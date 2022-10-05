@@ -1,0 +1,8 @@
+# Copyright 2022 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: hydra
+description: |
+  Charmed Ory Hydra
+summary: |
+  OAuth 2.0 and OpenID Connect 1.0 Provider
