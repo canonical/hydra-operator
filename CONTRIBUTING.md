@@ -55,7 +55,7 @@ juju add-model dev
 # Enable DEBUG logging
 juju model-config logging-config="<root>=INFO;unit=DEBUG"
 # Deploy the charm
-juju deploy ./hydra_ubuntu-*-amd64.charm
+juju deploy ./hydra_ubuntu*.charm --config dsn=postgres://operator:<pwd>@<ip>:5432/postgres --resource oci-image=$(yq eval '.resources.oci-image.upstream-source' metadata.yaml) --trust
 ```
 
 ## Canonical Contributor Agreement

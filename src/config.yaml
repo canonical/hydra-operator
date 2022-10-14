@@ -1,0 +1,15 @@
+log:
+  level: trace
+serve:
+  admin:
+    host: localhost
+    port: 4445
+  public:
+    host: localhost
+    port: 4444
+urls:
+  consent: http://localhost:3000/consent
+  login: http://localhost:3000/login
+  self:
+    issuer: http://localhost:4444
+    public: https://localhost:4444/

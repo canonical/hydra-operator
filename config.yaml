@@ -1,0 +1,16 @@
+# Copyright 2022 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+options:
+  dsn:
+    type: string
+    default: 'postgres://operator:<pwd>@<postgres-ip>:5432/postgres'
+    description: Database connection string
+  system-secret:
+    type: string
+    default: 'my-system-secret'
+    description: System secret
+  cookie-secret:
+    type: string
+    default: 'my-cookie-secret'
+    description: Cookies secret
