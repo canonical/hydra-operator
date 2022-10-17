@@ -16,7 +16,7 @@ from lightkube.resources.apps_v1 import StatefulSet
 from ops.charm import CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
-from ops.pebble import ChangeError, Layer, PathError, ProtocolError
+from ops.pebble import ChangeError, ExecError, Layer, PathError, ProtocolError
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,8 @@ class HydraCharm(CharmBase):
                 self.unit.status = BlockedStatus("Failed to replan")
                 return
 
+        self._run_sql_migration()
+
     def main(self, event) -> None:
         """Handles Hydra charm deployment."""
         try:
@@ -161,7 +163,7 @@ class HydraCharm(CharmBase):
             raise CheckFailedError("Waiting for pod startup to complete", WaitingStatus)
 
     def _push_config(self) -> None:
-        """Push configuration file to Hydra container."""
+        """Pushes configuration file to Hydra container."""
         try:
             with open("src/config.yaml", encoding="utf-8") as config_file:
                 config = config_file.read()
@@ -170,6 +172,20 @@ class HydraCharm(CharmBase):
         except (ProtocolError, PathError) as err:
             logger.error(str(err))
             self.unit.status = BlockedStatus(str(err))
+
+    def _run_sql_migration(self) -> None:
+        """Runs a command to create SQL schemas and apply migration plans."""
+        process = self._container.exec(
+            ["hydra", "migrate", "sql", "--read-from-env", "--yes"],
+            environment={"DSN": self.model.config["dsn"]},
+            timeout=20.0,
+        )
+        try:
+            stdout, _ = process.wait_output()
+            logger.info(f"Executing automigration: {stdout}")
+        except pebble.ExecError as err:
+            logger.error(f'Exited with code {err.exit_code}. Stderr: {err.stderr}')
+            self.unit.status = BlockedStatus("Database migration job failed")
 
 
 class CheckFailedError(Exception):
