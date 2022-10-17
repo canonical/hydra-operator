@@ -183,8 +183,8 @@ class HydraCharm(CharmBase):
         try:
             stdout, _ = process.wait_output()
             logger.info(f"Executing automigration: {stdout}")
-        except pebble.ExecError as err:
-            logger.error(f'Exited with code {err.exit_code}. Stderr: {err.stderr}')
+        except ExecError as err:
+            logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
             self.unit.status = BlockedStatus("Database migration job failed")
 
 
