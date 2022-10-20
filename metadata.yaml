@@ -15,3 +15,7 @@ resources:
     description: OCI image for hydra container
     auto-fetch: true
     upstream-source: oryd/hydra:v1.11.8
+requires:
+  pg-database:
+    interface: postgresql_client
+    limit: 1

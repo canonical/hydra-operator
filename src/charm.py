@@ -10,6 +10,7 @@ import glob
 import logging
 
 from charmed_kubeflow_chisme.kubernetes import KubernetesResourceHandler
+from charms.data_platform_libs.v0.database_requires import DatabaseRequires
 from lightkube import Client
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.apps_v1 import StatefulSet
@@ -19,6 +20,8 @@ from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingSta
 from ops.pebble import ChangeError, ExecError, Layer, PathError, ProtocolError
 
 logger = logging.getLogger(__name__)
+
+EXTRA_USER_ROLES = "SUPERUSER"
 
 
 class HydraCharm(CharmBase):
@@ -34,6 +37,9 @@ class HydraCharm(CharmBase):
         self._namespace = self.model.name
         self._context = {"namespace": self._namespace, "name": self._name}
 
+        database_name = f"{self.app.name.replace('-', '_')}_pg_database"
+        self.pg_database = DatabaseRequires(self, "pg-database", database_name, EXTRA_USER_ROLES)
+
         self.lightkube_client = Client(namespace=self._namespace, field_manager="lightkube")
 
         self.resource_handler = KubernetesResourceHandler(
@@ -48,6 +54,9 @@ class HydraCharm(CharmBase):
             self.on.upgrade_charm,
             self.on.config_changed,
             self.on.hydra_pebble_ready,
+            self.on["pg-database"].relation_changed,
+            self.pg_database.on.database_created,
+            self.pg_database.on.endpoints_changed,
         ]:
             self.framework.observe(event, self.main)
 
@@ -64,7 +73,7 @@ class HydraCharm(CharmBase):
                     "command": f"hydra serve all --config {self._hydra_config_path} --dangerous-force-http",
                     "startup": "enabled",
                     "environment": {
-                        "DSN": self.model.config["dsn"],
+                        # "DSN": self.model.config["dsn"],
                         "SECRETS_SYSTEM": self.model.config["system-secret"],
                         "SECRETS_COOKIE": self.model.config["cookie-secret"],
                     },
@@ -107,6 +116,34 @@ class HydraCharm(CharmBase):
                                                 "protocol": "TCP",
                                             },
                                         ],
+                                        "env": [
+                                            {
+                                                "name": "DB_USER",
+                                                "valueFrom": {
+                                                    "secretKeyRef": {
+                                                        "name": "test-secret",
+                                                        "key": "username",
+                                                    }
+                                                },
+                                            },
+                                            {
+                                                "name": "DB_PASSWORD",
+                                                "valueFrom": {
+                                                    "secretKeyRef": {
+                                                        "name": "test-secret",
+                                                        "key": "password",
+                                                    }
+                                                },
+                                            },
+                                            {
+                                                "name": "DB_ENDPOINT",
+                                                "value": "postgresql-k8s-primary.test-charm.svc.cluster.local:5432",
+                                            },
+                                            {
+                                                "name": "DSN",
+                                                "value": "postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_ENDPOINT)/postgres",
+                                            },
+                                        ],
                                     }
                                 ]
                             }
@@ -147,6 +184,14 @@ class HydraCharm(CharmBase):
             self.model.unit.status = err.status
             return
 
+        if not self.model.relations["pg-database"]:
+            self.model.unit.status = BlockedStatus("Missing required relation for postgresql")
+            return
+
+        # TODO: Create a secret with postgre credentials
+        #  on DatabaseCreatedEvent/DatabaseEndpointsChangedEvent
+        #  relation_data = self.pg_database.fetch_relation_data()
+
         self.model.unit.status = MaintenanceStatus("Configuring hydra charm")
 
         self._update_layer()
@@ -177,7 +222,7 @@ class HydraCharm(CharmBase):
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
             ["hydra", "migrate", "sql", "--read-from-env", "--yes"],
-            environment={"DSN": self.model.config["dsn"]},
+            # environment={"DSN": self.model.config["dsn"]},
             timeout=20.0,
         )
         try:
