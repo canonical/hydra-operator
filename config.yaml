@@ -2,10 +2,6 @@
 # See LICENSE file for licensing details.
 
 options:
-  dsn:
-    type: string
-    default: 'postgres://operator:<pwd>@<postgres-ip>:5432/postgres'
-    description: Database connection string
   system-secret:
     type: string
     default: 'my-system-secret'

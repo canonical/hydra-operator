@@ -11,5 +11,5 @@ urls:
   consent: http://localhost:3000/consent
   login: http://localhost:3000/login
   self:
-    issuer: http://localhost:4444
+    issuer: http://localhost:4444/
     public: https://localhost:4444/

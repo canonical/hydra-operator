@@ -8,6 +8,7 @@
 
 import glob
 import logging
+from base64 import b64encode
 
 from charmed_kubeflow_chisme.kubernetes import KubernetesResourceHandler
 from charms.data_platform_libs.v0.database_requires import DatabaseRequires
@@ -43,7 +44,7 @@ class HydraCharm(CharmBase):
         self.lightkube_client = Client(namespace=self._namespace, field_manager="lightkube")
 
         self.resource_handler = KubernetesResourceHandler(
-            template_files=[file for file in glob.glob("src/manifests/*.yaml")],
+            template_files=glob.glob("src/manifests/svc.yaml"),
             context=self._context,
             field_manager=self._name,
         )
@@ -55,10 +56,14 @@ class HydraCharm(CharmBase):
             self.on.config_changed,
             self.on.hydra_pebble_ready,
             self.on["pg-database"].relation_changed,
+        ]:
+            self.framework.observe(event, self.main)
+
+        for db_event in [
             self.pg_database.on.database_created,
             self.pg_database.on.endpoints_changed,
         ]:
-            self.framework.observe(event, self.main)
+            self.framework.observe(db_event, self._apply_secret)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -73,7 +78,6 @@ class HydraCharm(CharmBase):
                     "command": f"hydra serve all --config {self._hydra_config_path} --dangerous-force-http",
                     "startup": "enabled",
                     "environment": {
-                        # "DSN": self.model.config["dsn"],
                         "SECRETS_SYSTEM": self.model.config["system-secret"],
                         "SECRETS_COOKIE": self.model.config["cookie-secret"],
                     },
@@ -121,7 +125,7 @@ class HydraCharm(CharmBase):
                                                 "name": "DB_USER",
                                                 "valueFrom": {
                                                     "secretKeyRef": {
-                                                        "name": "test-secret",
+                                                        "name": f"{self._name}-database-secret",
                                                         "key": "username",
                                                     }
                                                 },
@@ -130,14 +134,19 @@ class HydraCharm(CharmBase):
                                                 "name": "DB_PASSWORD",
                                                 "valueFrom": {
                                                     "secretKeyRef": {
-                                                        "name": "test-secret",
+                                                        "name": f"{self._name}-database-secret",
                                                         "key": "password",
                                                     }
                                                 },
                                             },
                                             {
                                                 "name": "DB_ENDPOINT",
-                                                "value": "postgresql-k8s-primary.test-charm.svc.cluster.local:5432",
+                                                "valueFrom": {
+                                                    "secretKeyRef": {
+                                                        "name": f"{self._name}-database-secret",
+                                                        "key": "endpoint",
+                                                    }
+                                                },
                                             },
                                             {
                                                 "name": "DSN",
@@ -188,10 +197,6 @@ class HydraCharm(CharmBase):
             self.model.unit.status = BlockedStatus("Missing required relation for postgresql")
             return
 
-        # TODO: Create a secret with postgre credentials
-        #  on DatabaseCreatedEvent/DatabaseEndpointsChangedEvent
-        #  relation_data = self.pg_database.fetch_relation_data()
-
         self.model.unit.status = MaintenanceStatus("Configuring hydra charm")
 
         self._update_layer()
@@ -222,7 +227,6 @@ class HydraCharm(CharmBase):
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
             ["hydra", "migrate", "sql", "--read-from-env", "--yes"],
-            # environment={"DSN": self.model.config["dsn"]},
             timeout=20.0,
         )
         try:
@@ -231,6 +235,52 @@ class HydraCharm(CharmBase):
         except ExecError as err:
             logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
             self.unit.status = BlockedStatus("Database migration job failed")
+
+    def _apply_secret(self, db_event):
+        """Fetch db user credentials and create a secret."""
+        try:
+            relation_data = self.pg_database.fetch_relation_data()
+            db_data = relation_data[list(relation_data.keys())[0]]
+
+            encoded_db_data = {
+                k: b64encode(v.encode("utf-8")).decode("utf-8")
+                for k, v in {
+                    "username": db_data["username"],
+                    "password": db_data["password"],
+                    "endpoint": db_data["endpoints"],
+                }.items()
+            }
+
+            secret_context = {
+                "username": encoded_db_data["username"],
+                "password": encoded_db_data["password"],
+                "endpoint": encoded_db_data["endpoint"],
+                "namespace": self._namespace,
+                "name": self._name,
+            }
+
+            try:
+                secret_handler = KubernetesResourceHandler(
+                    template_files=glob.glob("src/manifests/secret.yaml"),
+                    context=secret_context,
+                    field_manager=self._name,
+                )
+                secret_handler.apply()
+            except ApiError as err:
+                logger.error(str(err))
+                self.unit.status = BlockedStatus(
+                    f"Applying resources failed with code {str(err.status.code)}."
+                )
+                return
+
+        except Exception as e:
+            logger.error(
+                f"Encountered the following exception when parsing postgresql relation: {str(e)}"
+            )
+            raise CheckFailedError(
+                "Unexpected error when parsing postgresql relation. See logs", BlockedStatus
+            )
+        return
 
 
 class CheckFailedError(Exception):
