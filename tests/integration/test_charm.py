@@ -44,7 +44,6 @@ async def test_build_and_deploy(ops_test: OpsTest):
 
     async with ops_test.fast_forward():
         await ops_test.model.wait_for_idle(
-            apps=[APP_NAME],
             raise_on_blocked=False,
             status="active",
             timeout=1000,

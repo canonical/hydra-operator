@@ -33,9 +33,18 @@ jobs:
           channel: 1.24/stable
           bootstrap-options: '--agent-version=2.9.34'
 
+      - name: Copy microk8s config
+        run: |
+          mkdir ~/.kube
+          microk8s config > ~/.kube/config
+
       - name: Run integration tests
         # set a predictable model name so it can be consumed by charm-logdump-action
         run: tox -e integration -- --model testing
+
+      - name: Get contexts
+        run: kubectl config view
+        if: failure()
 
       - name: Get juju status
         run: juju status --relations
