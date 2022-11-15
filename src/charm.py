@@ -58,7 +58,7 @@ class HydraCharm(CharmBase):
             self.pg_database.on.database_created,
             self.pg_database.on.endpoints_changed,
         ]:
-            self.framework.observe(db_event, self._apply_secret)
+            self.framework.observe(db_event, self._on_db_events)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -109,18 +109,6 @@ class HydraCharm(CharmBase):
                                 "containers": [
                                     {
                                         "name": "hydra",
-                                        "ports": [
-                                            {
-                                                "name": "http-admin",
-                                                "containerPort": 4445,
-                                                "protocol": "TCP",
-                                            },
-                                            {
-                                                "name": "http-public",
-                                                "containerPort": 4444,
-                                                "protocol": "TCP",
-                                            },
-                                        ],
                                         "env": [
                                             {
                                                 "name": "DB_USER",
@@ -268,7 +256,7 @@ class HydraCharm(CharmBase):
         except ApiError as e:
             logger.warning(str(e))
 
-    def _apply_secret(self, db_event) -> None:
+    def _on_db_events(self, db_event) -> None:
         """Fetch db user credentials and create a secret."""
         try:
             relation_data = self.pg_database.fetch_relation_data()
