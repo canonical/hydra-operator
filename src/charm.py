@@ -11,6 +11,7 @@ import logging
 from base64 import b64encode
 
 from charmed_kubeflow_chisme.kubernetes import KubernetesResourceHandler
+from charmed_kubeflow_chisme.lightkube.batch import delete_many
 from charms.data_platform_libs.v0.database_requires import DatabaseRequires
 from lightkube import Client
 from lightkube.core.exceptions import ApiError
@@ -49,15 +50,9 @@ class HydraCharm(CharmBase):
             field_manager=self._name,
         )
 
-        for event in [
-            self.on.install,
-            self.on.leader_elected,
-            self.on.upgrade_charm,
-            self.on.config_changed,
-            self.on.hydra_pebble_ready,
-            self.on["pg-database"].relation_changed,
-        ]:
-            self.framework.observe(event, self.main)
+        self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.remove, self._on_remove)
 
         for db_event in [
             self.pg_database.on.database_created,
@@ -83,19 +78,25 @@ class HydraCharm(CharmBase):
                     },
                 }
             },
+            "checks": {
+                "version": {
+                    "override": "replace",
+                    "exec": {"command": "hydra version"},
+                },
+                "ready": {
+                    "override": "replace",
+                    "http": {"url": "http://localhost:4445/admin/health/ready"},
+                },
+            },
         }
         return Layer(layer_config)
 
-    def _update_layer(self) -> None:
-        """Updates the Pebble configuration layer if changed."""
-        try:
-            self._check_container_connection()
-        except CheckFailedError as err:
-            self.model.unit.status = err.status
-            return
+    def _check_leader(self) -> None:
+        if not self.unit.is_leader():
+            # We can't do anything useful when not the leader, so do nothing.
+            raise CheckFailedError("Waiting for leadership", WaitingStatus)
 
-        self._push_config()
-
+    def _apply_and_patch_resources(self) -> None:
         try:
             self.resource_handler.apply()
             self.lightkube_client.patch(
@@ -163,10 +164,23 @@ class HydraCharm(CharmBase):
         except ApiError as err:
             logger.error(str(err))
             self.unit.status = BlockedStatus(
-                f"Applying resources failed with code {str(err.status.code)}."
+                f"Applying resources failed with code {err.status.code}."
             )
             return
 
+    def _push_config(self) -> None:
+        """Pushes configuration file to Hydra container."""
+        try:
+            with open("src/config.yaml", encoding="utf-8") as config_file:
+                config = config_file.read()
+                self._container.push(self._hydra_config_path, config, make_dirs=True)
+            logger.info("Pushed configs to hydra container")
+        except (ProtocolError, PathError) as err:
+            logger.error(str(err))
+            self.unit.status = BlockedStatus(str(err))
+
+    def _update_layer(self) -> None:
+        """Updates the Pebble configuration layer if changed."""
         # Get current layer
         current_layer = self._container.get_plan()
         # Create a new config layer
@@ -183,46 +197,6 @@ class HydraCharm(CharmBase):
                 self.unit.status = BlockedStatus("Failed to replan")
                 return
 
-        self._run_sql_migration()
-
-    def main(self, event) -> None:
-        """Handles Hydra charm deployment."""
-        try:
-            self._check_leader()
-        except CheckFailedError as err:
-            self.model.unit.status = err.status
-            return
-
-        if not self.model.relations["pg-database"]:
-            self.model.unit.status = BlockedStatus("Missing required relation for postgresql")
-            return
-
-        self.model.unit.status = MaintenanceStatus("Configuring hydra charm")
-
-        self._update_layer()
-
-        self.model.unit.status = ActiveStatus()
-
-    def _check_leader(self) -> None:
-        if not self.unit.is_leader():
-            # We can't do anything useful when not the leader, so do nothing.
-            raise CheckFailedError("Waiting for leadership", WaitingStatus)
-
-    def _check_container_connection(self) -> None:
-        if not self._container.can_connect():
-            raise CheckFailedError("Waiting for pod startup to complete", WaitingStatus)
-
-    def _push_config(self) -> None:
-        """Pushes configuration file to Hydra container."""
-        try:
-            with open("src/config.yaml", encoding="utf-8") as config_file:
-                config = config_file.read()
-                self._container.push(self._hydra_config_path, config, make_dirs=True)
-            logger.info("Pushed configs to hydra container")
-        except (ProtocolError, PathError) as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus(str(err))
-
     def _run_sql_migration(self) -> None:
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
@@ -236,7 +210,65 @@ class HydraCharm(CharmBase):
             logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
             self.unit.status = BlockedStatus("Database migration job failed")
 
-    def _apply_secret(self, db_event):
+    def _on_install(self, _) -> None:
+        """Event Handler for install event.
+
+        - check leadership
+        - check postgresql relation
+        """
+        try:
+            self._check_leader()
+        except CheckFailedError as err:
+            self.model.unit.status = err.status
+            return
+
+        if not self.model.relations["pg-database"]:
+            self.model.unit.status = BlockedStatus("Missing required relation for postgresql")
+            return
+
+        self.model.unit.status = MaintenanceStatus("Configuring hydra charm")
+
+        self.model.unit.status = ActiveStatus()
+
+    def _on_hydra_pebble_ready(self, event) -> None:
+        """Event Handler for pebble ready event.
+
+        Do the following if hydra container can be connected:
+        - apply and patch k8s resources
+        - push configs
+        - update pebble layer
+        - run sql migration
+        """
+        if not self.model.relations["pg-database"]:
+            self.model.unit.status = BlockedStatus("Missing required relation for postgresql")
+            return
+
+        if not self._container.can_connect():
+            self.unit.status = WaitingStatus("Waiting for pod startup to complete")
+            event.defer()
+            return
+
+        self.model.unit.status = MaintenanceStatus("Configuring hydra container")
+
+        self._apply_and_patch_resources()
+        self._push_config()
+        self._update_layer()
+        self._run_sql_migration()
+
+        self.model.unit.status = ActiveStatus()
+
+    def _on_remove(self, _) -> None:
+        """Event Handler for remove event.
+
+        Remove additional k8s resources created by the charm
+        """
+        manifests = self.resource_handler.render_manifests(force_recompute=False)
+        try:
+            delete_many(self.lightkube_client, manifests)
+        except ApiError as e:
+            logger.warning(str(e))
+
+    def _apply_secret(self, db_event) -> None:
         """Fetch db user credentials and create a secret."""
         try:
             relation_data = self.pg_database.fetch_relation_data()
