@@ -203,6 +203,7 @@ class HydraCharm(CharmBase):
 
         - check leadership
         - check postgresql relation
+        - apply and patch k8s resources
         """
         try:
             self._check_leader()
@@ -216,13 +217,14 @@ class HydraCharm(CharmBase):
 
         self.model.unit.status = MaintenanceStatus("Configuring hydra charm")
 
+        self._apply_and_patch_resources()
+
         self.model.unit.status = ActiveStatus()
 
     def _on_hydra_pebble_ready(self, event) -> None:
         """Event Handler for pebble ready event.
 
         Do the following if hydra container can be connected:
-        - apply and patch k8s resources
         - push configs
         - update pebble layer
         - run sql migration
@@ -238,7 +240,6 @@ class HydraCharm(CharmBase):
 
         self.model.unit.status = MaintenanceStatus("Configuring hydra container")
 
-        self._apply_and_patch_resources()
         self._push_config()
         self._update_layer()
         self._run_sql_migration()
