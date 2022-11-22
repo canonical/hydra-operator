@@ -34,7 +34,7 @@ class HydraCharm(CharmBase):
         self._namespace = self.model.name
         self._context = {"namespace": self._namespace, "name": self._name}
 
-        self.service_patcher = KubernetesServicePatch(self, [("admin", 4445), ("public", 4444)])
+        self.service_patcher = KubernetesServicePatch(self, [("hydra-admin", 4445), ("hydra-public", 4444)])
 
         self.database = DatabaseRequires(
             self,
@@ -60,7 +60,7 @@ class HydraCharm(CharmBase):
                 self._container_name: {
                     "override": "replace",
                     "summary": "entrypoint of the hydra-operator image",
-                    "command": f"hydra serve all --config {self._hydra_config_path} --dangerous-force-http",
+                    "command": f"hydra serve all --config {self._hydra_config_path} --dev",
                     "startup": "enabled",
                 }
             },
@@ -71,7 +71,7 @@ class HydraCharm(CharmBase):
                 },
                 "ready": {
                     "override": "replace",
-                    "http": {"url": "http://localhost:4445/admin/health/ready"},
+                    "http": {"url": "http://localhost:4445/health/ready"},
                 },
             },
         }
@@ -83,7 +83,12 @@ class HydraCharm(CharmBase):
         db_info = self._get_database_relation_info()
 
         config = {
+            "dsn": f"postgres://{db_info['username']}:{db_info['password']}@{db_info['endpoints']}/postgres",
             "log": {"level": "trace"},
+            "secrets": {
+                "cookie": ["my-cookie-secret"],
+                "system": ["my-system-secret"],
+            },
             "serve": {
                 "admin": {
                     "host": "localhost",
@@ -94,7 +99,6 @@ class HydraCharm(CharmBase):
                     "port": 4444,
                 },
             },
-            "dsn": f"postgres://{db_info['username']}:{db_info['password']}@{db_info['endpoints']}/postgres",
             "urls": {
                 "consent": "http://localhost:3000/consent",
                 "login": "http://localhost:3000/login",
