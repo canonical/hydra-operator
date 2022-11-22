@@ -6,15 +6,11 @@
 
 """A Juju charm for Ory Hydra."""
 
-import glob
 import logging
-from base64 import b64encode
 
-from charmed_kubeflow_chisme.kubernetes import KubernetesResourceHandler
+import yaml
 from charms.data_platform_libs.v0.database_requires import DatabaseRequires
-from lightkube import Client
-from lightkube.core.exceptions import ApiError
-from lightkube.resources.apps_v1 import StatefulSet
+from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from ops.charm import CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
@@ -38,32 +34,21 @@ class HydraCharm(CharmBase):
         self._namespace = self.model.name
         self._context = {"namespace": self._namespace, "name": self._name}
 
-        database_name = f"{self.app.name.replace('-', '_')}_pg_database"
-        self.pg_database = DatabaseRequires(self, "pg-database", database_name, EXTRA_USER_ROLES)
+        self.service_patcher = KubernetesServicePatch(self, [("hydra-admin", 4445), ("hydra-public", 4444)])
 
-        self.lightkube_client = Client(namespace=self._namespace, field_manager="lightkube")
-
-        self.resource_handler = KubernetesResourceHandler(
-            template_files=glob.glob("src/manifests/svc.yaml"),
-            context=self._context,
-            field_manager=self._name,
+        self.database = DatabaseRequires(
+            self,
+            relation_name="pg-database",
+            database_name="database",
+            extra_user_roles=EXTRA_USER_ROLES,
         )
 
-        for event in [
-            self.on.install,
-            self.on.leader_elected,
-            self.on.upgrade_charm,
-            self.on.config_changed,
-            self.on.hydra_pebble_ready,
-            self.on["pg-database"].relation_changed,
-        ]:
-            self.framework.observe(event, self.main)
-
+        self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         for db_event in [
-            self.pg_database.on.database_created,
-            self.pg_database.on.endpoints_changed,
+            self.database.on.database_created,
+            self.database.on.endpoints_changed,
         ]:
-            self.framework.observe(db_event, self._apply_secret)
+            self.framework.observe(db_event, self._on_db_events)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -75,98 +60,74 @@ class HydraCharm(CharmBase):
                 self._container_name: {
                     "override": "replace",
                     "summary": "entrypoint of the hydra-operator image",
-                    "command": f"hydra serve all --config {self._hydra_config_path} --dangerous-force-http",
+                    "command": f"hydra serve all --config {self._hydra_config_path} --dev",
                     "startup": "enabled",
-                    "environment": {
-                        "SECRETS_SYSTEM": self.model.config["system-secret"],
-                        "SECRETS_COOKIE": self.model.config["cookie-secret"],
-                    },
                 }
+            },
+            "checks": {
+                "version": {
+                    "override": "replace",
+                    "exec": {"command": "hydra version"},
+                },
+                "ready": {
+                    "override": "replace",
+                    "http": {"url": "http://localhost:4445/health/ready"},
+                },
             },
         }
         return Layer(layer_config)
 
-    def _update_layer(self) -> None:
-        """Updates the Pebble configuration layer if changed."""
-        try:
-            self._check_container_connection()
-        except CheckFailedError as err:
-            self.model.unit.status = err.status
-            return
+    @property
+    def _config(self) -> str:
+        """Returns Hydra configuration."""
+        db_info = self._get_database_relation_info()
 
-        self._push_config()
-
-        try:
-            self.resource_handler.apply()
-            self.lightkube_client.patch(
-                StatefulSet,
-                self._name,
-                {
-                    "spec": {
-                        "template": {
-                            "spec": {
-                                "containers": [
-                                    {
-                                        "name": "hydra",
-                                        "ports": [
-                                            {
-                                                "name": "http-admin",
-                                                "containerPort": 4445,
-                                                "protocol": "TCP",
-                                            },
-                                            {
-                                                "name": "http-public",
-                                                "containerPort": 4444,
-                                                "protocol": "TCP",
-                                            },
-                                        ],
-                                        "env": [
-                                            {
-                                                "name": "DB_USER",
-                                                "valueFrom": {
-                                                    "secretKeyRef": {
-                                                        "name": f"{self._name}-database-secret",
-                                                        "key": "username",
-                                                    }
-                                                },
-                                            },
-                                            {
-                                                "name": "DB_PASSWORD",
-                                                "valueFrom": {
-                                                    "secretKeyRef": {
-                                                        "name": f"{self._name}-database-secret",
-                                                        "key": "password",
-                                                    }
-                                                },
-                                            },
-                                            {
-                                                "name": "DB_ENDPOINT",
-                                                "valueFrom": {
-                                                    "secretKeyRef": {
-                                                        "name": f"{self._name}-database-secret",
-                                                        "key": "endpoint",
-                                                    }
-                                                },
-                                            },
-                                            {
-                                                "name": "DSN",
-                                                "value": "postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_ENDPOINT)/postgres",
-                                            },
-                                        ],
-                                    }
-                                ]
-                            }
-                        }
-                    }
+        config = {
+            "dsn": f"postgres://{db_info['username']}:{db_info['password']}@{db_info['endpoints']}/postgres",
+            "log": {"level": "trace"},
+            "secrets": {
+                "cookie": ["my-cookie-secret"],
+                "system": ["my-system-secret"],
+            },
+            "serve": {
+                "admin": {
+                    "host": "localhost",
+                    "port": 4445,
                 },
-            )
-        except ApiError as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus(
-                f"Applying resources failed with code {str(err.status.code)}."
-            )
-            return
+                "public": {
+                    "host": "localhost",
+                    "port": 4444,
+                },
+            },
+            "urls": {
+                "consent": "http://localhost:3000/consent",
+                "login": "http://localhost:3000/login",
+                "self": {
+                    "issuer": "http://localhost:4444/",
+                    "public": "http://localhost:4444/",
+                },
+            },
+        }
 
+        return yaml.dump(config)
+
+    def _check_leader(self) -> None:
+        if not self.unit.is_leader():
+            # We can't do anything useful when not the leader, so do nothing.
+            raise CheckFailedError("Waiting for leadership", WaitingStatus)
+
+    def _get_database_relation_info(self) -> dict:
+        relation_id = self.database.relations[0].id
+        relation_data = self.database.fetch_relation_data()[relation_id]
+
+        return {
+            "username": relation_data["username"],
+            "password": relation_data["password"],
+            "endpoints": relation_data["endpoints"],
+        }
+
+    def _update_layer(self) -> None:
+        """Updates the Pebble configuration layer and config if changed."""
         # Get current layer
         current_layer = self._container.get_plan()
         # Create a new config layer
@@ -175,18 +136,31 @@ class HydraCharm(CharmBase):
         if current_layer.services != new_layer.services:
             self.unit.status = MaintenanceStatus("Applying new pebble layer")
             self._container.add_layer(self._container_name, new_layer, combine=True)
-            logger.info("Pebble plan updated with new configuration, replanning")
-            try:
-                self._container.replan()
-            except ChangeError as err:
-                logger.error(str(err))
-                self.unit.status = BlockedStatus("Failed to replan")
-                return
+            logger.info("Pebble plan updated with new configuration")
+            # Push the config on first layer update to avoid PathError
+            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+            logger.info("Pushed hydra config")
 
-        self._run_sql_migration()
+        try:
+            current_config = self._container.pull(self._hydra_config_path).read()
+        except (ProtocolError, PathError) as err:
+            logger.error(str(err))
+            self.unit.status = BlockedStatus(str(err))
+        else:
+            if current_config != self._config:
+                self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+                logger.info("Updated hydra config")
 
-    def main(self, event) -> None:
-        """Handles Hydra charm deployment."""
+        try:
+            logger.info("Replanning pebble container")
+            self._container.replan()
+        except ChangeError as err:
+            logger.error(str(err))
+            self.unit.status = BlockedStatus("Failed to replan")
+            return
+
+    def _update_container(self, event) -> None:
+        """Update configs, pebble layer and run database migration."""
         try:
             self._check_leader()
         except CheckFailedError as err:
@@ -194,39 +168,30 @@ class HydraCharm(CharmBase):
             return
 
         if not self.model.relations["pg-database"]:
-            self.model.unit.status = BlockedStatus("Missing required relation for postgresql")
+            logger.error("Missing required relation with postgresql")
+            self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
             return
 
-        self.model.unit.status = MaintenanceStatus("Configuring hydra charm")
+        if not self.database.is_database_created():
+            event.defer()
+            logger.info("Missing database details. Deferring the event.")
+            self.unit.status = WaitingStatus("Waiting for database creation")
+            return
+
+        if not self._container.can_connect():
+            event.defer()
+            logger.info("Cannot connect to Hydra container. Deferring the event.")
+            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
 
         self._update_layer()
 
-        self.model.unit.status = ActiveStatus()
-
-    def _check_leader(self) -> None:
-        if not self.unit.is_leader():
-            # We can't do anything useful when not the leader, so do nothing.
-            raise CheckFailedError("Waiting for leadership", WaitingStatus)
-
-    def _check_container_connection(self) -> None:
-        if not self._container.can_connect():
-            raise CheckFailedError("Waiting for pod startup to complete", WaitingStatus)
-
-    def _push_config(self) -> None:
-        """Pushes configuration file to Hydra container."""
-        try:
-            with open("src/config.yaml", encoding="utf-8") as config_file:
-                config = config_file.read()
-                self._container.push(self._hydra_config_path, config, make_dirs=True)
-            logger.info("Pushed configs to hydra container")
-        except (ProtocolError, PathError) as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus(str(err))
+        self._run_sql_migration()
 
     def _run_sql_migration(self) -> None:
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
-            ["hydra", "migrate", "sql", "--read-from-env", "--yes"],
+            ["hydra", "migrate", "sql", "-e", "--config", self._hydra_config_path, "--yes"],
             timeout=20.0,
         )
         try:
@@ -236,51 +201,18 @@ class HydraCharm(CharmBase):
             logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
             self.unit.status = BlockedStatus("Database migration job failed")
 
-    def _apply_secret(self, db_event):
-        """Fetch db user credentials and create a secret."""
-        try:
-            relation_data = self.pg_database.fetch_relation_data()
-            db_data = relation_data[list(relation_data.keys())[0]]
+    def _on_hydra_pebble_ready(self, event) -> None:
+        """Event Handler for pebble ready event."""
+        self.model.unit.status = MaintenanceStatus("Configuring hydra container")
+        self._update_container(event)
 
-            encoded_db_data = {
-                k: b64encode(v.encode("utf-8")).decode("utf-8")
-                for k, v in {
-                    "username": db_data["username"],
-                    "password": db_data["password"],
-                    "endpoint": db_data["endpoints"],
-                }.items()
-            }
+        self.model.unit.status = ActiveStatus()
 
-            secret_context = {
-                "username": encoded_db_data["username"],
-                "password": encoded_db_data["password"],
-                "endpoint": encoded_db_data["endpoint"],
-                "namespace": self._namespace,
-                "name": self._name,
-            }
+    def _on_db_events(self, db_event) -> None:
+        """Event Handler for database-related events."""
+        self._update_container(db_event)
 
-            try:
-                secret_handler = KubernetesResourceHandler(
-                    template_files=glob.glob("src/manifests/secret.yaml"),
-                    context=secret_context,
-                    field_manager=self._name,
-                )
-                secret_handler.apply()
-            except ApiError as err:
-                logger.error(str(err))
-                self.unit.status = BlockedStatus(
-                    f"Applying resources failed with code {str(err.status.code)}."
-                )
-                return
-
-        except Exception as e:
-            logger.error(
-                f"Encountered the following exception when parsing postgresql relation: {str(e)}"
-            )
-            raise CheckFailedError(
-                "Unexpected error when parsing postgresql relation. See logs", BlockedStatus
-            )
-        return
+        self.unit.status = ActiveStatus()
 
 
 class CheckFailedError(Exception):
