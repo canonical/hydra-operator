@@ -34,7 +34,9 @@ class HydraCharm(CharmBase):
         self._namespace = self.model.name
         self._context = {"namespace": self._namespace, "name": self._name}
 
-        self.service_patcher = KubernetesServicePatch(self, [("hydra-admin", 4445), ("hydra-public", 4444)])
+        self.service_patcher = KubernetesServicePatch(
+            self, [("hydra-admin", 4445), ("hydra-public", 4444)]
+        )
 
         self.database = DatabaseRequires(
             self,
@@ -111,11 +113,6 @@ class HydraCharm(CharmBase):
 
         return yaml.dump(config)
 
-    def _check_leader(self) -> None:
-        if not self.unit.is_leader():
-            # We can't do anything useful when not the leader, so do nothing.
-            raise CheckFailedError("Waiting for leadership", WaitingStatus)
-
     def _get_database_relation_info(self) -> dict:
         relation_id = self.database.relations[0].id
         relation_data = self.database.fetch_relation_data()[relation_id]
@@ -128,18 +125,13 @@ class HydraCharm(CharmBase):
 
     def _update_layer(self) -> None:
         """Updates the Pebble configuration layer and config if changed."""
-        # Get current layer
-        current_layer = self._container.get_plan()
-        # Create a new config layer
-        new_layer = self._hydra_layer
+        self.unit.status = MaintenanceStatus("Applying pebble layer")
+        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
+        logger.info("Pebble plan updated with new configuration")
 
-        if current_layer.services != new_layer.services:
-            self.unit.status = MaintenanceStatus("Applying new pebble layer")
-            self._container.add_layer(self._container_name, new_layer, combine=True)
-            logger.info("Pebble plan updated with new configuration")
-            # Push the config on first layer update to avoid PathError
-            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-            logger.info("Pushed hydra config")
+        # Push the config on first layer update to avoid PathError
+        self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+        logger.info("Pushed hydra config")
 
         try:
             current_config = self._container.pull(self._hydra_config_path).read()
@@ -161,13 +153,17 @@ class HydraCharm(CharmBase):
 
     def _update_container(self, event) -> None:
         """Update configs, pebble layer and run database migration."""
-        try:
-            self._check_leader()
-        except CheckFailedError as err:
-            self.model.unit.status = err.status
+        self.unit.status = MaintenanceStatus("Configuring hydra container")
+        if not self.unit.is_leader():
+            # TODO: Observe leader_elected event instead of event deferring
+            event.defer()
+            logger.info("Unit does not have leadership")
+            self.unit.status = WaitingStatus("Waiting for leadership")
             return
 
         if not self.model.relations["pg-database"]:
+            # TODO: Observe relation_joined event instead of event deferring
+            event.defer()
             logger.error("Missing required relation with postgresql")
             self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
             return
@@ -188,6 +184,8 @@ class HydraCharm(CharmBase):
 
         self._run_sql_migration()
 
+        self.unit.status = ActiveStatus()
+
     def _run_sql_migration(self) -> None:
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
@@ -203,27 +201,12 @@ class HydraCharm(CharmBase):
 
     def _on_hydra_pebble_ready(self, event) -> None:
         """Event Handler for pebble ready event."""
-        self.model.unit.status = MaintenanceStatus("Configuring hydra container")
         self._update_container(event)
-
-        self.model.unit.status = ActiveStatus()
 
     def _on_db_events(self, db_event) -> None:
         """Event Handler for database-related events."""
+        logger.info("Retrieved database details")
         self._update_container(db_event)
-
-        self.unit.status = ActiveStatus()
-
-
-class CheckFailedError(Exception):
-    """Raise this exception if one of the checks in main fails."""
-
-    def __init__(self, msg, status_type=None):
-        super().__init__()
-
-        self.msg = str(msg)
-        self.status_type = status_type
-        self.status = status_type(self.msg)
 
 
 if __name__ == "__main__":
