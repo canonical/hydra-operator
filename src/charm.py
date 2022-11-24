@@ -126,12 +126,21 @@ class HydraCharm(CharmBase):
     def _update_layer(self) -> None:
         """Updates the Pebble configuration layer and config if changed."""
         self.unit.status = MaintenanceStatus("Applying pebble layer")
-        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-        logger.info("Pebble plan updated with new configuration")
 
-        # Push the config on first layer update to avoid PathError
-        self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-        logger.info("Pushed hydra config")
+        if not self._container.get_plan():
+            # Push the config on first layer update to avoid PathError
+            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+            logger.info("Pushed hydra config")
+
+        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
+        logger.info("Pebble plan updated with new configuration, replanning")
+
+        try:
+            self._container.replan()
+        except ChangeError as err:
+            logger.error(str(err))
+            self.unit.status = BlockedStatus("Failed to replan")
+            return
 
         try:
             current_config = self._container.pull(self._hydra_config_path).read()
@@ -141,15 +150,8 @@ class HydraCharm(CharmBase):
         else:
             if current_config != self._config:
                 self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-                logger.info("Updated hydra config")
-
-        try:
-            logger.info("Replanning pebble container")
-            self._container.replan()
-        except ChangeError as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus("Failed to replan")
-            return
+                logger.info("Updated hydra config, restarting the container")
+                self._container.restart()
 
     def _update_container(self, event) -> None:
         """Update configs, pebble layer and run database migration."""
