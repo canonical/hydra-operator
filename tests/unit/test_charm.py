@@ -1,13 +1,17 @@
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import MagicMock
-
 import pytest
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
+import yaml
+from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
 from ops.testing import Harness
 
 from charm import HydraCharm
+
+CONTAINER_NAME = "hydra"
+DB_USERNAME = "test-username"
+DB_PASSWORD = "test-password"
+DB_ENDPOINT = "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
 
 
 @pytest.fixture()
@@ -16,103 +20,146 @@ def harness():
 
 
 @pytest.fixture()
-def mocked_lightkube_client(mocker):
-    mocked_client = MagicMock()
-    mocked_client_factory = mocker.patch("charm.Client")
-    mocked_client_factory.return_value = mocked_client
-    yield mocked_client
+def mocked_kubernetes_service_patcher(mocker):
+    mocked_service_patcher = mocker.patch("charm.KubernetesServicePatch")
+    mocked_service_patcher.return_value = lambda x, y: None
+    yield mocked_service_patcher
 
 
 @pytest.fixture()
-def mocked_resource_handler(mocker):
-    mocked_resource_handler = MagicMock()
-    mocked_resource_handler_factory = mocker.patch("charm.KubernetesResourceHandler")
-    mocked_resource_handler_factory.return_value = mocked_resource_handler
-    yield mocked_resource_handler
+def mocked_update_container(mocker):
+    mocked_update_container = mocker.patch("charm.HydraCharm._update_container")
+    yield mocked_update_container
 
 
-def test_leadership_events(harness, mocked_resource_handler, mocked_lightkube_client):
-    """Test leader-elected event handling."""
-    harness.set_leader(False)
-    harness.begin_with_initial_hooks()
-    assert harness.charm.model.unit.status == WaitingStatus("Waiting for leadership")
-    harness.set_leader(True)
-    assert harness.charm.model.unit.status != WaitingStatus("Waiting for leadership")
-    harness.set_leader(False)
-    # Emit another leader_elected event due to https://github.com/canonical/operator/issues/812
-    harness._charm.on.leader_elected.emit()
-    assert harness.charm.model.unit.status == WaitingStatus("Waiting for leadership")
+def setup_postgres_relation(harness):
+    db_relation_id = harness.add_relation("pg-database", "postgresql-k8s")
+    harness.add_relation_unit(db_relation_id, "postgresql-k8s/0")
+    harness.update_relation_data(
+        db_relation_id,
+        "postgresql-k8s",
+        {
+            "data": '{"database": "database", "extra-user-roles": "SUPERUSER"}',
+            "endpoints": DB_ENDPOINT,
+            "password": DB_PASSWORD,
+            "username": DB_USERNAME,
+        },
+    )
+
+    return db_relation_id
 
 
-def test_pebble_container_can_connect(harness, mocked_resource_handler, mocked_lightkube_client):
+def test_not_leader(harness, mocked_kubernetes_service_patcher):
+    harness.begin()
+    setup_postgres_relation(harness)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    assert harness.charm.unit.status == WaitingStatus("Waiting for leadership")
+
+
+def test_install_without_relation(harness, mocked_kubernetes_service_patcher):
     harness.set_leader(True)
     harness.begin()
 
-    harness.set_can_connect("hydra", True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
+
+
+def test_pebble_container_can_connect(
+    harness, mocked_kubernetes_service_patcher, mocked_update_container
+):
+    harness.set_leader(True)
+    harness.begin()
+    setup_postgres_relation(harness)
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
     assert isinstance(harness.charm.unit.status, MaintenanceStatus)
     assert harness.get_container_pebble_plan("hydra")._services is not None
 
-    harness.charm._push_config()
-    assert not isinstance(harness.charm.unit.status, BlockedStatus)
 
-
-def test_install_without_relation(harness, mocked_resource_handler, mocked_lightkube_client):
+def test_pebble_container_cannot_connect(harness, mocked_kubernetes_service_patcher):
     harness.set_leader(True)
     harness.begin()
+    setup_postgres_relation(harness)
+    harness.set_can_connect(CONTAINER_NAME, False)
 
-    harness.charm.on.install.emit()
-    assert isinstance(harness.charm.unit.status, BlockedStatus)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
-    assert (
-        "status_set",
-        "blocked",
-        "Missing required relation for postgresql",
-        {"is_app": False},
-    ) in harness._get_backend_calls()
+    assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
 
 
-def test_install_with_relation(harness, mocked_resource_handler, mocked_lightkube_client):
+def test_missing_relation_data(harness, mocked_kubernetes_service_patcher):
     harness.set_leader(True)
-    rel_id = harness.add_relation("pg-database", "app")
-    harness.add_relation_unit(rel_id, "app/0")
-    harness.update_relation_data(
-        rel_id,
-        "app",
-        {"_supported_versions": "- v1"},
-    )
-    harness.begin()
+    db_relation_id = harness.add_relation("pg-database", "postgresql-k8s")
+    harness.add_relation_unit(db_relation_id, "postgresql-k8s/0")
 
-    harness.charm.on.install.emit()
-    assert isinstance(harness.charm.unit.status, ActiveStatus)
+    harness.begin_with_initial_hooks()
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    assert harness.charm.unit.status == WaitingStatus("Waiting for database creation")
 
 
-def test_events(harness, mocker, mocked_resource_handler, mocked_lightkube_client):
+def test_relation_data(harness, mocked_kubernetes_service_patcher):
+    harness.set_leader(True)
+    db_relation_id = setup_postgres_relation(harness)
+    harness.begin_with_initial_hooks()
+
+    relation_data = harness.get_relation_data(db_relation_id, "postgresql-k8s")
+    assert relation_data["username"] == "test-username"
+    assert relation_data["password"] == "test-password"
+    assert relation_data["endpoints"] == "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
+
+
+def test_events(harness, mocked_kubernetes_service_patcher, mocked_update_container):
     harness.set_leader(True)
     harness.begin()
-    main = mocker.patch("charm.HydraCharm.main")
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
-    harness.charm.on.install.emit()
-    main.assert_called_once()
-    main.reset_mock()
+    mocked_update_container.assert_called_once()
 
-    harness.charm.on.config_changed.emit()
-    main.assert_called_once()
-    main.reset_mock()
+    setup_postgres_relation(harness)
+    assert mocked_update_container.call_count == 2
 
 
-def test_config_changed(harness, mocker, mocked_resource_handler, mocked_lightkube_client):
+def test_update_container_config(
+    harness, mocked_kubernetes_service_patcher, mocked_update_container
+):
     harness.set_leader(True)
-    update_layer = mocker.patch("charm.HydraCharm._update_layer")
-
-    rel_id = harness.add_relation("pg-database", "app")
-    harness.add_relation_unit(rel_id, "app/0")
-    harness.update_relation_data(
-        rel_id,
-        "app",
-        {"_supported_versions": "- v1"},
-    )
     harness.begin()
+    harness.set_can_connect(CONTAINER_NAME, True)
+    setup_postgres_relation(harness)
 
-    harness.update_config({"system-secret": "new-secret"})
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
-    update_layer.assert_called()
+    mocked_update_container.assert_called()
+    assert isinstance(harness.charm.unit.status, MaintenanceStatus)
+
+    expected_config = {
+        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/postgres",
+        "log": {"level": "trace"},
+        "secrets": {
+            "cookie": ["my-cookie-secret"],
+            "system": ["my-system-secret"],
+        },
+        "serve": {
+            "admin": {
+                "host": "localhost",
+                "port": 4445,
+            },
+            "public": {
+                "host": "localhost",
+                "port": 4444,
+            },
+        },
+        "urls": {
+            "consent": "http://localhost:3000/consent",
+            "login": "http://localhost:3000/login",
+            "self": {
+                "issuer": "http://localhost:4444/",
+                "public": "http://localhost:4444/",
+            },
+        },
+    }
+
+    assert harness.charm._config == yaml.dump(expected_config)
