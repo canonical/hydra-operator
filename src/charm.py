@@ -127,7 +127,7 @@ class HydraCharm(CharmBase):
         """Updates the Pebble configuration layer and config if changed."""
         self.unit.status = MaintenanceStatus("Applying pebble layer")
 
-        if not self._container.get_plan():
+        if not self._container.get_plan().to_dict():
             # Push the config on first layer update to avoid PathError
             self._container.push(self._hydra_config_path, self._config, make_dirs=True)
             logger.info("Pushed hydra config")
