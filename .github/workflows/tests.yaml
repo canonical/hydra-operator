@@ -54,4 +54,6 @@ jobs:
 
       - name: Get hydra container logs
         run: kubectl logs hydra-0 -c hydra -n testing
-        if: failure()
+
+      - name: Get hydra config file
+        run: kubectl exec -it hydra-0 -c hydra -n testing -- cat /etc/config/hydra.yaml
