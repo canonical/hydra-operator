@@ -24,7 +24,7 @@ charmcraft pack
 Deploy the charm:
 <!-- TODO: Update to deploy from charmhub once the charm is published -->
 ```bash
-juju deploy ./hydra*.charm --resource oci-image=$(yq eval '.resources.oci-image.upstream-source' metadata.yaml) --trust
+juju deploy ./hydra*.charm --resource oci-image=$(yq eval '.resources.oci-image.upstream-source' metadata.yaml)
 ```
 
 Finally, add a required relation:
@@ -77,11 +77,16 @@ This charm requires a relation with [postgresql-k8s-operator](https://github.com
 
 The image used by this charm is hosted on [Docker Hub](https://hub.docker.com/r/oryd/hydra) and maintained by Ory.
 
+## Security
+
+Security issues can be reported through [LaunchPad](https://wiki.ubuntu.com/DebuggingSecurity#How%20to%20File). Please do not file GitHub issues about security issues.
+
 ## Contributing
 
 Please see the [Juju SDK docs](https://juju.is/docs/sdk) for guidelines on enhancements to this
 charm following best practice guidelines, and
 [CONTRIBUTING.md](https://github.com/canonical/hydra-operator/blob/main/CONTRIBUTING.md) for developer guidance.
 
-## Security
-Security issues can be reported through [LaunchPad](https://wiki.ubuntu.com/DebuggingSecurity#How%20to%20File). Please do not file GitHub issues about security issues.
+## License
+
+The Charmed Hydra Operator is free software, distributed under the Apache Software License, version 2.0. See [LICENSE](https://github.com/canonical/hydra-operator/blob/main/LICENSE) for more information.
