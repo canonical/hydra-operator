@@ -54,8 +54,12 @@ charmcraft pack
 juju add-model dev
 # Enable DEBUG logging
 juju model-config logging-config="<root>=INFO;unit=DEBUG"
+# Deploy postgresql-k8s charm
+juju deploy postgresql-k8s --channel edge --trust
 # Deploy the charm
-juju deploy ./hydra_ubuntu-*-amd64.charm
+juju deploy ./hydra*.charm --resource oci-image=$(yq eval '.resources.oci-image.upstream-source' metadata.yaml)
+# Add relation
+juju relate postgresql-k8s hydra
 ```
 
 ## Canonical Contributor Agreement
