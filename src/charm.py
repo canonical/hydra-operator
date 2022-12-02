@@ -31,8 +31,6 @@ class HydraCharm(CharmBase):
         self._container = self.unit.get_container(self._container_name)
         self._hydra_config_path = "/etc/config/hydra.yaml"
         self._name = self.model.app.name
-        self._namespace = self.model.name
-        self._context = {"namespace": self._namespace, "name": self._name}
 
         self.service_patcher = KubernetesServicePatch(
             self, [("hydra-admin", 4445), ("hydra-public", 4444)]
