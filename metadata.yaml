@@ -6,3 +6,15 @@ description: |
   Charmed Ory Hydra
 summary: |
   OAuth 2.0 and OpenID Connect 1.0 Provider
+containers:
+  hydra:
+    resource: oci-image
+resources:
+  oci-image:
+    type: oci-image
+    description: OCI image for hydra container
+    upstream-source: oryd/hydra:v2.0.2
+requires:
+  pg-database:
+    interface: postgresql_client
+    limit: 1
