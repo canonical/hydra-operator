@@ -39,7 +39,7 @@ def setup_postgres_relation(harness):
         db_relation_id,
         "postgresql-k8s",
         {
-            "data": '{"database": "database", "extra-user-roles": "SUPERUSER"}',
+            "data": '{"database": "hydra", "extra-user-roles": "SUPERUSER"}',
             "endpoints": DB_ENDPOINT,
             "password": DB_PASSWORD,
             "username": DB_USERNAME,
@@ -52,6 +52,7 @@ def setup_postgres_relation(harness):
 def test_not_leader(harness, mocked_kubernetes_service_patcher):
     harness.begin()
     setup_postgres_relation(harness)
+    harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     assert harness.charm.unit.status == WaitingStatus("Waiting for leadership")
 
