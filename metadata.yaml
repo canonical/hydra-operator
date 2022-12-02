@@ -13,7 +13,6 @@ resources:
   oci-image:
     type: oci-image
     description: OCI image for hydra container
-    auto-fetch: true
     upstream-source: oryd/hydra:v2.0.2
 requires:
   pg-database:

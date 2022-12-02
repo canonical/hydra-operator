@@ -41,7 +41,7 @@ class HydraCharm(CharmBase):
         self.database = DatabaseRequires(
             self,
             relation_name="pg-database",
-            database_name="database",
+            database_name=self._name,
             extra_user_roles=EXTRA_USER_ROLES,
         )
 
@@ -156,12 +156,6 @@ class HydraCharm(CharmBase):
     def _update_container(self, event) -> None:
         """Update configs, pebble layer and run database migration."""
         self.unit.status = MaintenanceStatus("Configuring hydra container")
-        if not self.unit.is_leader():
-            # TODO: Observe leader_elected event instead of event deferring
-            event.defer()
-            logger.info("Unit does not have leadership")
-            self.unit.status = WaitingStatus("Waiting for leadership")
-            return
 
         if not self.model.relations["pg-database"]:
             # TODO: Observe relation_joined event instead of event deferring
@@ -183,6 +177,12 @@ class HydraCharm(CharmBase):
             return
 
         self._update_layer()
+
+        if not self.unit.is_leader():
+            # TODO: Observe leader_elected event
+            logger.info("Unit does not have leadership")
+            self.unit.status = WaitingStatus("Waiting for leadership")
+            return
 
         self._run_sql_migration()
 
