@@ -10,7 +10,7 @@ For more details and documentation, visit https://www.ory.sh/docs/hydra/
 
 The Hydra Operator may be deployed using the Juju command line as follows:
 
-Deploy postgresql-k8s charm:
+Deploy the `postgresql-k8s` charm:
 
 ```bash
 juju deploy postgresql-k8s --channel edge --trust
@@ -27,7 +27,7 @@ Deploy the charm:
 juju deploy ./hydra*.charm --resource oci-image=$(yq eval '.resources.oci-image.upstream-source' metadata.yaml)
 ```
 
-Finally, add a required relation:
+Finally, add the required relation:
 ```bash
 juju relate postgresql-k8s hydra
 ```
