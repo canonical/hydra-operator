@@ -83,7 +83,7 @@ class HydraCharm(CharmBase):
         db_info = self._get_database_relation_info()
 
         config = {
-            "dsn": f"postgres://{db_info['username']}:{db_info['password']}@{db_info['endpoints']}/postgres",
+            "dsn": f"postgres://{db_info['username']}:{db_info['password']}@{db_info['endpoints']}/{self._name}",
             "log": {"level": "trace"},
             "secrets": {
                 "cookie": ["my-cookie-secret"],
