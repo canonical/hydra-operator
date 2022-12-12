@@ -13,12 +13,14 @@ from charms.data_platform_libs.v0.database_requires import DatabaseRequires
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from ops.charm import CharmBase
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
-from ops.pebble import ChangeError, ExecError, Layer, PathError, ProtocolError
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
+from ops.pebble import ChangeError, ExecError, Layer
 
 logger = logging.getLogger(__name__)
 
 EXTRA_USER_ROLES = "SUPERUSER"
+HYDRA_ADMIN_PORT = 4445
+HYDRA_PUBLIC_PORT = 4444
 
 
 class HydraCharm(CharmBase):
@@ -33,7 +35,7 @@ class HydraCharm(CharmBase):
         self._name = self.model.app.name
 
         self.service_patcher = KubernetesServicePatch(
-            self, [("hydra-admin", 4445), ("hydra-public", 4444)]
+            self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
         )
 
         self.database = DatabaseRequires(
@@ -44,11 +46,11 @@ class HydraCharm(CharmBase):
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
-        for db_event in [
-            self.database.on.database_created,
-            self.database.on.endpoints_changed,
-        ]:
-            self.framework.observe(db_event, self._on_db_events)
+        self.framework.observe(self.database.on.database_created, self._on_database_created)
+        self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
+        self.framework.observe(
+            self.on["pg-database"].relation_departed, self._on_database_relation_departed
+        )
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -61,7 +63,7 @@ class HydraCharm(CharmBase):
                     "override": "replace",
                     "summary": "entrypoint of the hydra-operator image",
                     "command": f"hydra serve all --config {self._hydra_config_path} --dev",
-                    "startup": "enabled",
+                    "startup": "disabled",
                 }
             },
             "checks": {
@@ -121,71 +123,6 @@ class HydraCharm(CharmBase):
             "endpoints": relation_data["endpoints"],
         }
 
-    def _update_layer(self) -> None:
-        """Updates the Pebble configuration layer and config if changed."""
-        self.unit.status = MaintenanceStatus("Applying pebble layer")
-
-        if not self._container.get_plan().to_dict():
-            # Push the config on first layer update to avoid PathError
-            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-            logger.info("Pushed hydra config")
-
-        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-        logger.info("Pebble plan updated with new configuration, replanning")
-
-        try:
-            self._container.replan()
-        except ChangeError as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus("Failed to replan")
-            return
-
-        try:
-            current_config = self._container.pull(self._hydra_config_path).read()
-        except (ProtocolError, PathError) as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus(str(err))
-        else:
-            if current_config != self._config:
-                self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-                logger.info("Updated hydra config, restarting the container")
-                self._container.restart()
-
-    def _update_container(self, event) -> None:
-        """Update configs, pebble layer and run database migration."""
-        self.unit.status = MaintenanceStatus("Configuring hydra container")
-
-        if not self.model.relations["pg-database"]:
-            # TODO: Observe relation_joined event instead of event deferring
-            event.defer()
-            logger.error("Missing required relation with postgresql")
-            self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
-            return
-
-        if not self.database.is_database_created():
-            event.defer()
-            logger.info("Missing database details. Deferring the event.")
-            self.unit.status = WaitingStatus("Waiting for database creation")
-            return
-
-        if not self._container.can_connect():
-            event.defer()
-            logger.info("Cannot connect to Hydra container. Deferring the event.")
-            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
-            return
-
-        self._update_layer()
-
-        if not self.unit.is_leader():
-            # TODO: Observe leader_elected event
-            logger.info("Unit does not have leadership")
-            self.unit.status = WaitingStatus("Waiting for leadership")
-            return
-
-        self._run_sql_migration()
-
-        self.unit.status = ActiveStatus()
-
     def _run_sql_migration(self) -> None:
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
@@ -201,12 +138,92 @@ class HydraCharm(CharmBase):
 
     def _on_hydra_pebble_ready(self, event) -> None:
         """Event Handler for pebble ready event."""
-        self._update_container(event)
+        if not self.model.relations["pg-database"]:
+            # TODO: Observe relation_joined event instead of event deferring
+            event.defer()
+            logger.error("Missing required relation with postgresql")
+            self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
+            return
 
-    def _on_db_events(self, db_event) -> None:
-        """Event Handler for database-related events."""
+        if not self._container.can_connect():
+            event.defer()
+            logger.info("Cannot connect to Hydra container. Deferring the event.")
+            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
+
+        self.unit.status = MaintenanceStatus("Configuring resources")
+
+        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
+        logger.info("Pebble plan updated with new configuration, replanning")
+        try:
+            self._container.replan()
+        except ChangeError as err:
+            logger.error(str(err))
+            self.unit.status = BlockedStatus("Failed to replan")
+            return
+
+        if self.database.is_database_created():
+            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+            self._container.start(self._container_name)
+            self.unit.status = ActiveStatus()
+
+    def _on_database_created(self, event) -> None:
+        """Event Handler for database created event."""
         logger.info("Retrieved database details")
-        self._update_container(db_event)
+
+        if not self.unit.is_leader():
+            # TODO: Observe leader_elected event
+            logger.info("Unit does not have leadership")
+            self.unit.status = WaitingStatus("Waiting for leadership")
+            return
+
+        if not self._container.can_connect():
+            event.defer()
+            logger.info("Cannot connect to Hydra container. Deferring the event.")
+            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
+
+        self.unit.status = MaintenanceStatus(
+            "Configuring container and resources for database connection"
+        )
+
+        try:
+            self._container.get_service(self._container_name)
+            logger.info("Updating Hydra config and restarting service")
+            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+            self._run_sql_migration()
+            self._container.restart(self._container_name)
+            self.unit.status = ActiveStatus()
+        except (ModelError, RuntimeError):
+            event.defer()
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            logger.info("Hydra service is absent. Deferring database created event.")
+
+    def _on_database_changed(self, event) -> None:
+        """Event Handler for database changed event."""
+        if not self._container.can_connect():
+            event.defer()
+            logger.info("Cannot connect to Hydra container. Deferring the event.")
+            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
+
+        self.unit.status = MaintenanceStatus("Updating database details")
+
+        try:
+            self._container.get_service(self._container_name)
+            logger.info("Updating Hydra config and restarting service")
+            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+            self._container.restart(self._container_name)
+            self.unit.status = ActiveStatus()
+        except (ModelError, RuntimeError):
+            event.defer()
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            logger.info("Hydra service is absent. Deferring database created event.")
+
+    def _on_database_relation_departed(self, event) -> None:
+        """Event Handler for database relation departed event."""
+        logger.error("Missing required relation with postgresql")
+        self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
 
 
 if __name__ == "__main__":
