@@ -112,7 +112,8 @@ def test_pebble_container_can_connect(
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
     assert isinstance(harness.charm.unit.status, ActiveStatus)
-    assert harness.get_container_pebble_plan("hydra")._services is not None
+    service = harness.model.unit.get_container(CONTAINER_NAME).get_service("hydra")
+    assert service.is_running()
 
 
 def test_pebble_container_cannot_connect(

@@ -11,7 +11,7 @@ import logging
 import yaml
 from charms.data_platform_libs.v0.database_requires import DatabaseRequires
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
-from ops.charm import CharmBase
+from ops.charm import ActionEvent, CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
 from ops.pebble import ChangeError, ExecError, Layer
@@ -48,6 +48,7 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.database.on.database_created, self._on_database_created)
         self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
+        self.framework.observe(self.on.run_migration_action, self._on_run_migration)
         self.framework.observe(
             self.on["pg-database"].relation_departed, self._on_database_relation_departed
         )
@@ -63,7 +64,9 @@ class HydraCharm(CharmBase):
                     "override": "replace",
                     "summary": "entrypoint of the hydra-operator image",
                     "command": f"hydra serve all --config {self._hydra_config_path} --dev",
-                    "startup": "disabled",
+                    "startup": "disabled"
+                    if not self.database.is_database_created()
+                    else "enabled",
                 }
             },
             "checks": {
@@ -126,8 +129,7 @@ class HydraCharm(CharmBase):
     def _run_sql_migration(self) -> None:
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
-            ["hydra", "migrate", "sql", "-e", "--config", self._hydra_config_path, "--yes"],
-            timeout=20.0,
+            ["hydra", "migrate", "sql", "-e", "--config", self._hydra_config_path, "--yes"]
         )
         try:
             stdout, _ = process.wait_output()
@@ -135,6 +137,7 @@ class HydraCharm(CharmBase):
         except ExecError as err:
             logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
             self.unit.status = BlockedStatus("Database migration job failed")
+            logger.error("Automigration job failed, please use the run-migration action")
 
     def _on_hydra_pebble_ready(self, event) -> None:
         """Event Handler for pebble ready event."""
@@ -161,11 +164,15 @@ class HydraCharm(CharmBase):
             logger.error(str(err))
             self.unit.status = BlockedStatus("Failed to replan")
             return
-
-        if self.database.is_database_created():
-            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-            self._container.start(self._container_name)
-            self.unit.status = ActiveStatus()
+        finally:
+            if self.database.is_database_created():
+                if not self._container.exists(self._hydra_config_path):
+                    logger.info(
+                        "Config file not found. Pushing it to the container and replanning"
+                    )
+                    self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+                    self._container.replan()
+                self.unit.status = ActiveStatus()
 
     def _on_database_created(self, event) -> None:
         """Event Handler for database created event."""
@@ -188,6 +195,7 @@ class HydraCharm(CharmBase):
         )
 
         try:
+            self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
             self._container.get_service(self._container_name)
             logger.info("Updating Hydra config and restarting service")
             self._container.push(self._hydra_config_path, self._config, make_dirs=True)
@@ -219,6 +227,11 @@ class HydraCharm(CharmBase):
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             logger.info("Hydra service is absent. Deferring database created event.")
+
+    def _on_run_migration(self, event: ActionEvent) -> None:
+        """Runs the migration as an action response."""
+        logger.info("Executing database migration initiated by user")
+        self._run_sql_migration()
 
     def _on_database_relation_departed(self, event) -> None:
         """Event Handler for database relation departed event."""
