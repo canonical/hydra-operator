@@ -17,6 +17,7 @@ DB_ENDPOINT = "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
 @pytest.fixture()
 def harness():
     harness = Harness(HydraCharm)
+    harness.set_model_name("testing")
     harness.set_leader(True)
     return harness
 
@@ -136,7 +137,7 @@ def test_update_container_config(harness, mocked_kubernetes_service_patcher, moc
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
     expected_config = {
-        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/hydra",
+        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
         "log": {"level": "trace"},
         "secrets": {
             "cookie": ["my-cookie-secret"],

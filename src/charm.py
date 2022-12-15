@@ -41,7 +41,7 @@ class HydraCharm(CharmBase):
         self.database = DatabaseRequires(
             self,
             relation_name="pg-database",
-            database_name=self._name,
+            database_name=f"{self.model.name}_{self._name}",
             extra_user_roles=EXTRA_USER_ROLES,
         )
 
@@ -88,7 +88,7 @@ class HydraCharm(CharmBase):
         db_info = self._get_database_relation_info()
 
         config = {
-            "dsn": f"postgres://{db_info['username']}:{db_info['password']}@{db_info['endpoints']}/{self._name}",
+            "dsn": f"postgres://{db_info['username']}:{db_info['password']}@{db_info['endpoints']}/{self.model.name}_{self._name}",
             "log": {"level": "trace"},
             "secrets": {
                 "cookie": ["my-cookie-secret"],
@@ -143,8 +143,6 @@ class HydraCharm(CharmBase):
     def _on_hydra_pebble_ready(self, event) -> None:
         """Event Handler for pebble ready event."""
         if not self.model.relations["pg-database"]:
-            # TODO: Observe relation_joined event instead of event deferring
-            event.defer()
             logger.error("Missing required relation with postgresql")
             self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
             return
