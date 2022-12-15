@@ -61,7 +61,7 @@ def test_not_leader(harness, mocked_kubernetes_service_patcher):
     assert (
         "status_set",
         "waiting",
-        "Waiting for leadership",
+        "Unit waiting for leadership to run the migration",
         {"is_app": False},
     ) in harness._get_backend_calls()
 

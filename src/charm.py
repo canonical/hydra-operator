@@ -126,10 +126,11 @@ class HydraCharm(CharmBase):
             "endpoints": relation_data["endpoints"],
         }
 
-    def _run_sql_migration(self) -> None:
+    def _run_sql_migration(self, set_timeout) -> None:
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
-            ["hydra", "migrate", "sql", "-e", "--config", self._hydra_config_path, "--yes"]
+            ["hydra", "migrate", "sql", "-e", "--config", self._hydra_config_path, "--yes"],
+            timeout=20.0 if set_timeout else None,
         )
         try:
             stdout, _ = process.wait_output()
@@ -181,7 +182,7 @@ class HydraCharm(CharmBase):
         if not self.unit.is_leader():
             # TODO: Observe leader_elected event
             logger.info("Unit does not have leadership")
-            self.unit.status = WaitingStatus("Waiting for leadership")
+            self.unit.status = WaitingStatus("Unit waiting for leadership to run the migration")
             return
 
         if not self._container.can_connect():
@@ -199,7 +200,7 @@ class HydraCharm(CharmBase):
             self._container.get_service(self._container_name)
             logger.info("Updating Hydra config and restarting service")
             self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-            self._run_sql_migration()
+            self._run_sql_migration(set_timeout=True)
             self._container.restart(self._container_name)
             self.unit.status = ActiveStatus()
         except (ModelError, RuntimeError):
@@ -231,7 +232,7 @@ class HydraCharm(CharmBase):
     def _on_run_migration(self, event: ActionEvent) -> None:
         """Runs the migration as an action response."""
         logger.info("Executing database migration initiated by user")
-        self._run_sql_migration()
+        self._run_sql_migration(set_timeout=False)
 
     def _on_database_relation_departed(self, event) -> None:
         """Event Handler for database relation departed event."""
