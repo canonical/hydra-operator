@@ -103,3 +103,4 @@ async def test_has_admin_ingress(ops_test: OpsTest):
     )
 
     assert resp.status_code == 200
+    assert resp.json() == []
