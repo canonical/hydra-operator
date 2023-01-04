@@ -85,10 +85,13 @@ class HydraCharm(CharmBase):
     @property
     def _config(self) -> str:
         """Returns Hydra configuration."""
-        db_info = self._get_database_relation_info()
+        try:
+            db_info = self._get_database_relation_info() or {}
+        except IndexError:
+            db_info = {}
 
         config = {
-            "dsn": f"postgres://{db_info['username']}:{db_info['password']}@{db_info['endpoints']}/{self.model.name}_{self._name}",
+            "dsn": f"postgres://{db_info.get('username')}:{db_info.get('password')}@{db_info.get('endpoints')}/{self.model.name}_{self._name}",
             "log": {"level": "trace"},
             "secrets": {
                 "cookie": ["my-cookie-secret"],
@@ -121,9 +124,9 @@ class HydraCharm(CharmBase):
         relation_data = self.database.fetch_relation_data()[relation_id]
 
         return {
-            "username": relation_data["username"],
-            "password": relation_data["password"],
-            "endpoints": relation_data["endpoints"],
+            "username": relation_data.get("username"),
+            "password": relation_data.get("password"),
+            "endpoints": relation_data.get("endpoints"),
         }
 
     def _run_sql_migration(self, set_timeout) -> None:
@@ -132,13 +135,9 @@ class HydraCharm(CharmBase):
             ["hydra", "migrate", "sql", "-e", "--config", self._hydra_config_path, "--yes"],
             timeout=20.0 if set_timeout else None,
         )
-        try:
-            stdout, _ = process.wait_output()
-            logger.info(f"Executing automigration: {stdout}")
-        except ExecError as err:
-            logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
-            self.unit.status = BlockedStatus("Database migration job failed")
-            logger.error("Automigration job failed, please use the run-migration action")
+
+        stdout, _ = process.wait_output()
+        logger.info(f"Executing automigration: {stdout}")
 
     def _on_hydra_pebble_ready(self, event) -> None:
         """Event Handler for pebble ready event."""
@@ -156,22 +155,15 @@ class HydraCharm(CharmBase):
         self.unit.status = MaintenanceStatus("Configuring resources")
 
         self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-        logger.info("Pebble plan updated with new configuration, replanning")
+        self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+
         try:
             self._container.replan()
+            self.unit.status = ActiveStatus()
         except ChangeError as err:
             logger.error(str(err))
             self.unit.status = BlockedStatus("Failed to replan")
             return
-        finally:
-            if self.database.is_database_created():
-                if not self._container.exists(self._hydra_config_path):
-                    logger.info(
-                        "Config file not found. Pushing it to the container and replanning"
-                    )
-                    self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-                    self._container.replan()
-                self.unit.status = ActiveStatus()
 
     def _on_database_created(self, event) -> None:
         """Event Handler for database created event."""
@@ -198,7 +190,12 @@ class HydraCharm(CharmBase):
             self._container.get_service(self._container_name)
             logger.info("Updating Hydra config and restarting service")
             self._container.push(self._hydra_config_path, self._config, make_dirs=True)
-            self._run_sql_migration(set_timeout=True)
+            try:
+                self._run_sql_migration(set_timeout=True)
+            except ExecError as err:
+                logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
+                self.unit.status = BlockedStatus("Database migration job failed")
+                logger.error("Automigration job failed, please use the run-migration action")
             self._container.restart(self._container_name)
             self.unit.status = ActiveStatus()
         except (ModelError, RuntimeError):
@@ -229,13 +226,23 @@ class HydraCharm(CharmBase):
 
     def _on_run_migration(self, event: ActionEvent) -> None:
         """Runs the migration as an action response."""
+        if not self.unit.is_leader():
+            event.fail("The action can be run only on leader unit")
+            return
+
         logger.info("Executing database migration initiated by user")
-        self._run_sql_migration(set_timeout=False)
+        try:
+            self._run_sql_migration(set_timeout=False)
+        except ExecError as err:
+            logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
+            event.fail("Execution failed, please inspect the logs")
 
     def _on_database_relation_departed(self, event) -> None:
         """Event Handler for database relation departed event."""
         logger.error("Missing required relation with postgresql")
         self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
+        if self._container.can_connect():
+            self._container.stop(self._container_name)
 
 
 if __name__ == "__main__":

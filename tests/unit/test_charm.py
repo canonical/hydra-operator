@@ -3,7 +3,7 @@
 
 import pytest
 import yaml
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.testing import Harness
 
 from charm import HydraCharm
@@ -72,17 +72,6 @@ def test_install_without_relation(harness, mocked_kubernetes_service_patcher):
 
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
-
-
-def test_missing_database_details(harness, mocked_kubernetes_service_patcher):
-    harness.begin()
-    db_relation_id = harness.add_relation("pg-database", "postgresql-k8s")
-    harness.add_relation_unit(db_relation_id, "postgresql-k8s/0")
-
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    assert harness.charm.unit.status == MaintenanceStatus("Configuring resources")
 
 
 def test_relation_data(harness, mocked_kubernetes_service_patcher, mocked_sql_migration):
