@@ -25,7 +25,6 @@ async def get_unit_address(ops_test: OpsTest, app_name: str, unit_num: int) -> s
     return status["applications"][app_name]["units"][f"{app_name}/{unit_num}"]["address"]
 
 
-
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(ops_test: OpsTest):
     """Build hydra and deploy it with required charms and relations."""
@@ -98,9 +97,7 @@ async def test_has_admin_ingress(ops_test: OpsTest):
     # Get the traefik address and try to reach hydra
     admin_address = await get_unit_address(ops_test, TRAEFIK_ADMIN_APP, 0)
 
-    resp = requests.get(
-        f"http://{admin_address}/{ops_test.model.name}-{APP_NAME}/admin/clients"
-    )
+    resp = requests.get(f"http://{admin_address}/{ops_test.model.name}-{APP_NAME}/admin/clients")
 
     assert resp.status_code == 200
     assert resp.json() == []

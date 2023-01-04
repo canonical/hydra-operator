@@ -77,8 +77,6 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
 
-
-
     @property
     def _hydra_layer(self) -> Layer:
         """Returns a pre-configured Pebble layer."""

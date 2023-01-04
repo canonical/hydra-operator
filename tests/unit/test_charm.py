@@ -5,7 +5,6 @@ import pytest
 import yaml
 from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
 
-
 CONTAINER_NAME = "hydra"
 DB_USERNAME = "test-username"
 DB_PASSWORD = "test-password"
@@ -38,7 +37,6 @@ def setup_ingress_relation(harness, type):
         {"url": f"http://{type}:80/{harness.model.name}-hydra"},
     )
     return relation_id
-
 
 
 def test_not_leader(harness, mocked_kubernetes_service_patcher):
