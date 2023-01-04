@@ -120,7 +120,7 @@ class HydraCharm(CharmBase):
                 "consent": "http://localhost:3000/consent",
                 "login": "http://localhost:3000/login",
                 "self": {
-                    "issuer": "http://127.0.0.1:4444",
+                    "issuer": "http://localhost:4444/",
                 },
             },
         }

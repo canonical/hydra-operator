@@ -133,22 +133,11 @@ def test_update_container_config(
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
         },
-        "serve": {
-            "admin": {
-                "host": "localhost",
-                "port": 4445,
-            },
-            "public": {
-                "host": "localhost",
-                "port": 4444,
-            },
-        },
         "urls": {
             "consent": "http://localhost:3000/consent",
             "login": "http://localhost:3000/login",
             "self": {
                 "issuer": "http://localhost:4444/",
-                "public": "http://localhost:4444/",
             },
         },
     }
