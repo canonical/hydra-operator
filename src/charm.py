@@ -156,6 +156,7 @@ class HydraCharm(CharmBase):
 
         self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
         self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+        logger.info("Pebble plan updated with new configuration, replanning")
 
         try:
             self._container.replan()
