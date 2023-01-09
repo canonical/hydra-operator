@@ -69,7 +69,6 @@ class HydraCharm(CharmBase):
         ]:
             self.framework.observe(db_event, self._on_db_events)
 
-        # Admin ingress events
         self.framework.observe(self.admin_ingress.on.ready, self._on_admin_ingress_ready)
         self.framework.observe(self.admin_ingress.on.revoked, self._on_ingress_revoked)
 
