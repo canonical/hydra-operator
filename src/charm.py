@@ -33,6 +33,7 @@ class HydraCharm(CharmBase):
         self._container = self.unit.get_container(self._container_name)
         self._hydra_config_path = "/etc/config/hydra.yaml"
         self._name = self.model.app.name
+        self._db_relation_name = "pg-database"
 
         self.service_patcher = KubernetesServicePatch(
             self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
@@ -40,7 +41,7 @@ class HydraCharm(CharmBase):
 
         self.database = DatabaseRequires(
             self,
-            relation_name="pg-database",
+            relation_name=self._db_relation_name,
             database_name=f"{self.model.name}_{self._name}",
             extra_user_roles=EXTRA_USER_ROLES,
         )
@@ -50,7 +51,7 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
         self.framework.observe(self.on.run_migration_action, self._on_run_migration)
         self.framework.observe(
-            self.on["pg-database"].relation_departed, self._on_database_relation_departed
+            self.on[self._db_relation_name].relation_departed, self._on_database_relation_departed
         )
 
     @property
@@ -139,7 +140,7 @@ class HydraCharm(CharmBase):
 
     def _on_hydra_pebble_ready(self, event) -> None:
         """Event Handler for pebble ready event."""
-        if not self.model.relations["pg-database"]:
+        if not self.model.relations[self._db_relation_name]:
             logger.error("Missing required relation with postgresql")
             self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
             return
@@ -159,14 +160,15 @@ class HydraCharm(CharmBase):
             self._container.replan()
         except ChangeError as err:
             logger.error(str(err))
-            self.unit.status = BlockedStatus("Failed to replan")
+            self.unit.status = BlockedStatus("Failed to replan, please consult the logs")
             return
 
         if self.database.is_database_created():
             self._container.push(self._hydra_config_path, self._config, make_dirs=True)
             self._container.start(self._container_name)
             self.unit.status = ActiveStatus()
-            return
+        else:
+            self.unit.status = WaitingStatus("Waiting for database creation")
 
     def _on_database_created(self, event) -> None:
         """Event Handler for database created event."""

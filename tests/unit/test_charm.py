@@ -74,6 +74,18 @@ def test_install_without_relation(harness, mocked_kubernetes_service_patcher):
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
 
+def test_install_without_database(harness, mocked_kubernetes_service_patcher):
+    harness.begin()
+
+    db_relation_id = harness.add_relation("pg-database", "postgresql-k8s")
+    harness.add_relation_unit(db_relation_id, "postgresql-k8s/0")
+
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    assert harness.charm.unit.status == WaitingStatus("Waiting for database creation")
+
+
 def test_relation_data(harness, mocked_kubernetes_service_patcher, mocked_sql_migration):
     db_relation_id = setup_postgres_relation(harness)
     harness.begin_with_initial_hooks()
