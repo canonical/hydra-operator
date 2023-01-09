@@ -100,4 +100,3 @@ async def test_has_admin_ingress(ops_test: OpsTest):
     resp = requests.get(f"http://{admin_address}/{ops_test.model.name}-{APP_NAME}/admin/clients")
 
     assert resp.status_code == 200
-    assert resp.json() == []

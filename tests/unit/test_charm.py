@@ -1,6 +1,8 @@
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
+
 import pytest
 import yaml
 from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
@@ -34,7 +36,7 @@ def setup_ingress_relation(harness, type):
     harness.update_relation_data(
         relation_id,
         f"{type}-traefik",
-        {"url": f"http://{type}:80/{harness.model.name}-hydra"},
+        {"ingress": json.dumps({"url": f"http://{type}:80/{harness.model.name}-hydra"})},
     )
     return relation_id
 
