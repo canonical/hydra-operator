@@ -149,7 +149,6 @@ def test_update_container_config(
 def test_ingress_relation_created(
     harness, mocked_kubernetes_service_patcher, mocked_fqdn, api_type, port
 ) -> None:
-    harness.set_leader(True)
     harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
 
