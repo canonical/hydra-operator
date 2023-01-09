@@ -42,6 +42,7 @@ def setup_ingress_relation(harness, type):
 
 
 def test_not_leader(harness, mocked_kubernetes_service_patcher):
+    harness.set_leader(False)
     harness.begin()
     setup_postgres_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, True)
