@@ -10,7 +10,8 @@ from charm import HydraCharm
 @pytest.fixture()
 def harness():
     harness = Harness(HydraCharm)
-    harness.set_model_name("hydra-model")
+    harness.set_model_name("testing")
+    harness.set_leader(True)
     return harness
 
 
