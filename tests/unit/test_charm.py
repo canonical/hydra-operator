@@ -1,38 +1,13 @@
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import pytest
 import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.testing import Harness
-
-from charm import HydraCharm
 
 CONTAINER_NAME = "hydra"
 DB_USERNAME = "test-username"
 DB_PASSWORD = "test-password"
 DB_ENDPOINT = "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
-
-
-@pytest.fixture()
-def harness():
-    harness = Harness(HydraCharm)
-    harness.set_model_name("testing")
-    harness.set_leader(True)
-    return harness
-
-
-@pytest.fixture()
-def mocked_kubernetes_service_patcher(mocker):
-    mocked_service_patcher = mocker.patch("charm.KubernetesServicePatch")
-    mocked_service_patcher.return_value = lambda x, y: None
-    yield mocked_service_patcher
-
-
-@pytest.fixture()
-def mocked_sql_migration(mocker):
-    mocked_sql_migration = mocker.patch("charm.HydraCharm._run_sql_migration")
-    yield mocked_sql_migration
 
 
 def setup_postgres_relation(harness):
