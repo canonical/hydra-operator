@@ -240,10 +240,6 @@ class HydraCharm(CharmBase):
 
     def _on_run_migration(self, event: ActionEvent) -> None:
         """Runs the migration as an action response."""
-        if not self.unit.is_leader():
-            event.fail("The action can be run only on leader unit")
-            return
-
         logger.info("Executing database migration initiated by user")
         try:
             self._run_sql_migration(set_timeout=False)
