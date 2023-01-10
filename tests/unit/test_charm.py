@@ -5,7 +5,7 @@ import json
 
 import pytest
 import yaml
-from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 
 CONTAINER_NAME = "hydra"
 DB_USERNAME = "test-username"
