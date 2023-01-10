@@ -140,11 +140,6 @@ class HydraCharm(CharmBase):
 
     def _on_hydra_pebble_ready(self, event) -> None:
         """Event Handler for pebble ready event."""
-        if not self.model.relations[self._db_relation_name]:
-            logger.error("Missing required relation with postgresql")
-            self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
-            return
-
         if not self._container.can_connect():
             event.defer()
             logger.info("Cannot connect to Hydra container. Deferring the event.")
@@ -167,8 +162,12 @@ class HydraCharm(CharmBase):
             self._container.push(self._hydra_config_path, self._config, make_dirs=True)
             self._container.start(self._container_name)
             self.unit.status = ActiveStatus()
-        else:
+            return
+
+        if self.model.relations[self._db_relation_name]:
             self.unit.status = WaitingStatus("Waiting for database creation")
+        else:
+            self.unit.status = BlockedStatus("Missing required relation with postgresql")
 
     def _on_database_created(self, event) -> None:
         """Event Handler for database created event."""

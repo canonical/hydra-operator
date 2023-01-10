@@ -70,7 +70,9 @@ def test_not_leader(harness, mocked_kubernetes_service_patcher):
 def test_install_without_relation(harness, mocked_kubernetes_service_patcher):
     harness.begin()
 
+    harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
 
