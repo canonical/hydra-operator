@@ -1,35 +1,16 @@
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
+
 import pytest
 import yaml
 from ops.model import BlockedStatus, MaintenanceStatus, WaitingStatus
-from ops.testing import Harness
-
-from charm import HydraCharm
 
 CONTAINER_NAME = "hydra"
 DB_USERNAME = "test-username"
 DB_PASSWORD = "test-password"
 DB_ENDPOINT = "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
-
-
-@pytest.fixture()
-def harness():
-    return Harness(HydraCharm)
-
-
-@pytest.fixture()
-def mocked_kubernetes_service_patcher(mocker):
-    mocked_service_patcher = mocker.patch("charm.KubernetesServicePatch")
-    mocked_service_patcher.return_value = lambda x, y: None
-    yield mocked_service_patcher
-
-
-@pytest.fixture()
-def mocked_update_container(mocker):
-    mocked_update_container = mocker.patch("charm.HydraCharm._update_container")
-    yield mocked_update_container
 
 
 def setup_postgres_relation(harness):
@@ -49,7 +30,19 @@ def setup_postgres_relation(harness):
     return db_relation_id
 
 
+def setup_ingress_relation(harness, type):
+    relation_id = harness.add_relation(f"{type}-ingress", f"{type}-traefik")
+    harness.add_relation_unit(relation_id, f"{type}-traefik/0")
+    harness.update_relation_data(
+        relation_id,
+        f"{type}-traefik",
+        {"ingress": json.dumps({"url": f"http://{type}:80/{harness.model.name}-hydra"})},
+    )
+    return relation_id
+
+
 def test_not_leader(harness, mocked_kubernetes_service_patcher):
+    harness.set_leader(False)
     harness.begin()
     setup_postgres_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -143,24 +136,32 @@ def test_update_container_config(
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
         },
-        "serve": {
-            "admin": {
-                "host": "localhost",
-                "port": 4445,
-            },
-            "public": {
-                "host": "localhost",
-                "port": 4444,
-            },
-        },
         "urls": {
             "consent": "http://localhost:3000/consent",
             "login": "http://localhost:3000/login",
             "self": {
                 "issuer": "http://localhost:4444/",
-                "public": "http://localhost:4444/",
             },
         },
     }
 
     assert harness.charm._config == yaml.dump(expected_config)
+
+
+@pytest.mark.parametrize("api_type,port", [("admin", "4445"), ("public", "4444")])
+def test_ingress_relation_created(
+    harness, mocked_kubernetes_service_patcher, mocked_fqdn, api_type, port
+) -> None:
+    harness.begin()
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id = setup_ingress_relation(harness, api_type)
+    app_data = harness.get_relation_data(relation_id, harness.charm.app)
+
+    assert app_data == {
+        "host": mocked_fqdn.return_value,
+        "model": harness.model.name,
+        "name": "hydra",
+        "port": port,
+        "strip-prefix": "true",
+    }

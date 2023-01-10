@@ -11,6 +11,11 @@ import logging
 import yaml
 from charms.data_platform_libs.v0.database_requires import DatabaseRequires
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
+from charms.traefik_k8s.v1.ingress import (
+    IngressPerAppReadyEvent,
+    IngressPerAppRequirer,
+    IngressPerAppRevokedEvent,
+)
 from ops.charm import CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
@@ -19,6 +24,8 @@ from ops.pebble import ChangeError, ExecError, Layer, PathError, ProtocolError
 logger = logging.getLogger(__name__)
 
 EXTRA_USER_ROLES = "SUPERUSER"
+HYDRA_ADMIN_PORT = 4445
+HYDRA_PUBLIC_PORT = 4444
 
 
 class HydraCharm(CharmBase):
@@ -33,7 +40,7 @@ class HydraCharm(CharmBase):
         self._name = self.model.app.name
 
         self.service_patcher = KubernetesServicePatch(
-            self, [("hydra-admin", 4445), ("hydra-public", 4444)]
+            self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
         )
 
         self.database = DatabaseRequires(
@@ -42,6 +49,18 @@ class HydraCharm(CharmBase):
             database_name=self._name,
             extra_user_roles=EXTRA_USER_ROLES,
         )
+        self.admin_ingress = IngressPerAppRequirer(
+            self,
+            relation_name="admin-ingress",
+            port=HYDRA_ADMIN_PORT,
+            strip_prefix=True,
+        )
+        self.public_ingress = IngressPerAppRequirer(
+            self,
+            relation_name="public-ingress",
+            port=HYDRA_PUBLIC_PORT,
+            strip_prefix=True,
+        )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         for db_event in [
@@ -49,6 +68,12 @@ class HydraCharm(CharmBase):
             self.database.on.endpoints_changed,
         ]:
             self.framework.observe(db_event, self._on_db_events)
+
+        self.framework.observe(self.admin_ingress.on.ready, self._on_admin_ingress_ready)
+        self.framework.observe(self.admin_ingress.on.revoked, self._on_ingress_revoked)
+
+        self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
+        self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -89,22 +114,11 @@ class HydraCharm(CharmBase):
                 "cookie": ["my-cookie-secret"],
                 "system": ["my-system-secret"],
             },
-            "serve": {
-                "admin": {
-                    "host": "localhost",
-                    "port": 4445,
-                },
-                "public": {
-                    "host": "localhost",
-                    "port": 4444,
-                },
-            },
             "urls": {
                 "consent": "http://localhost:3000/consent",
                 "login": "http://localhost:3000/login",
                 "self": {
                     "issuer": "http://localhost:4444/",
-                    "public": "http://localhost:4444/",
                 },
             },
         }
@@ -207,6 +221,18 @@ class HydraCharm(CharmBase):
         """Event Handler for database-related events."""
         logger.info("Retrieved database details")
         self._update_container(db_event)
+
+    def _on_admin_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
+        if self.unit.is_leader():
+            logger.info("This app's admin ingress URL: %s", event.url)
+
+    def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
+        if self.unit.is_leader():
+            logger.info("This app's public ingress URL: %s", event.url)
+
+    def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
+        if self.unit.is_leader():
+            logger.info("This app no longer has ingress")
 
 
 if __name__ == "__main__":

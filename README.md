@@ -34,6 +34,20 @@ juju relate postgresql-k8s hydra
 
 You can follow the deployment status with `watch -c juju status --color`.
 
+### Ingress
+
+The Hydra Operator offers integration with the [traefik-k8s-operator](https://github.com/canonical/traefik-k8s-operator) for ingress. Hydra has two APIs which can be exposed through ingress, the public API and the admin API.
+
+If you have a traefik deployed and configured in your hydra model, to provide ingress to the admin API run:
+```console
+juju relate traefik-admin hydra:admin-ingress
+```
+
+To provide ingress to the public API run:
+```console
+juju relate traefik-public hydra:public-ingress
+```
+
 ## Testing
 
 Unit and integration tests can be run with tox:
@@ -50,22 +64,22 @@ kubectl exec -it hydra-0 -c hydra -n <model> -- sh
 Create an exemplary client:
 ```shell
 # hydra create client --endpoint http://127.0.0.1:4445/ --name example-client
-CLIENT ID	b55b6857-968e-4fb7-be77-f701ec751405	
-CLIENT SECRET	b3wFYH2N_epJY6C8jCuinBRP60		
-GRANT TYPES	authorization_code			
-RESPONSE TYPES	code					
-SCOPE		offline_access offline openid		
-AUDIENCE						
-REDIRECT URIS	
+CLIENT ID	b55b6857-968e-4fb7-be77-f701ec751405
+CLIENT SECRET	b3wFYH2N_epJY6C8jCuinBRP60
+GRANT TYPES	authorization_code
+RESPONSE TYPES	code
+SCOPE		offline_access offline openid
+AUDIENCE
+REDIRECT URIS
 ```
 
 List the clients:
 ```shell
 # hydra list clients --endpoint http://127.0.0.1:4445/
-CLIENT ID				CLIENT SECRET	GRANT TYPES		RESPONSE TYPES	SCOPE				AUDIENCE	REDIRECT URIS	
-b55b6857-968e-4fb7-be77-f701ec751405			authorization_code	code		offline_access offline openid					
-					
-NEXT PAGE TOKEN					
+CLIENT ID				CLIENT SECRET	GRANT TYPES		RESPONSE TYPES	SCOPE				AUDIENCE	REDIRECT URIS
+b55b6857-968e-4fb7-be77-f701ec751405			authorization_code	code		offline_access offline openid
+
+NEXT PAGE TOKEN
 IS LAST PAGE				true
 ```
 
