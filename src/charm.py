@@ -9,9 +9,13 @@
 import logging
 
 import yaml
-from charms.data_platform_libs.v0.database_requires import DatabaseRequires
+from charms.data_platform_libs.v0.database_requires import (
+    DatabaseCreatedEvent,
+    DatabaseEndpointsChangedEvent,
+    DatabaseRequires,
+)
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
-from ops.charm import ActionEvent, CharmBase
+from ops.charm import ActionEvent, CharmBase, RelationDepartedEvent, WorkloadEvent
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
 from ops.pebble import ChangeError, ExecError, Layer
@@ -128,7 +132,7 @@ class HydraCharm(CharmBase):
             "endpoints": relation_data.get("endpoints"),
         }
 
-    def _run_sql_migration(self, set_timeout) -> None:
+    def _run_sql_migration(self, set_timeout: bool) -> None:
         """Runs a command to create SQL schemas and apply migration plans."""
         process = self._container.exec(
             ["hydra", "migrate", "sql", "-e", "--config", self._hydra_config_path, "--yes"],
@@ -138,7 +142,7 @@ class HydraCharm(CharmBase):
         stdout, _ = process.wait_output()
         logger.info(f"Executing automigration: {stdout}")
 
-    def _on_hydra_pebble_ready(self, event) -> None:
+    def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event Handler for pebble ready event."""
         if not self._container.can_connect():
             event.defer()
@@ -169,7 +173,7 @@ class HydraCharm(CharmBase):
         else:
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
 
-    def _on_database_created(self, event) -> None:
+    def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
         logger.info("Retrieved database details")
 
@@ -211,7 +215,7 @@ class HydraCharm(CharmBase):
         self._container.start(self._container_name)
         self.unit.status = ActiveStatus()
 
-    def _on_database_changed(self, event) -> None:
+    def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
         """Event Handler for database changed event."""
         if not self._container.can_connect():
             event.defer()
@@ -248,7 +252,7 @@ class HydraCharm(CharmBase):
             event.fail("Execution failed, please inspect the logs")
             return
 
-    def _on_database_relation_departed(self, event) -> None:
+    def _on_database_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Event Handler for database relation departed event."""
         logger.error("Missing required relation with postgresql")
         self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
