@@ -23,9 +23,9 @@ def mocked_kubernetes_service_patcher(mocker):
 
 
 @pytest.fixture()
-def mocked_update_container(mocker):
-    mocked_update_container = mocker.patch("charm.HydraCharm._update_container")
-    yield mocked_update_container
+def mocked_sql_migration(mocker):
+    mocked_sql_migration = mocker.patch("charm.HydraCharm._run_sql_migration")
+    yield mocked_sql_migration
 
 
 @pytest.fixture()
