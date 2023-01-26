@@ -8,7 +8,6 @@
 
 import logging
 
-import yaml
 from charms.data_platform_libs.v0.database_requires import (
     DatabaseCreatedEvent,
     DatabaseEndpointsChangedEvent,
@@ -20,6 +19,7 @@ from charms.traefik_k8s.v1.ingress import (
     IngressPerAppRequirer,
     IngressPerAppRevokedEvent,
 )
+from jinja2 import Template
 from ops.charm import ActionEvent, CharmBase, RelationDepartedEvent, WorkloadEvent
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
@@ -41,7 +41,7 @@ class HydraCharm(CharmBase):
         self._container_name = "hydra"
         self._container = self.unit.get_container(self._container_name)
         self._hydra_config_path = "/etc/config/hydra.yaml"
-        self._name = self.model.app.name
+        self._db_name = f"{self.model.name}_{self.app.name}"
         self._db_relation_name = "pg-database"
 
         self.service_patcher = KubernetesServicePatch(
@@ -51,7 +51,7 @@ class HydraCharm(CharmBase):
         self.database = DatabaseRequires(
             self,
             relation_name=self._db_relation_name,
-            database_name=f"{self.model.name}_{self._name}",
+            database_name=self._db_name,
             extra_user_roles=EXTRA_USER_ROLES,
         )
         self.admin_ingress = IngressPerAppRequirer(
@@ -108,31 +108,18 @@ class HydraCharm(CharmBase):
         }
         return Layer(layer_config)
 
-    @property
-    def _config(self) -> str:
-        """Returns Hydra configuration."""
-        try:
-            db_info = self._get_database_relation_info() or {}
-        except IndexError:
-            db_info = {}
+    def _render_conf_file(self) -> None:
+        """Render the Hydra configuration file."""
+        with open("templates/hydra.yaml.j2", "r") as file:
+            template = Template(file.read())
 
-        config = {
-            "dsn": f"postgres://{db_info.get('username')}:{db_info.get('password')}@{db_info.get('endpoints')}/{self.model.name}_{self._name}",
-            "log": {"level": "trace"},
-            "secrets": {
-                "cookie": ["my-cookie-secret"],
-                "system": ["my-system-secret"],
-            },
-            "urls": {
-                "consent": "http://localhost:3000/consent",
-                "login": "http://localhost:3000/login",
-                "self": {
-                    "issuer": "http://localhost:4444/",
-                },
-            },
-        }
-
-        return yaml.dump(config)
+        rendered = template.render(
+            db_info=self._get_database_relation_info(),
+            consent_url="http://localhost:4455/consent",
+            error_url="http://localhost:4455/error",
+            login_url="http://localhost:4455/login",
+        )
+        return rendered
 
     def _get_database_relation_info(self) -> dict:
         relation_id = self.database.relations[0].id
@@ -142,6 +129,7 @@ class HydraCharm(CharmBase):
             "username": relation_data.get("username"),
             "password": relation_data.get("password"),
             "endpoints": relation_data.get("endpoints"),
+            "database_name": self._db_name,
         }
 
     def _run_sql_migration(self, set_timeout: bool) -> None:
@@ -175,7 +163,7 @@ class HydraCharm(CharmBase):
             return
 
         if self.database.is_database_created():
-            self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+            self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
             self._container.start(self._container_name)
             self.unit.status = ActiveStatus()
             return
@@ -214,7 +202,7 @@ class HydraCharm(CharmBase):
             return
 
         logger.info("Updating Hydra config and restarting service")
-        self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
 
         try:
             self._run_sql_migration(set_timeout=True)
@@ -246,7 +234,7 @@ class HydraCharm(CharmBase):
             return
 
         logger.info("Updating Hydra config and restarting service")
-        self._container.push(self._hydra_config_path, self._config, make_dirs=True)
+        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
         self._container.restart(self._container_name)
         self.unit.status = ActiveStatus()
 

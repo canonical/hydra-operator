@@ -1,4 +1,5 @@
 ops==1.5.3
 lightkube
 lightkube-models
+jinja2
 jsonschema

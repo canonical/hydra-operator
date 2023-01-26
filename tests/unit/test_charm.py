@@ -136,15 +136,16 @@ def test_update_container_config(harness, mocked_kubernetes_service_patcher, moc
             "system": ["my-system-secret"],
         },
         "urls": {
-            "consent": "http://localhost:3000/consent",
-            "login": "http://localhost:3000/login",
+            "consent": "http://localhost:4455/consent",
+            "error": "http://localhost:4455/error",
+            "login": "http://localhost:4455/login",
             "self": {
                 "issuer": "http://localhost:4444/",
             },
         },
     }
 
-    assert harness.charm._config == yaml.dump(expected_config)
+    assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
 
 
 @pytest.mark.parametrize("api_type,port", [("admin", "4445"), ("public", "4444")])
