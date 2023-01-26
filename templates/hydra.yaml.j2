@@ -1,0 +1,14 @@
+dsn: postgres://{{ db_info.get('username') }}:{{ db_info.get('password') }}@{{ db_info.get('endpoints') }}/{{ db_info.get('database_name') }}
+log:
+  level: trace
+secrets:
+  cookie:
+  - my-cookie-secret
+  system:
+  - my-system-secret
+urls:
+  consent: {{ consent_url }}
+  error: {{ error_url }}
+  login: {{ login_url }}
+  self:
+    issuer: http://localhost:4444/
