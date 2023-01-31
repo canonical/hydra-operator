@@ -8,7 +8,7 @@
 
 import logging
 
-from charms.data_platform_libs.v0.database_requires import (
+from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
     DatabaseEndpointsChangedEvent,
     DatabaseRequires,
@@ -162,7 +162,7 @@ class HydraCharm(CharmBase):
             self.unit.status = BlockedStatus("Failed to replan, please consult the logs")
             return
 
-        if self.database.is_database_created():
+        if self.database.is_resource_created():
             self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
             self._container.start(self._container_name)
             self.unit.status = ActiveStatus()
