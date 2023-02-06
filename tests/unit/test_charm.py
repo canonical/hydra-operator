@@ -135,12 +135,27 @@ def test_update_container_config(harness, mocked_kubernetes_service_patcher, moc
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
         },
+        "serve": {
+            "admin": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+            "public": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+        },
         "urls": {
-            "consent": "http://localhost:4455/consent",
-            "error": "http://localhost:4455/error",
-            "login": "http://localhost:4455/login",
+            "consent": "http://127.0.0.1:4455/consent",
+            "error": "http://127.0.0.1:4455/error",
+            "login": "http://127.0.0.1:4455/login",
             "self": {
                 "issuer": "http://localhost:4444/",
+                "public": "http://localhost:4444/",
             },
         },
     }

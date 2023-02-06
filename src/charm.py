@@ -7,6 +7,7 @@
 """A Juju charm for Ory Hydra."""
 
 import logging
+from os.path import join
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -20,7 +21,14 @@ from charms.traefik_k8s.v1.ingress import (
     IngressPerAppRevokedEvent,
 )
 from jinja2 import Template
-from ops.charm import ActionEvent, CharmBase, RelationDepartedEvent, WorkloadEvent
+from ops.charm import (
+    ActionEvent,
+    CharmBase,
+    ConfigChangedEvent,
+    HookEvent,
+    RelationDepartedEvent,
+    WorkloadEvent,
+)
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
 from ops.pebble import ChangeError, ExecError, Layer
@@ -68,6 +76,7 @@ class HydraCharm(CharmBase):
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.database.on.database_created, self._on_database_created)
         self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
         self.framework.observe(self.on.run_migration_action, self._on_run_migration)
@@ -115,9 +124,9 @@ class HydraCharm(CharmBase):
 
         rendered = template.render(
             db_info=self._get_database_relation_info(),
-            consent_url="http://localhost:4455/consent",
-            error_url="http://localhost:4455/error",
-            login_url="http://localhost:4455/login",
+            consent_url=join(self.config.get("kratos_ui_url"), "consent"),
+            error_url=join(self.config.get("kratos_ui_url"), "error"),
+            login_url=join(self.config.get("kratos_ui_url"), "login"),
         )
         return rendered
 
@@ -141,6 +150,34 @@ class HydraCharm(CharmBase):
 
         stdout, _ = process.wait_output()
         logger.info(f"Executing automigration: {stdout}")
+
+    def _update_config_restart_service(self, event: HookEvent) -> None:
+        if not self._container.can_connect():
+            event.defer()
+            logger.info("Cannot connect to Hydra container. Deferring the event.")
+            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
+
+        self.unit.status = MaintenanceStatus("Configuring resources")
+
+        try:
+            self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            event.defer()
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            logger.info("Hydra service is absent. Deferring the event.")
+            return
+
+        if self.database.is_resource_created():
+            self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
+            self._container.start(self._container_name)
+            self.unit.status = ActiveStatus()
+            return
+
+        if self.model.relations[self._db_relation_name]:
+            self.unit.status = WaitingStatus("Waiting for database creation")
+        else:
+            self.unit.status = BlockedStatus("Missing required relation with postgresql")
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event Handler for pebble ready event."""
@@ -172,6 +209,10 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting for database creation")
         else:
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
+
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        """Event Handler for config changed event."""
+        self._update_config_restart_service(event)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
@@ -217,26 +258,7 @@ class HydraCharm(CharmBase):
 
     def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
         """Event Handler for database changed event."""
-        if not self._container.can_connect():
-            event.defer()
-            logger.info("Cannot connect to Hydra container. Deferring the event.")
-            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
-            return
-
-        self.unit.status = MaintenanceStatus("Updating database details")
-
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
-            event.defer()
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            logger.info("Hydra service is absent. Deferring database created event.")
-            return
-
-        logger.info("Updating Hydra config and restarting service")
-        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-        self._container.restart(self._container_name)
-        self.unit.status = ActiveStatus()
+        self._update_config_restart_service(event)
 
     def _on_run_migration(self, event: ActionEvent) -> None:
         """Runs the migration as an action response."""
