@@ -154,8 +154,8 @@ def test_update_container_config(harness, mocked_kubernetes_service_patcher, moc
             "error": "http://127.0.0.1:4455/error",
             "login": "http://127.0.0.1:4455/login",
             "self": {
-                "issuer": "http://localhost:4444/",
-                "public": "http://localhost:4444/",
+                "issuer": "http://127.0.0.1:4444/",
+                "public": "http://127.0.0.1:4444/",
             },
         },
     }

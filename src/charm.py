@@ -127,6 +127,9 @@ class HydraCharm(CharmBase):
             consent_url=join(self.config.get("kratos_ui_url"), "consent"),
             error_url=join(self.config.get("kratos_ui_url"), "error"),
             login_url=join(self.config.get("kratos_ui_url"), "login"),
+            hydra_public_url=self.public_ingress.url
+            if self.model.relations["public-ingress"]
+            else "http://127.0.0.1:4444/",
         )
         return rendered
 
@@ -285,9 +288,13 @@ class HydraCharm(CharmBase):
         if self.unit.is_leader():
             logger.info("This app's public ingress URL: %s", event.url)
 
+        self._update_config_restart_service(event)
+
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         if self.unit.is_leader():
             logger.info("This app no longer has ingress")
+
+        self._update_config_restart_service(event)
 
 
 if __name__ == "__main__":
