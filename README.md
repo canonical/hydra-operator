@@ -34,20 +34,6 @@ juju relate postgresql-k8s hydra
 
 You can follow the deployment status with `watch -c juju status --color`.
 
-### Ingress
-
-The Hydra Operator offers integration with the [traefik-k8s-operator](https://github.com/canonical/traefik-k8s-operator) for ingress. Hydra has two APIs which can be exposed through ingress, the public API and the admin API.
-
-If you have a traefik deployed and configured in your hydra model, to provide ingress to the admin API run:
-```console
-juju relate traefik-admin hydra:admin-ingress
-```
-
-To provide ingress to the public API run:
-```console
-juju relate traefik-public hydra:public-ingress
-```
-
 ## Testing
 
 Unit and integration tests can be run with tox:
@@ -85,7 +71,55 @@ IS LAST PAGE				true
 
 ## Relations
 
+### PostgreSQL
+
 This charm requires a relation with [postgresql-k8s-operator](https://github.com/canonical/postgresql-k8s-operator).
+
+### Ingress
+
+The Hydra Operator offers integration with the [traefik-k8s-operator](https://github.com/canonical/traefik-k8s-operator) for ingress.
+Hydra has two APIs which can be exposed through ingress, the public API and the admin API.
+
+If you have a traefik deployed and configured in your hydra model, to provide ingress to the admin API run:
+```console
+juju relate traefik-admin hydra:admin-ingress
+```
+
+To provide ingress to the public API run:
+```console
+juju relate traefik-public hydra:public-ingress
+```
+
+## Integration with Kratos and UI
+
+The following instructions assume that you have deployed `traefik-admin` and `traefik-public` charms and related them to hydra.
+
+If you have deployed [UI charm](https://github.com/canonical/kratos-ui-operator), you can configure it with hydra by providing its URL.
+Note that the UI charm should run behind a proxy.
+```console
+juju config hydra kratos_ui_url=http://{traefik_public_ip}/{model_name}-{kratos_ui_app_name}
+```
+
+In order to integrate hydra with kratos, it needs to be able to access hydra's admin API endpoint.
+To enable that, create a client for kratos capable of requesting `client_credentials` grant:
+```console
+kubectl exec -it hydra-0 -c hydra -n <model> -- hydra create client --grant-type ["client_credentials"] --endpoint http://{traefik_admin_ip}/{model_name}-{hydra_app_name}
+```
+
+Then deploy `kratos-external-idp-integrator` charm and relate it to kratos:
+```console
+juju deploy kratos-external-idp-integrator hydra-integrator --channel edge
+juju relate hydra-integrator kratos
+```
+
+Finally, provide the integrator charm with the client details:
+```console
+juju config hydra-integrator provider=generic client_id=<client-id> client_secret=<client-secret> issuer_url=http://{traefik_public_ip}/{model_name}-{hydra_app_name}
+```
+
+For example, if hydra is running in model named `test` behind a proxy with address `http://10.64.140.46:80/`, the `issuer_url` will be `http://10.64.140.46:80/test-hydra`.
+
+For further guidance on integration on kratos side, visit the [kratos-operator](https://github.com/canonical/kratos-operator#readme) repository.
 
 ## OCI Images
 
