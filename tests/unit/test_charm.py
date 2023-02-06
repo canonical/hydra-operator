@@ -163,6 +163,68 @@ def test_update_container_config(harness, mocked_kubernetes_service_patcher, moc
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
 
 
+def test_on_config_changed_without_service(harness, mocked_kubernetes_service_patcher) -> None:
+    harness.begin()
+    setup_postgres_relation(harness)
+    harness.update_config({"kratos_ui_url": "http://some-url"})
+
+    assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
+
+
+def test_on_config_changed_without_database(harness, mocked_kubernetes_service_patcher) -> None:
+    harness.begin()
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    harness.update_config({"kratos_ui_url": "http://some-url"})
+
+    assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
+
+
+def test_config_updated_on_config_changed(
+    harness, mocked_kubernetes_service_patcher, mocked_sql_migration
+) -> None:
+    harness.begin()
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_postgres_relation(harness)
+
+    harness.update_config({"kratos_ui_url": "http://some-url"})
+
+    expected_config = {
+        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
+        "log": {"level": "trace"},
+        "secrets": {
+            "cookie": ["my-cookie-secret"],
+            "system": ["my-system-secret"],
+        },
+        "serve": {
+            "admin": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+            "public": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+        },
+        "urls": {
+            "consent": "http://some-url/consent",
+            "error": "http://some-url/error",
+            "login": "http://some-url/login",
+            "self": {
+                "issuer": "http://127.0.0.1:4444/",
+                "public": "http://127.0.0.1:4444/",
+            },
+        },
+    }
+
+    assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
+
+
 @pytest.mark.parametrize("api_type,port", [("admin", "4445"), ("public", "4444")])
 def test_ingress_relation_created(
     harness, mocked_kubernetes_service_patcher, mocked_fqdn, api_type, port
@@ -180,3 +242,47 @@ def test_ingress_relation_created(
         "port": port,
         "strip-prefix": "true",
     }
+
+
+def test_config_updated_on_ingress_relation_joined(
+    harness, mocked_kubernetes_service_patcher
+) -> None:
+    harness.begin()
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_postgres_relation(harness)
+    setup_ingress_relation(harness, "public")
+
+    expected_config = {
+        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
+        "log": {"level": "trace"},
+        "secrets": {
+            "cookie": ["my-cookie-secret"],
+            "system": ["my-system-secret"],
+        },
+        "serve": {
+            "admin": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+            "public": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+        },
+        "urls": {
+            "consent": "http://127.0.0.1:4455/consent",
+            "error": "http://127.0.0.1:4455/error",
+            "login": "http://127.0.0.1:4455/login",
+            "self": {
+                "issuer": "http://public:80/testing-hydra",
+                "public": "http://public:80/testing-hydra",
+            },
+        },
+    }
+
+    assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
