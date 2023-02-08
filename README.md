@@ -90,7 +90,7 @@ To provide ingress to the public API run:
 juju relate traefik-public hydra:public-ingress
 ```
 
-### PostgreSQL
+### Kratos
 
 This charm offers integration with [kratos-operator](https://github.com/canonical/kratos-operator).
 
