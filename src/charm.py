@@ -27,11 +27,14 @@ from ops.charm import (
     ConfigChangedEvent,
     HookEvent,
     RelationDepartedEvent,
+    RelationEvent,
     WorkloadEvent,
 )
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
 from ops.pebble import ChangeError, ExecError, Layer
+
+from hydra_endpoints_provider import RELATION_NAME, HydraEndpointsProvider
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +78,16 @@ class HydraCharm(CharmBase):
             strip_prefix=True,
         )
 
+        self.endpoints_provider = HydraEndpointsProvider(self)
+
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(
+            self.on[RELATION_NAME].relation_created, self._on_hydra_relation_changed
+        )
+        self.framework.observe(
+            self.on[RELATION_NAME].relation_changed, self._on_hydra_relation_changed
+        )
         self.framework.observe(self.database.on.database_created, self._on_database_created)
         self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
         self.framework.observe(self.on.run_migration_action, self._on_run_migration)
@@ -182,6 +193,25 @@ class HydraCharm(CharmBase):
         else:
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
 
+    def _send_relation_info(self) -> None:
+        admin_endpoint = (
+            self.admin_ingress.url
+            if self.model.relations["admin-ingress"]
+            else "http://127.0.0.1:4445/",
+        )
+        public_endpoint = (
+            self.public_ingress.url
+            if self.model.relations["public-ingress"]
+            else "http://127.0.0.1:4444/",
+        )
+        self.endpoints_provider.send_endpoint_relation_data(
+            self.app, admin_endpoint[0], public_endpoint[0]
+        )
+
+        logger.info(
+            f"Sent endpoints info: public - {public_endpoint[0]} admin - {admin_endpoint[0]}"
+        )
+
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event Handler for pebble ready event."""
         if not self._container.can_connect():
@@ -216,6 +246,10 @@ class HydraCharm(CharmBase):
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Event Handler for config changed event."""
         self._update_config_restart_service(event)
+
+    def _on_hydra_relation_changed(self, event: RelationEvent) -> None:
+        """Event Handler for relation changed event."""
+        self._send_relation_info()
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
@@ -284,6 +318,8 @@ class HydraCharm(CharmBase):
         if self.unit.is_leader():
             logger.info("This app's admin ingress URL: %s", event.url)
 
+        self._send_relation_info()
+
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         if self.unit.is_leader():
             logger.info("This app's public ingress URL: %s", event.url)
@@ -295,6 +331,7 @@ class HydraCharm(CharmBase):
             logger.info("This app no longer has ingress")
 
         self._update_config_restart_service(event)
+        self._send_relation_info()
 
 
 if __name__ == "__main__":
