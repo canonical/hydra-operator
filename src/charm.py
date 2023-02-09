@@ -156,7 +156,7 @@ class HydraCharm(CharmBase):
             return False
         return service.is_running()
 
-    def _render_conf_file(self) -> None:
+    def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
         with open("templates/hydra.yaml.j2", "r") as file:
             template = Template(file.read())
