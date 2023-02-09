@@ -8,7 +8,7 @@ Python Operator for Ory Hydra - a scalable, security first OAuth 2.0 and OpenID 
 
 ```bash
 juju deploy postgresql-k8s --channel edge --trust
-juju deploy hydra
+juju deploy hydra --trust
 juju relate postgresql-k8s hydra
 ```
 
