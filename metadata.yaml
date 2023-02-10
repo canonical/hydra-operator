@@ -24,6 +24,6 @@ requires:
     interface: ingress
 provides:
   endpoint-info:
-    interface: hydra-endpoints-info
+    interface: hydra_endpoints
     description: |
       Provides API endpoints to a related application

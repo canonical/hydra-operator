@@ -10,7 +10,7 @@ This library provides a Python API for both requesting and providing public and 
 To get started using the library, you need to fetch the library using `charmcraft`.
 ```shell
 cd some-charm
-charmcraft fetch-lib charms.hydra.v0.hydra_endpoints_info
+charmcraft fetch-lib charms.hydra.v0.hydra_endpoints
 ```
 
 To use the library from the provider side (Hydra):
@@ -18,7 +18,7 @@ In the `metadata.yaml` of the charm, add the following:
 ```yaml
 provides:
   endpoint-info:
-    interface: hydra-endpoints-info
+    interface: hydra_endpoints
     description: Provides API endpoints to a related application
 ```
 
@@ -27,12 +27,12 @@ In the `metadata.yaml` of the charm, add the following:
 ```yaml
 requires:
   endpoint-info:
-    interface: hydra-endpoints-info
+    interface: hydra_endpoints
     limit: 1
 ```
 Then, to initialise the library:
 ```python
-from charms.hydra.v0.hydra_endpoints_info import (
+from charms.hydra.v0.hydra_endpoints import (
     HydraEndpointsRelationError,
     HydraEndpointsRequirer,
 )
@@ -68,7 +68,7 @@ from ops.model import Application
 # LIBPATCH = 0
 
 RELATION_NAME = "endpoint-info"
-INTERFACE_NAME = "hydra-endpoints-info"
+INTERFACE_NAME = "hydra_endpoints"
 logger = logging.getLogger(__name__)
 
 
