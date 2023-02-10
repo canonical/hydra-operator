@@ -94,7 +94,7 @@ class HydraEndpointsRequirer(Object):
         self.charm = charm
         self.relation_name = relation_name
 
-    def get_relation_data(self):
+    def get_relation_data(self) -> dict:
         if not self.model.unit.is_leader():
             return
         endpoints = self.model.relations[self.relation_name]
