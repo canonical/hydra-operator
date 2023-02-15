@@ -31,7 +31,7 @@ jobs:
         with:
           provider: microk8s
           channel: 1.25/stable
-          juju-channel: 3.1.0
+          juju-channel: 3.1
           bootstrap-options: '--agent-version=3.1.0'
 
       - name: Run integration tests
