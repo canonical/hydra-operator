@@ -135,9 +135,9 @@ class HydraCharm(CharmBase):
 
         rendered = template.render(
             db_info=self._get_database_relation_info(),
-            consent_url=join(self.config.get("kratos_ui_url"), "consent"),
-            error_url=join(self.config.get("kratos_ui_url"), "error"),
-            login_url=join(self.config.get("kratos_ui_url"), "login"),
+            consent_url=join(self.config.get("login_ui_url"), "consent"),
+            error_url=join(self.config.get("login_ui_url"), "error"),
+            login_url=join(self.config.get("login_ui_url"), "login"),
             hydra_public_url=self.public_ingress.url
             if self.model.relations["public-ingress"]
             else "http://127.0.0.1:4444/",

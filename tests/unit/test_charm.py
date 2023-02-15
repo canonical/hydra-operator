@@ -166,7 +166,7 @@ def test_update_container_config(harness, mocked_kubernetes_service_patcher, moc
 def test_on_config_changed_without_service(harness, mocked_kubernetes_service_patcher) -> None:
     harness.begin()
     setup_postgres_relation(harness)
-    harness.update_config({"kratos_ui_url": "http://some-url"})
+    harness.update_config({"login_ui_url": "http://some-url"})
 
     assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
 
@@ -175,7 +175,7 @@ def test_on_config_changed_without_database(harness, mocked_kubernetes_service_p
     harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    harness.update_config({"kratos_ui_url": "http://some-url"})
+    harness.update_config({"login_ui_url": "http://some-url"})
 
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
@@ -188,7 +188,7 @@ def test_config_updated_on_config_changed(
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_postgres_relation(harness)
 
-    harness.update_config({"kratos_ui_url": "http://some-url"})
+    harness.update_config({"login_ui_url": "http://some-url"})
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",

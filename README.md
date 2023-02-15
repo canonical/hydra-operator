@@ -102,7 +102,7 @@ The following instructions assume that you have deployed `traefik-admin` and `tr
 If you have deployed [Login UI charm](https://github.com/canonical/identity-platform-login-ui), you can configure it with hydra by providing its URL.
 Note that the UI charm should run behind a proxy.
 ```console
-juju config hydra kratos_ui_url=http://{traefik_public_ip}/{model_name}-{kratos_ui_app_name}
+juju config hydra login_ui_url=http://{traefik_public_ip}/{model_name}-{kratos_ui_app_name}
 ```
 
 In order to integrate hydra with kratos, it needs to be able to access hydra's admin API endpoint.
