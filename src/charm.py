@@ -14,6 +14,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
+from charms.hydra.v0.hydra_endpoints import RELATION_NAME, HydraEndpointsProvider
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -33,8 +34,6 @@ from ops.charm import (
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
 from ops.pebble import ChangeError, ExecError, Layer
-
-from hydra_endpoints_provider import RELATION_NAME, HydraEndpointsProvider
 
 logger = logging.getLogger(__name__)
 
