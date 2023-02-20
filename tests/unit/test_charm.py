@@ -151,7 +151,7 @@ def test_update_container_config(harness, mocked_kubernetes_service_patcher, moc
         },
         "urls": {
             "consent": "http://127.0.0.1:4455/consent",
-            "error": "http://127.0.0.1:4455/error",
+            "error": "http://127.0.0.1:4455/oidc_error",
             "login": "http://127.0.0.1:4455/login",
             "self": {
                 "issuer": "http://127.0.0.1:4444/",
@@ -213,7 +213,7 @@ def test_config_updated_on_config_changed(
         },
         "urls": {
             "consent": "http://some-url/consent",
-            "error": "http://some-url/error",
+            "error": "http://some-url/oidc_error",
             "login": "http://some-url/login",
             "self": {
                 "issuer": "http://127.0.0.1:4444/",
@@ -276,7 +276,7 @@ def test_config_updated_on_ingress_relation_joined(
         },
         "urls": {
             "consent": "http://127.0.0.1:4455/consent",
-            "error": "http://127.0.0.1:4455/error",
+            "error": "http://127.0.0.1:4455/oidc_error",
             "login": "http://127.0.0.1:4455/login",
             "self": {
                 "issuer": "http://public:80/testing-hydra",

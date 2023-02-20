@@ -135,7 +135,7 @@ class HydraCharm(CharmBase):
         rendered = template.render(
             db_info=self._get_database_relation_info(),
             consent_url=join(self.config.get("login_ui_url"), "consent"),
-            error_url=join(self.config.get("login_ui_url"), "error"),
+            error_url=join(self.config.get("login_ui_url"), "oidc_error"),
             login_url=join(self.config.get("login_ui_url"), "login"),
             hydra_public_url=self.public_ingress.url
             if self.model.relations["public-ingress"]
@@ -196,12 +196,12 @@ class HydraCharm(CharmBase):
         admin_endpoint = (
             self.admin_ingress.url
             if self.model.relations["admin-ingress"]
-            else "http://127.0.0.1:4445/",
+            else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}",
         )
         public_endpoint = (
             self.public_ingress.url
             if self.model.relations["public-ingress"]
-            else "http://127.0.0.1:4444/",
+            else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}",
         )
         self.endpoints_provider.send_endpoint_relation_data(
             self.app, admin_endpoint[0], public_endpoint[0]

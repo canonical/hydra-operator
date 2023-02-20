@@ -80,7 +80,7 @@ This charm requires a relation with [postgresql-k8s-operator](https://github.com
 The Hydra Operator offers integration with the [traefik-k8s-operator](https://github.com/canonical/traefik-k8s-operator) for ingress.
 Hydra has two APIs which can be exposed through ingress, the public API and the admin API.
 
-If you have a traefik deployed and configured in your hydra model, to provide ingress to the admin API run:
+If you have traefik deployed and configured in your hydra model, to provide ingress to the admin API run:
 ```console
 juju relate traefik-admin hydra:admin-ingress
 ```
@@ -110,24 +110,6 @@ To enable that, relate the two charms:
 ```console
 juju relate kratos hydra
 ```
-
-Next, create a client for kratos capable of requesting `client_credentials` grant:
-```console
-kubectl exec -it hydra-0 -c hydra -n <model> -- hydra create client --grant-type ["client_credentials"] --endpoint http://{traefik_admin_ip}/{model_name}-{hydra_app_name}
-```
-
-Then deploy `kratos-external-idp-integrator` charm and relate it to kratos:
-```console
-juju deploy kratos-external-idp-integrator hydra-integrator --channel edge
-juju relate hydra-integrator kratos
-```
-
-Finally, provide the integrator charm with the client details:
-```console
-juju config hydra-integrator provider=generic client_id=<client-id> client_secret=<client-secret> issuer_url=http://{traefik_public_ip}/{model_name}-{hydra_app_name}
-```
-
-For example, if hydra is running in model named `test` behind a proxy with address `http://10.64.140.46:80/`, the `issuer_url` will be `http://10.64.140.46:80/test-hydra`.
 
 For further guidance on integration on kratos side, visit the [kratos-operator](https://github.com/canonical/kratos-operator#readme) repository.
 
