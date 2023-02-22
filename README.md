@@ -62,3 +62,17 @@ For further guidance on integration on kratos side, visit the [kratos-operator](
 ## OCI Images
 
 The image used by this charm is hosted on [Docker Hub](https://hub.docker.com/r/oryd/hydra) and maintained by Ory.
+
+## Security
+
+Security issues can be reported through [LaunchPad](https://wiki.ubuntu.com/DebuggingSecurity#How%20to%20File). Please do not file GitHub issues about security issues.
+
+## Contributing
+
+Please see the [Juju SDK docs](https://juju.is/docs/sdk) for guidelines on enhancements to this
+charm following best practice guidelines, and
+[CONTRIBUTING.md](https://github.com/canonical/hydra-operator/blob/main/CONTRIBUTING.md) for developer guidance.
+
+## License
+
+The Charmed Hydra Operator is free software, distributed under the Apache Software License, version 2.0. See [LICENSE](https://github.com/canonical/hydra-operator/blob/main/LICENSE) for more information.
