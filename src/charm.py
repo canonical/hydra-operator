@@ -14,7 +14,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
-from charms.hydra.v0.hydra_endpoints import RELATION_NAME, HydraEndpointsProvider
+from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -28,7 +28,6 @@ from ops.charm import (
     ConfigChangedEvent,
     HookEvent,
     RelationDepartedEvent,
-    RelationEvent,
     WorkloadEvent,
 )
 from ops.main import main
@@ -82,10 +81,7 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
-            self.on[RELATION_NAME].relation_created, self._on_hydra_relation_changed
-        )
-        self.framework.observe(
-            self.on[RELATION_NAME].relation_changed, self._on_hydra_relation_changed
+            self.endpoints_provider.on.ready, self._update_hydra_endpoints_relation_data
         )
         self.framework.observe(self.database.on.database_created, self._on_database_created)
         self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
@@ -127,6 +123,15 @@ class HydraCharm(CharmBase):
         }
         return Layer(layer_config)
 
+    @property
+    def _hydra_service_is_running(self) -> bool:
+        try:
+            self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            return False
+
+        return True
+
     def _render_conf_file(self) -> None:
         """Render the Hydra configuration file."""
         with open("templates/hydra.yaml.j2", "r") as file:
@@ -139,7 +144,7 @@ class HydraCharm(CharmBase):
             login_url=join(self.config.get("login_ui_url"), "login"),
             hydra_public_url=self.public_ingress.url
             if self.model.relations["public-ingress"]
-            else "http://127.0.0.1:4444/",
+            else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
         )
         return rendered
 
@@ -164,7 +169,7 @@ class HydraCharm(CharmBase):
         stdout, _ = process.wait_output()
         logger.info(f"Executing automigration: {stdout}")
 
-    def _update_config_restart_service(self, event: HookEvent) -> None:
+    def _handle_status_update_config(self, event: HookEvent) -> None:
         if not self._container.can_connect():
             event.defer()
             logger.info("Cannot connect to Hydra container. Deferring the event.")
@@ -173,9 +178,7 @@ class HydraCharm(CharmBase):
 
         self.unit.status = MaintenanceStatus("Configuring resources")
 
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
+        if not self._hydra_service_is_running:
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             logger.info("Hydra service is absent. Deferring the event.")
@@ -192,7 +195,7 @@ class HydraCharm(CharmBase):
         else:
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
 
-    def _send_relation_info(self) -> None:
+    def _update_hydra_endpoints_relation_data(self, event) -> None:
         admin_endpoint = (
             self.admin_ingress.url
             if self.model.relations["admin-ingress"]
@@ -244,11 +247,7 @@ class HydraCharm(CharmBase):
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Event Handler for config changed event."""
-        self._update_config_restart_service(event)
-
-    def _on_hydra_relation_changed(self, event: RelationEvent) -> None:
-        """Event Handler for relation changed event."""
-        self._send_relation_info()
+        self._handle_status_update_config(event)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
@@ -270,12 +269,10 @@ class HydraCharm(CharmBase):
             "Configuring container and resources for database connection"
         )
 
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
+        if not self._hydra_service_is_running:
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
-            logger.info("Hydra service is absent. Deferring database created event.")
+            logger.info("Hydra service is absent. Deferring the event.")
             return
 
         logger.info("Updating Hydra config and restarting service")
@@ -294,7 +291,7 @@ class HydraCharm(CharmBase):
 
     def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
         """Event Handler for database changed event."""
-        self._update_config_restart_service(event)
+        self._handle_status_update_config(event)
 
     def _on_run_migration(self, event: ActionEvent) -> None:
         """Runs the migration as an action response."""
@@ -317,20 +314,20 @@ class HydraCharm(CharmBase):
         if self.unit.is_leader():
             logger.info("This app's admin ingress URL: %s", event.url)
 
-        self._send_relation_info()
+        self._update_hydra_endpoints_relation_data(event)
 
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         if self.unit.is_leader():
             logger.info("This app's public ingress URL: %s", event.url)
 
-        self._update_config_restart_service(event)
+        self._handle_status_update_config(event)
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         if self.unit.is_leader():
             logger.info("This app no longer has ingress")
 
-        self._update_config_restart_service(event)
-        self._send_relation_info()
+        self._handle_status_update_config(event)
+        self._update_hydra_endpoints_relation_data(event)
 
 
 if __name__ == "__main__":

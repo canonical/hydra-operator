@@ -22,7 +22,7 @@ provides:
     description: Provides API endpoints to a related application
 ```
 
-To use the library from the requirer side (Kratos):
+To use the library from the requirer side:
 In the `metadata.yaml` of the charm, add the following:
 ```yaml
 requires:
@@ -44,7 +44,7 @@ Class SomeCharm(CharmBase):
     def some_event_function():
         # fetch the relation info
         try:
-            hydra_data = self.hydra_endpoints_relation.get_relation_data()
+            hydra_data = self.hydra_endpoints_relation.get_hydra_endpoints()
         except HydraEndpointsRelationError as error:
             ...
 ```
@@ -53,7 +53,13 @@ Class SomeCharm(CharmBase):
 
 import logging
 
-from ops.framework import Object
+from ops.charm import (
+    CharmBase,
+    RelationChangedEvent,
+    RelationCreatedEvent,
+    RelationJoinedEvent,
+)
+from ops.framework import EventBase, EventSource, Object, ObjectEvents
 from ops.model import Application
 
 # The unique Charmhub library identifier, never change it
@@ -71,13 +77,46 @@ INTERFACE_NAME = "hydra_endpoints"
 logger = logging.getLogger(__name__)
 
 
+class RelationReadyEvent(EventBase):
+    """Event to notify the charm that the relation is ready."""
+
+
+class HydraEndpointsProviderEvents(ObjectEvents):
+    """Event descriptor for events raised by `HydraEndpointsProvider`."""
+
+    ready = EventSource(RelationReadyEvent)
+
+
 class HydraEndpointsProvider(Object):
     """Provider side of the endpoint-info relation."""
 
-    def __init__(self, charm, relation_name=RELATION_NAME):
+    on = HydraEndpointsProviderEvents()
+
+    def __init__(self, charm: CharmBase, relation_name: str = RELATION_NAME):
         super().__init__(charm, relation_name)
 
-    def send_endpoint_relation_data(self, charm, admin_endpoint, public_endpoint):
+        self._charm = charm
+        self._relation_name = relation_name
+
+        events = self._charm.on[relation_name]
+        self.framework.observe(events.relation_joined, self._on_provider_endpoint_relation_joined)
+        self.framework.observe(events.relation_created, self._on_provider_endpoint_relation_joined)
+        self.framework.observe(
+            events.relation_changed, self._on_provider_endpoint_relation_changed
+        )
+
+    def _on_provider_endpoint_relation_joined(self, event: RelationJoinedEvent):
+        self.on.ready.emit()
+
+    def _on_provider_endpoint_relation_created(self, event: RelationCreatedEvent):
+        self.on.ready.emit()
+
+    def _on_provider_endpoint_relation_changed(self, event: RelationChangedEvent):
+        self.on.ready.emit()
+
+    def send_endpoint_relation_data(
+        self, charm, admin_endpoint: str, public_endpoint: str
+    ) -> None:
         """Updates relation with endpoints info."""
         relations = self.model.relations[RELATION_NAME]
         for relation in relations:
@@ -107,12 +146,13 @@ class HydraEndpointsRelationDataMissingError(HydraEndpointsRelationError):
 
 class HydraEndpointsRequirer(Object):
     """Requirer side of the endpoint-info relation."""
-    def __init__(self, charm, relation_name: str = RELATION_NAME):
+
+    def __init__(self, charm: CharmBase, relation_name: str = RELATION_NAME):
         super().__init__(charm, relation_name)
         self.charm = charm
         self.relation_name = relation_name
 
-    def get_relation_data(self) -> dict:
+    def get_hydra_endpoints(self) -> dict:
         if not self.model.unit.is_leader():
             return
         endpoints = self.model.relations[self.relation_name]
@@ -128,7 +168,6 @@ class HydraEndpointsRequirer(Object):
         data = endpoints[0].data[remote_app]
 
         if not "admin_endpoint" in data:
-            logger.error("Missing admin endpoint in endpoint-info relation data")
             raise HydraEndpointsRelationDataMissingError(
                 "Missing admin endpoint in endpoint-info relation data"
             )

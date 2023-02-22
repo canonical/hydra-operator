@@ -41,9 +41,8 @@ def setup_ingress_relation(harness, type):
     return relation_id
 
 
-def test_not_leader(harness, mocked_kubernetes_service_patcher):
+def test_not_leader(harness):
     harness.set_leader(False)
-    harness.begin()
     setup_postgres_relation(harness)
 
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -56,18 +55,14 @@ def test_not_leader(harness, mocked_kubernetes_service_patcher):
     ) in harness._get_backend_calls()
 
 
-def test_install_without_relation(harness, mocked_kubernetes_service_patcher):
-    harness.begin()
-
+def test_install_without_relation(harness):
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
 
-def test_install_without_database(harness, mocked_kubernetes_service_patcher):
-    harness.begin()
-
+def test_install_without_database(harness):
     db_relation_id = harness.add_relation("pg-database", "postgresql-k8s")
     harness.add_relation_unit(db_relation_id, "postgresql-k8s/0")
 
@@ -77,9 +72,8 @@ def test_install_without_database(harness, mocked_kubernetes_service_patcher):
     assert harness.charm.unit.status == WaitingStatus("Waiting for database creation")
 
 
-def test_relation_data(harness, mocked_kubernetes_service_patcher, mocked_sql_migration):
+def test_relation_data(harness, mocked_sql_migration):
     db_relation_id = setup_postgres_relation(harness)
-    harness.begin_with_initial_hooks()
 
     relation_data = harness.get_relation_data(db_relation_id, "postgresql-k8s")
     assert relation_data["username"] == "test-username"
@@ -87,18 +81,14 @@ def test_relation_data(harness, mocked_kubernetes_service_patcher, mocked_sql_mi
     assert relation_data["endpoints"] == "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
 
 
-def test_relation_departed(harness, mocked_kubernetes_service_patcher, mocked_sql_migration):
-    harness.begin()
+def test_relation_departed(harness, mocked_sql_migration):
     db_relation_id = setup_postgres_relation(harness)
 
     harness.remove_relation_unit(db_relation_id, "postgresql-k8s/0")
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
 
-def test_pebble_container_can_connect(
-    harness, mocked_kubernetes_service_patcher, mocked_sql_migration
-):
-    harness.begin()
+def test_pebble_container_can_connect(harness, mocked_sql_migration):
     setup_postgres_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, True)
 
@@ -109,10 +99,7 @@ def test_pebble_container_can_connect(
     assert service.is_running()
 
 
-def test_pebble_container_cannot_connect(
-    harness, mocked_kubernetes_service_patcher, mocked_sql_migration
-):
-    harness.begin()
+def test_pebble_container_cannot_connect(harness, mocked_sql_migration):
     setup_postgres_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, False)
 
@@ -121,8 +108,7 @@ def test_pebble_container_cannot_connect(
     assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
 
 
-def test_update_container_config(harness, mocked_kubernetes_service_patcher, mocked_sql_migration):
-    harness.begin()
+def test_update_container_config(harness, mocked_sql_migration):
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_postgres_relation(harness)
 
@@ -163,16 +149,14 @@ def test_update_container_config(harness, mocked_kubernetes_service_patcher, moc
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
 
 
-def test_on_config_changed_without_service(harness, mocked_kubernetes_service_patcher) -> None:
-    harness.begin()
+def test_on_config_changed_without_service(harness) -> None:
     setup_postgres_relation(harness)
     harness.update_config({"login_ui_url": "http://some-url"})
 
     assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
 
 
-def test_on_config_changed_without_database(harness, mocked_kubernetes_service_patcher) -> None:
-    harness.begin()
+def test_on_config_changed_without_database(harness) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     harness.update_config({"login_ui_url": "http://some-url"})
@@ -180,10 +164,7 @@ def test_on_config_changed_without_database(harness, mocked_kubernetes_service_p
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
 
-def test_config_updated_on_config_changed(
-    harness, mocked_kubernetes_service_patcher, mocked_sql_migration
-) -> None:
-    harness.begin()
+def test_config_updated_on_config_changed(harness, mocked_sql_migration) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_postgres_relation(harness)
@@ -226,10 +207,7 @@ def test_config_updated_on_config_changed(
 
 
 @pytest.mark.parametrize("api_type,port", [("admin", "4445"), ("public", "4444")])
-def test_ingress_relation_created(
-    harness, mocked_kubernetes_service_patcher, mocked_fqdn, api_type, port
-) -> None:
-    harness.begin()
+def test_ingress_relation_created(harness, mocked_fqdn, api_type, port) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id = setup_ingress_relation(harness, api_type)
@@ -244,10 +222,7 @@ def test_ingress_relation_created(
     }
 
 
-def test_config_updated_on_ingress_relation_joined(
-    harness, mocked_kubernetes_service_patcher
-) -> None:
-    harness.begin()
+def test_config_updated_on_ingress_relation_joined(harness) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_postgres_relation(harness)
