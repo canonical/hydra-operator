@@ -184,16 +184,18 @@ class HydraCharm(CharmBase):
             logger.info("Hydra service is absent. Deferring the event.")
             return
 
-        if self.database.is_resource_created():
-            self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-            self._container.start(self._container_name)
-            self.unit.status = ActiveStatus()
+        if not self.model.relations[self._db_relation_name]:
+            self.unit.status = BlockedStatus("Missing required relation with postgresql")
             return
 
-        if self.model.relations[self._db_relation_name]:
+        if not self.database.is_resource_created():
             self.unit.status = WaitingStatus("Waiting for database creation")
-        else:
-            self.unit.status = BlockedStatus("Missing required relation with postgresql")
+            event.defer()
+            return
+
+        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
+        self._container.start(self._container_name)
+        self.unit.status = ActiveStatus()
 
     def _update_hydra_endpoints_relation_data(self, event) -> None:
         admin_endpoint = (
@@ -234,16 +236,18 @@ class HydraCharm(CharmBase):
             self.unit.status = BlockedStatus("Failed to replan, please consult the logs")
             return
 
-        if self.database.is_resource_created():
-            self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-            self._container.start(self._container_name)
-            self.unit.status = ActiveStatus()
+        if not self.model.relations[self._db_relation_name]:
+            self.unit.status = BlockedStatus("Missing required relation with postgresql")
             return
 
-        if self.model.relations[self._db_relation_name]:
+        if not self.database.is_resource_created():
             self.unit.status = WaitingStatus("Waiting for database creation")
-        else:
-            self.unit.status = BlockedStatus("Missing required relation with postgresql")
+            event.defer()
+            return
+
+        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
+        self._container.start(self._container_name)
+        self.unit.status = ActiveStatus()
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Event Handler for config changed event."""
