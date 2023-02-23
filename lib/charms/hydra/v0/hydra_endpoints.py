@@ -13,15 +13,6 @@ cd some-charm
 charmcraft fetch-lib charms.hydra.v0.hydra_endpoints
 ```
 
-To use the library from the provider side (Hydra):
-In the `metadata.yaml` of the charm, add the following:
-```yaml
-provides:
-  endpoint-info:
-    interface: hydra_endpoints
-    description: Provides API endpoints to a related application
-```
-
 To use the library from the requirer side:
 In the `metadata.yaml` of the charm, add the following:
 ```yaml
