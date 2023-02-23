@@ -42,6 +42,7 @@ async def test_build_and_deploy(ops_test: OpsTest):
         entity_url=charm,
         resources={"oci-image": hydra_image_path},
         series="jammy",
+        trust=True,
     )
 
     await ops_test.model.add_relation(
