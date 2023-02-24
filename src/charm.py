@@ -28,6 +28,7 @@ from ops.charm import (
     ConfigChangedEvent,
     HookEvent,
     RelationDepartedEvent,
+    RelationEvent,
     WorkloadEvent,
 )
 from ops.main import main
@@ -124,7 +125,7 @@ class HydraCharm(CharmBase):
         return Layer(layer_config)
 
     @property
-    def _hydra_service_is_running(self) -> bool:
+    def _hydra_service_is_created(self) -> bool:
         try:
             self._container.get_service(self._container_name)
         except (ModelError, RuntimeError):
@@ -178,7 +179,19 @@ class HydraCharm(CharmBase):
 
         self.unit.status = MaintenanceStatus("Configuring resources")
 
-        if not self._hydra_service_is_running:
+        current_layer = self._container.get_plan()
+        new_layer = self._hydra_layer
+        if current_layer.services != new_layer.services:
+            self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
+            logger.info("Pebble plan updated with new configuration, replanning")
+            try:
+                self._container.replan()
+            except ChangeError as err:
+                logger.error(str(err))
+                self.unit.status = BlockedStatus("Failed to replan, please consult the logs")
+                return
+
+        if not self._hydra_service_is_created:
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             logger.info("Hydra service is absent. Deferring the event.")
@@ -194,10 +207,10 @@ class HydraCharm(CharmBase):
             return
 
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-        self._container.start(self._container_name)
+        self._container.restart(self._container_name)
         self.unit.status = ActiveStatus()
 
-    def _update_hydra_endpoints_relation_data(self, event) -> None:
+    def _update_hydra_endpoints_relation_data(self, event: RelationEvent) -> None:
         admin_endpoint = (
             self.admin_ingress.url
             if self.model.relations["admin-ingress"]
@@ -218,36 +231,7 @@ class HydraCharm(CharmBase):
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event Handler for pebble ready event."""
-        if not self._container.can_connect():
-            event.defer()
-            logger.info("Cannot connect to Hydra container. Deferring the event.")
-            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
-            return
-
-        self.unit.status = MaintenanceStatus("Configuring resources")
-
-        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-        logger.info("Pebble plan updated with new configuration, replanning")
-
-        try:
-            self._container.replan()
-        except ChangeError as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus("Failed to replan, please consult the logs")
-            return
-
-        if not self.model.relations[self._db_relation_name]:
-            self.unit.status = BlockedStatus("Missing required relation with postgresql")
-            return
-
-        if not self.database.is_resource_created():
-            self.unit.status = WaitingStatus("Waiting for database creation")
-            event.defer()
-            return
-
-        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-        self._container.start(self._container_name)
-        self.unit.status = ActiveStatus()
+        self._handle_status_update_config(event)
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Event Handler for config changed event."""
@@ -273,7 +257,7 @@ class HydraCharm(CharmBase):
             "Configuring container and resources for database connection"
         )
 
-        if not self._hydra_service_is_running:
+        if not self._hydra_service_is_created:
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             logger.info("Hydra service is absent. Deferring the event.")
