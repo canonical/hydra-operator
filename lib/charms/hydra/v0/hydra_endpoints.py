@@ -109,6 +109,9 @@ class HydraEndpointsProvider(Object):
         self, charm, admin_endpoint: str, public_endpoint: str
     ) -> None:
         """Updates relation with endpoints info."""
+        if not self._charm.unit.is_leader():
+            return
+
         relations = self.model.relations[RELATION_NAME]
         for relation in relations:
             relation.data[charm].update(
