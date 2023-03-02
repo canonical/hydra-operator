@@ -203,7 +203,6 @@ class HydraCharm(CharmBase):
 
         if not self.database.is_resource_created():
             self.unit.status = WaitingStatus("Waiting for database creation")
-            event.defer()
             return
 
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
