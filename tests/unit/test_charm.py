@@ -201,6 +201,7 @@ def test_config_updated_on_config_changed(harness, mocked_sql_migration) -> None
                 "public": "http://127.0.0.1:4444/",
             },
         },
+        "webfinger": {"oidc_discovery": {"supported_scope": "openid profile email " "phone"}},
     }
 
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config

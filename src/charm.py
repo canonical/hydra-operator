@@ -6,6 +6,7 @@
 
 """A Juju charm for Ory Hydra."""
 
+import json
 import logging
 from os.path import join
 
@@ -15,6 +16,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
 )
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
+from charms.hydra.v0.oauth import OAuthProvider
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -40,6 +42,7 @@ logger = logging.getLogger(__name__)
 EXTRA_USER_ROLES = "SUPERUSER"
 HYDRA_ADMIN_PORT = 4445
 HYDRA_PUBLIC_PORT = 4444
+SUPPORTED_SCOPES = "openid profile email phone"
 
 
 class HydraCharm(CharmBase):
@@ -76,6 +79,7 @@ class HydraCharm(CharmBase):
             port=HYDRA_PUBLIC_PORT,
             strip_prefix=True,
         )
+        self.oauth = OAuthProvider(self)
 
         self.endpoints_provider = HydraEndpointsProvider(self)
 
@@ -96,6 +100,9 @@ class HydraCharm(CharmBase):
 
         self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
+
+        self.framework.observe(self.oauth.on.client_created, self._on_client_create)
+        self.framework.observe(self.oauth.on.client_config_changed, self._on_client_config_changed)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -146,6 +153,7 @@ class HydraCharm(CharmBase):
             hydra_public_url=self.public_ingress.url
             if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
+            supported_scopes=SUPPORTED_SCOPES,
         )
         return rendered
 
@@ -303,6 +311,7 @@ class HydraCharm(CharmBase):
             logger.info("This app's admin ingress URL: %s", event.url)
 
         self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
 
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         if self.unit.is_leader():
@@ -310,6 +319,7 @@ class HydraCharm(CharmBase):
 
         self._handle_status_update_config(event)
         self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         if self.unit.is_leader():
@@ -317,6 +327,87 @@ class HydraCharm(CharmBase):
 
         self._handle_status_update_config(event)
         self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
+
+    def _on_client_create(self, event):
+        if not self._container.can_connect():
+            event.defer()
+            return
+
+        try:
+            self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            event.defer()
+            return
+
+        client_config = event.to_client_config()
+        client = self._create_client(
+            client_config, metadata=f'{{"relation_id": {event.relation_id}}}'
+        )
+
+        self.oauth.set_client_credentials_in_relation_data(
+            event.relation_id, client["client_id"], client["client_secret"]
+        )
+
+    def _on_client_config_changed(self, event):
+        ...
+        # client_config = event.to_client_config()
+        # self._create_client(client_config, metadata=f"{{\"relation_id\": {event.relation_id}}}")
+
+    def _create_client(self, client_config, metadata=None):
+        cmd = [
+            "hydra",
+            "create",
+            "client",
+            "--endpoint",
+            f"http://localhost:{HYDRA_ADMIN_PORT}",
+            "--format",
+            "json",
+            "--grant-type",
+            ",".join(client_config.grant_types or ["authorization_code", "refresh_token"]),
+            "--response-type",
+            "code",
+        ]
+
+        if client_config.scope:
+            for s in client_config.scope.split(" "):
+                cmd.append("--scope")
+                cmd.append(s)
+        if client_config.redirect_uri:
+            cmd.append("--redirect-uri")
+            cmd.append(client_config.redirect_uri)
+        if metadata:
+            cmd.append("--metadata")
+            if isinstance(metadata, dict):
+                cmd.append(json.dumps(metadata))
+            elif isinstance(metadata, str):
+                cmd.append(metadata)
+            else:
+                raise ValueError("Invalid metadata")
+
+        logger.info(cmd)
+
+        process = self._container.exec(cmd)
+        stdout, _ = process.wait_output()
+        logger.info(f"Created client: {stdout}")
+
+        return json.loads(stdout)
+
+    def _update_endpoint_info(self):
+        if not self.admin_ingress.url or not self.public_ingress.url:
+            return
+
+        self.oauth.set_provider_info_in_relation_data(
+            {
+                "issuer_url": self.public_ingress.url,
+                "authorization_endpoint": join(self.public_ingress.url, "oauth2/auth"),
+                "token_endpoint": join(self.public_ingress.url, "oauth2/token"),
+                "introspection_endpoint": join(self.admin_ingress.url, "admin/oauth2/introspect"),
+                "userinfo_endpoint": join(self.public_ingress.url, "userinfo"),
+                "jwks_endpoint": join(self.public_ingress.url, ".well-known/jwks.json"),
+                "scope": SUPPORTED_SCOPES,
+            }
+        )
 
 
 if __name__ == "__main__":

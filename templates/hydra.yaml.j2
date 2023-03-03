@@ -24,3 +24,7 @@ urls:
   self:
     issuer: {{ hydra_public_url }}
     public: {{ hydra_public_url }}
+
+webfinger:
+  oidc_discovery:
+    supported_scope: {{ supported_scopes }}
