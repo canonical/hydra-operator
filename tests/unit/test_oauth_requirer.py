@@ -1,8 +1,6 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from os.path import join
-
 import pytest
 from charms.hydra.v0.oauth import (
     CLIENT_SECRET_FIELD,

@@ -53,9 +53,12 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass, field
+from typing import Dict, List, Optional
 
 import jsonschema
-from ops.framework import EventBase, EventSource, Object, ObjectEvents
+from ops.charm import CharmBase, RelationChangedEvent, RelationCreatedEvent
+from ops.framework import EventBase, EventSource, Handle, Object, ObjectEvents
+from ops.model import Relation, Secret
 
 # The unique Charmhub library identifier, never change it
 LIBID = "a3a301e325e34aac80a2d633ef61fe97"
@@ -168,13 +171,13 @@ class DataValidationError(RuntimeError):
     """Raised when data validation fails on relation data."""
 
 
-def _load_data(data, schema=None):
+def _load_data(data: Dict, schema: Optional[Dict] = None) -> Dict:
     """Parses nested fields and checks whether `data` matches `schema`."""
     ret = {}
     for k, v in data.items():
         try:
             ret[k] = json.loads(v)
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             ret[k] = v
 
     if schema:
@@ -182,7 +185,7 @@ def _load_data(data, schema=None):
     return ret
 
 
-def _dump_data(data, schema=None):
+def _dump_data(data: Dict, schema: Optional[Dict] = None) -> Dict:
     if schema:
         _validate_data(data, schema)
 
@@ -198,7 +201,7 @@ def _dump_data(data, schema=None):
     return ret
 
 
-def _validate_data(data, schema):
+def _validate_data(data: Dict, schema: Dict) -> None:
     """Checks whether `data` matches `schema`.
 
     Will raise DataValidationError if the data is not valid, else return None.
@@ -219,7 +222,7 @@ class ClientConfig:
     audience: list[str] = field(default_factory=lambda: [])
     token_endpoint_auth_method: str = "client_secret_basic"
 
-    def validate(self):
+    def validate(self) -> None:
         """Validate the client configuration."""
         # Validate redirect_uri
         if not re.match(url_regex, self.redirect_uri):
@@ -243,19 +246,19 @@ class ClientConfig:
 class ClientCredentialsChangedEvent(EventBase):
     """Event to notify the charm that the client credentials changed."""
 
-    def __init__(self, handle, client_id, client_secret_id):
+    def __init__(self, handle: Handle, client_id: str, client_secret_id: str):
         super().__init__(handle)
         self.client_id = client_id
         self.client_secret_id = client_secret_id
 
-    def snapshot(self):
+    def snapshot(self) -> Dict:
         """Save event."""
         return {
             "client_id": self.client_id,
             "client_secret_id": self.client_secret_id,
         }
 
-    def restore(self, snapshot):
+    def restore(self, snapshot: Dict) -> None:
         """Restore event."""
         self.client_id = snapshot["client_id"]
         self.client_secret_id = snapshot["client_secret_id"]
@@ -277,7 +280,12 @@ class OAuthRequirer(Object):
 
     on = OAuthRequirerEvents()
 
-    def __init__(self, charm, client_config=None, relation_name=DEFAULT_RELATION_NAME):
+    def __init__(
+        self,
+        charm: CharmBase,
+        client_config: Optional[ClientConfig] = None,
+        relation_name: str = DEFAULT_RELATION_NAME,
+    ) -> None:
         super().__init__(charm, relation_name)
         self._charm = charm
         self._relation_name = relation_name
@@ -286,13 +294,13 @@ class OAuthRequirer(Object):
         self.framework.observe(events.relation_created, self._on_relation_created_event)
         self.framework.observe(events.relation_changed, self._on_relation_changed_event)
 
-    def _on_relation_created_event(self, event):
+    def _on_relation_created_event(self, event: RelationCreatedEvent) -> None:
         try:
             self._update_relation_data(self._client_config, event.relation.id)
         except Exception:
             pass
 
-    def _on_relation_changed_event(self, event):
+    def _on_relation_changed_event(self, event: RelationChangedEvent) -> None:
         if not self.model.unit.is_leader():
             return
 
@@ -315,9 +323,14 @@ class OAuthRequirer(Object):
             # TODO: log some error?
             pass
 
-    def _update_relation_data(self, client_config, relation_id):
-        if not self.model.unit.is_leader():
+    def _update_relation_data(
+        self, client_config: Optional[ClientConfig], relation_id: int
+    ) -> None:
+        if not self.model.unit.is_leader() or not client_config:
             return
+
+        if not isinstance(client_config, ClientConfig):
+            raise ValueError(f"Unexpected client_config type: {type(client_config)}")
 
         try:
             client_config.validate()
@@ -330,24 +343,31 @@ class OAuthRequirer(Object):
             relation_name=self._relation_name, relation_id=relation_id
         )
 
+        if not relation:
+            return
+
         data = _dump_data(asdict(client_config), OAUTH_REQUIRER_JSON_SCHEMA)
         relation.data[self.model.app].update(data)
 
-    def get_provider_info(self):
+    def get_provider_info(self) -> Optional[Dict]:
+        """Get the provider information from the databag."""
         if len(self.model.relations) == 0:
-            return
+            return None
         relation = self.model.get_relation(self._relation_name)
+        if not relation:
+            return None
 
         data = _load_data(relation.data[relation.app], OAUTH_PROVIDER_JSON_SCHEMA)
         data.pop("client_id", None)
         data.pop("client_secret_id", None)
         return data
 
-    def get_client_secret(self, client_secret_id):
+    def get_client_secret(self, client_secret_id: str) -> Secret:
+        """Get the client_secret."""
         client_secret = self.model.get_secret(id=client_secret_id)
         return client_secret
 
-    def update_client_config(self, client_config):
+    def update_client_config(self, client_config: ClientConfig) -> None:
         """Update the client config stored in the object."""
         self._client_config = client_config
 
@@ -357,14 +377,14 @@ class ClientCreateEvent(EventBase):
 
     def __init__(
         self,
-        handle,
-        redirect_uri,
-        scope,
-        grant_types,
-        audience,
-        token_endpoint_auth_method,
-        relation_id,
-    ):
+        handle: Handle,
+        redirect_uri: str,
+        scope: str,
+        grant_types: List[str],
+        audience: List,
+        token_endpoint_auth_method: str,
+        relation_id: str,
+    ) -> None:
         super().__init__(handle)
         self.redirect_uri = redirect_uri
         self.scope = scope
@@ -373,7 +393,7 @@ class ClientCreateEvent(EventBase):
         self.token_endpoint_auth_method = token_endpoint_auth_method
         self.relation_id = relation_id
 
-    def snapshot(self):
+    def snapshot(self) -> Dict:
         """Save event."""
         return {
             "redirect_uri": self.redirect_uri,
@@ -384,7 +404,7 @@ class ClientCreateEvent(EventBase):
             "relation_id": self.relation_id,
         }
 
-    def restore(self, snapshot):
+    def restore(self, snapshot: Dict) -> None:
         """Restore event."""
         self.redirect_uri = snapshot["redirect_uri"]
         self.scope = snapshot["scope"]
@@ -393,7 +413,7 @@ class ClientCreateEvent(EventBase):
         self.token_endpoint_auth_method = snapshot["token_endpoint_auth_method"]
         self.relation_id = snapshot["relation_id"]
 
-    def to_client_config(self):
+    def to_client_config(self) -> ClientConfig:
         """Convert the event information to a ClientConfig object."""
         return ClientConfig(
             self.redirect_uri,
@@ -409,15 +429,15 @@ class ClientConfigChangedEvent(EventBase):
 
     def __init__(
         self,
-        handle,
-        redirect_uri,
-        scope,
-        grant_types,
-        audience,
-        token_endpoint_auth_method,
-        relation_id,
-        client_id,
-    ):
+        handle: Handle,
+        redirect_uri: str,
+        scope: str,
+        grant_types: List,
+        audience: List,
+        token_endpoint_auth_method: str,
+        relation_id: str,
+        client_id: str,
+    ) -> None:
         super().__init__(handle)
         self.redirect_uri = redirect_uri
         self.scope = scope
@@ -427,7 +447,7 @@ class ClientConfigChangedEvent(EventBase):
         self.relation_id = relation_id
         self.client_id = client_id
 
-    def snapshot(self):
+    def snapshot(self) -> Dict:
         """Save event."""
         return {
             "redirect_uri": self.redirect_uri,
@@ -439,7 +459,7 @@ class ClientConfigChangedEvent(EventBase):
             "client_id": self.client_id,
         }
 
-    def restore(self, snapshot):
+    def restore(self, snapshot: Dict) -> None:
         """Restore event."""
         self.redirect_uri = snapshot["redirect_uri"]
         self.scope = snapshot["scope"]
@@ -449,7 +469,7 @@ class ClientConfigChangedEvent(EventBase):
         self.relation_id = snapshot["relation_id"]
         self.client_id = snapshot["client_id"]
 
-    def to_client_config(self):
+    def to_client_config(self) -> ClientConfig:
         """Convert the event information to a ClientConfig object."""
         return ClientConfig(
             self.redirect_uri,
@@ -472,7 +492,7 @@ class OAuthProvider(Object):
 
     on = OAuthProviderEvents()
 
-    def __init__(self, charm, relation_name=DEFAULT_RELATION_NAME):
+    def __init__(self, charm: CharmBase, relation_name: str = DEFAULT_RELATION_NAME) -> None:
         super().__init__(charm, relation_name)
         self._charm = charm
         self._relation_name = relation_name
@@ -482,7 +502,7 @@ class OAuthProvider(Object):
             self._get_client_config_from_relation_data,
         )
 
-    def _get_client_config_from_relation_data(self, event):
+    def _get_client_config_from_relation_data(self, event: RelationChangedEvent) -> None:
         if not self.model.unit.is_leader():
             return
 
@@ -517,14 +537,14 @@ class OAuthProvider(Object):
                 redirect_uri, scope, grant_types, audience, token_endpoint_auth_method, relation_id
             )
 
-    def _create_juju_secret(self, client_secret, relation):
+    def _create_juju_secret(self, client_secret: str, relation: Relation) -> Secret:
         """Create a juju secret and grant it to a relation."""
         secret = {CLIENT_SECRET_FIELD: client_secret}
         juju_secret = self.model.app.add_secret(secret, label="client_secret")
         juju_secret.grant(relation)
         return juju_secret
 
-    def set_provider_info_in_relation_data(self, data):
+    def set_provider_info_in_relation_data(self, data: Dict) -> None:
         """Put the provider information in the the databag."""
         if not self.model.unit.is_leader():
             return
@@ -532,12 +552,16 @@ class OAuthProvider(Object):
         for relation in self.model.relations[self._relation_name]:
             relation.data[self.model.app].update(_dump_data(data))
 
-    def set_client_credentials_in_relation_data(self, relation_id, client_id, client_secret):
+    def set_client_credentials_in_relation_data(
+        self, relation_id: int, client_id: str, client_secret: str
+    ) -> None:
         """Put the client credentials in the the databag."""
         if not self.model.unit.is_leader():
             return
 
         relation = self.model.get_relation(self._relation_name, relation_id)
+        if not relation:
+            return None
         # TODO: What if we are refreshing the client_secret? We need to add a
         # new revision for that
         secret = self._create_juju_secret(client_secret, relation)

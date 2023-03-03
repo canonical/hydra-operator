@@ -9,6 +9,7 @@
 import json
 import logging
 from os.path import join
+from typing import Dict, Optional, Union
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -16,7 +17,12 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
 )
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
-from charms.hydra.v0.oauth import OAuthProvider
+from charms.hydra.v0.oauth import (
+    ClientConfig,
+    ClientConfigChangedEvent,
+    ClientCreateEvent,
+    OAuthProvider,
+)
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -329,7 +335,7 @@ class HydraCharm(CharmBase):
         self._update_hydra_endpoints_relation_data(event)
         self._update_endpoint_info()
 
-    def _on_client_create(self, event):
+    def _on_client_create(self, event: ClientCreateEvent) -> None:
         if not self._container.can_connect():
             event.defer()
             return
@@ -349,12 +355,14 @@ class HydraCharm(CharmBase):
             event.relation_id, client["client_id"], client["client_secret"]
         )
 
-    def _on_client_config_changed(self, event):
+    def _on_client_config_changed(self, event: ClientConfigChangedEvent) -> None:
         ...
         # client_config = event.to_client_config()
         # self._create_client(client_config, metadata=f"{{\"relation_id\": {event.relation_id}}}")
 
-    def _create_client(self, client_config, metadata=None):
+    def _create_client(
+        self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
+    ):
         cmd = [
             "hydra",
             "create",
@@ -387,8 +395,12 @@ class HydraCharm(CharmBase):
 
         logger.info(cmd)
 
-        process = self._container.exec(cmd)
-        stdout, _ = process.wait_output()
+        try:
+            process = self._container.exec(cmd)
+            stdout, _ = process.wait_output()
+        except ExecError as err:
+            logger.error(f"Failed to create client: {err.exit_code}. Stderr: {err.stderr}")
+            return
         logger.info(f"Created client: {stdout}")
 
         return json.loads(stdout)
