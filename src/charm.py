@@ -308,6 +308,7 @@ class HydraCharm(CharmBase):
             logger.info("This app's public ingress URL: %s", event.url)
 
         self._handle_status_update_config(event)
+        self._update_hydra_endpoints_relation_data(event)
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         if self.unit.is_leader():
