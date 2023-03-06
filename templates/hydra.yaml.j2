@@ -6,9 +6,21 @@ secrets:
   - my-cookie-secret
   system:
   - my-system-secret
+serve:
+  admin:
+    cors:
+      enabled: true
+      allowed_origins:
+        - "*"
+  public:
+    cors:
+      enabled: true
+      allowed_origins:
+        - "*"
 urls:
   consent: {{ consent_url }}
   error: {{ error_url }}
   login: {{ login_url }}
   self:
-    issuer: http://localhost:4444/
+    issuer: {{ hydra_public_url }}
+    public: {{ hydra_public_url }}

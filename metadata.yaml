@@ -22,3 +22,8 @@ requires:
     interface: ingress
   admin-ingress:
     interface: ingress
+provides:
+  endpoint-info:
+    interface: hydra_endpoints
+    description: |
+      Provides API endpoints to a related application

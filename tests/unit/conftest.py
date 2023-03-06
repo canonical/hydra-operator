@@ -8,10 +8,11 @@ from charm import HydraCharm
 
 
 @pytest.fixture()
-def harness():
+def harness(mocked_kubernetes_service_patcher):
     harness = Harness(HydraCharm)
     harness.set_model_name("testing")
     harness.set_leader(True)
+    harness.begin()
     return harness
 
 
