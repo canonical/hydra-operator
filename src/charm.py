@@ -41,7 +41,7 @@ from ops.charm import (
 )
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
-from ops.pebble import ChangeError, ExecError, Layer
+from ops.pebble import ChangeError, ExecError, Layer, Error
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +400,9 @@ class HydraCharm(CharmBase):
             stdout, _ = process.wait_output()
         except ExecError as err:
             logger.error(f"Failed to create client: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the commmand: {e}")
             return
         logger.info(f"Created client: {stdout}")
 
