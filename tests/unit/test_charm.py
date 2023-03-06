@@ -7,7 +7,7 @@ import logging
 import pytest
 import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.pebble import ExecError, Error
+from ops.pebble import Error, ExecError
 
 from tests.unit.test_oauth_requirer import CLIENT_CONFIG
 
@@ -48,7 +48,7 @@ def setup_ingress_relation(harness, type):
 def setup_oauth_relation(harness):
     app_name = "requirer"
     relation_id = harness.add_relation("oauth", app_name)
-    harness.add_relation_unit(relation_id, f"requirer/0")
+    harness.add_relation_unit(relation_id, "requirer/0")
     return relation_id, app_name
 
 
@@ -460,7 +460,9 @@ def test_client_created_event_when_error(harness, mocked_create_client, caplog):
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
     assert len(caplog.record_tuples) == 1
-    assert caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
+    assert (
+        caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
+    )
 
 
 def test_client_config_changed_event(harness, mocked_updated_client):
@@ -468,33 +470,44 @@ def test_client_config_changed_event(harness, mocked_updated_client):
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
-    app_data = harness.get_relation_data(relation_id, harness.charm.app)
+    harness.charm.oauth.on.client_config_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
 
     assert mocked_updated_client.called
 
 
-def test_client_config_changed_event_when_cannot_connect(harness, mocked_kubernetes_service_patcher, mocked_updated_client):
+def test_client_config_changed_event_when_cannot_connect(
+    harness, mocked_kubernetes_service_patcher, mocked_updated_client
+):
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, False)
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+    harness.charm.oauth.on.client_config_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
 
     assert not mocked_updated_client.called
 
 
-def test_client_config_changed_event_when_no_service(harness, mocked_kubernetes_service_patcher, mocked_updated_client):
+def test_client_config_changed_event_when_no_service(
+    harness, mocked_kubernetes_service_patcher, mocked_updated_client
+):
     harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+    harness.charm.oauth.on.client_config_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
 
     assert not mocked_updated_client.called
 
 
-def test_client_config_changed_event_when_exec_error(harness, mocked_kubernetes_service_patcher, mocked_updated_client, caplog):
+def test_client_config_changed_event_when_exec_error(
+    harness, mocked_kubernetes_service_patcher, mocked_updated_client, caplog
+):
     caplog.set_level(logging.ERROR)
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -502,13 +515,17 @@ def test_client_config_changed_event_when_exec_error(harness, mocked_kubernetes_
     mocked_updated_client.side_effect = err
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+    harness.charm.oauth.on.client_config_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
 
     assert len(caplog.record_tuples) == 1
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
 
 
-def test_client_config_changed_event_when_error(harness, mocked_kubernetes_service_patcher, mocked_updated_client, caplog):
+def test_client_config_changed_event_when_error(
+    harness, mocked_kubernetes_service_patcher, mocked_updated_client, caplog
+):
     caplog.set_level(logging.ERROR)
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -516,7 +533,11 @@ def test_client_config_changed_event_when_error(harness, mocked_kubernetes_servi
     mocked_updated_client.side_effect = err
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+    harness.charm.oauth.on.client_config_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
 
     assert len(caplog.record_tuples) == 1
-    assert caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
+    assert (
+        caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
+    )

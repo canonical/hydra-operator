@@ -4,7 +4,13 @@
 from os.path import join
 
 import pytest
-from charms.hydra.v0.oauth import CLIENT_SECRET_FIELD, ClientConfigChangedEvent, ClientCreateEvent, ClientDeletedEvent, OAuthProvider
+from charms.hydra.v0.oauth import (
+    CLIENT_SECRET_FIELD,
+    ClientConfigChangedEvent,
+    ClientCreateEvent,
+    ClientDeletedEvent,
+    OAuthProvider,
+)
 from ops.charm import CharmBase
 from ops.testing import Harness
 

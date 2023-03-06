@@ -242,6 +242,7 @@ class ClientConfig:
             )
 
     def to_dict(self) -> Dict:
+        """Convert object to dict."""
         return {k: v for k, v in asdict(self).items() if v is not None}
 
 
@@ -342,9 +343,7 @@ class OAuthRequirer(Object):
                 relation_name=self._relation_name, relation_id=relation_id
             )
         except TooManyRelatedAppsError:
-            raise RuntimeError(
-                "More than one relations are defined. Please provide a relation_id"
-            )
+            raise RuntimeError("More than one relations are defined. Please provide a relation_id")
 
         if not relation:
             return

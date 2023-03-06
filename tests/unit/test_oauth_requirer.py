@@ -142,7 +142,7 @@ def test_malformed_redirect_url(harness):
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.redirect_uri = "http://some.callback"
 
-    with pytest.raises(ClientConfigError, match=f"Invalid URL {client_config.redirect_uri}") as e:
+    with pytest.raises(ClientConfigError, match=f"Invalid URL {client_config.redirect_uri}"):
         harness.charm.oauth.update_client_config(client_config=client_config)
 
 
@@ -150,7 +150,7 @@ def test_invalid_grant_type(harness):
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.grant_types = ["authorization_code", "token_exchange"]
 
-    with pytest.raises(ClientConfigError, match="Invalid grant_type") as e:
+    with pytest.raises(ClientConfigError, match="Invalid grant_type"):
         harness.charm.oauth.update_client_config(client_config=client_config)
 
 
@@ -158,5 +158,5 @@ def test_invalid_client_authn_method(harness):
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.token_endpoint_auth_method = "private_key_jwt"
 
-    with pytest.raises(ClientConfigError, match="Invalid client auth method") as e:
+    with pytest.raises(ClientConfigError, match="Invalid client auth method"):
         harness.charm.oauth.update_client_config(client_config=client_config)

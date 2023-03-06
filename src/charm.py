@@ -396,7 +396,7 @@ class HydraCharm(CharmBase):
     def _client_config_to_cmd(
         self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
     ) -> List[str]:
-        """Convert a ClientConfig object to a list of parameters"""
+        """Convert a ClientConfig object to a list of parameters."""
         flags = [
             "--grant-type",
             ",".join(client_config.grant_types or ["authorization_code", "refresh_token"]),
@@ -437,7 +437,7 @@ class HydraCharm(CharmBase):
         process = self._container.exec(cmd, timeout=20)
         stdout, stderr = process.wait_output()
         if not stderr:
-            logger.info(f"Successfully created client")
+            logger.info("Successfully created client")
         else:
             logger.info(f"Failed to create client: {stderr}")
         return json.loads(stdout)
