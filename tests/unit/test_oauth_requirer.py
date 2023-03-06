@@ -5,6 +5,7 @@ import pytest
 from charms.hydra.v0.oauth import (
     CLIENT_SECRET_FIELD,
     ClientConfig,
+    ClientConfigError,
     ClientCredentialsChangedEvent,
     OAuthRequirer,
     ProviderConfigChangedEvent,
@@ -48,6 +49,7 @@ class OAuthRequirerCharm(CharmBase):
         self.events = []
         self.framework.observe(self.oauth.on.client_credentials_changed, self._record_event)
         self.framework.observe(self.oauth.on.provider_config_changed, self._record_event)
+        self.framework.observe(self.oauth.on.invalid_client_config, self._record_event)
 
     def _record_event(self, event):
         self.events.append(event)
@@ -62,9 +64,11 @@ def test_data_in_relation_bag_on_joined(harness):
 
 
 def test_client_credentials_changed_emitted_on_client_creation(harness):
+    client_secret = "s3cR#T"
+
     relation_id = harness.add_relation("oauth", "provider")
     harness.add_relation_unit(relation_id, "provider/0")
-    secret_id = harness.add_model_secret("provider", {CLIENT_SECRET_FIELD: "s3cR#T"})
+    secret_id = harness.add_model_secret("provider", {CLIENT_SECRET_FIELD: client_secret})
     harness.grant_secret(secret_id, "requirer-tester")
     harness.update_relation_data(
         relation_id,
@@ -92,6 +96,10 @@ def test_client_credentials_changed_emitted_on_client_creation(harness):
     assert isinstance(event, ClientCredentialsChangedEvent)
     assert event.client_id == "client_id"
     assert event.client_secret_id == secret_id
+
+    secret = harness.charm.oauth.get_client_secret(event.client_secret_id)
+
+    assert secret.get_content() == {"secret": client_secret}
 
 
 def test_provider_endpoints_changed_emitted(harness):
@@ -128,3 +136,27 @@ def test_provider_endpoints_changed_emitted(harness):
         "token_endpoint": "https://example.oidc.com/oauth2/token",
         "userinfo_endpoint": "https://example.oidc.com/userinfo",
     }
+
+
+def test_malformed_redirect_url(harness):
+    client_config = ClientConfig(**CLIENT_CONFIG)
+    client_config.redirect_uri = "http://some.callback"
+
+    with pytest.raises(ClientConfigError, match=f"Invalid URL {client_config.redirect_uri}") as e:
+        harness.charm.oauth.update_client_config(client_config=client_config)
+
+
+def test_invalid_grant_type(harness):
+    client_config = ClientConfig(**CLIENT_CONFIG)
+    client_config.grant_types = ["authorization_code", "token_exchange"]
+
+    with pytest.raises(ClientConfigError, match="Invalid grant_type") as e:
+        harness.charm.oauth.update_client_config(client_config=client_config)
+
+
+def test_invalid_client_authn_method(harness):
+    client_config = ClientConfig(**CLIENT_CONFIG)
+    client_config.token_endpoint_auth_method = "private_key_jwt"
+
+    with pytest.raises(ClientConfigError, match="Invalid client auth method") as e:
+        harness.charm.oauth.update_client_config(client_config=client_config)

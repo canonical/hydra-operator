@@ -9,7 +9,7 @@
 import json
 import logging
 from os.path import join
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -37,11 +37,13 @@ from ops.charm import (
     HookEvent,
     RelationDepartedEvent,
     RelationEvent,
+    RelationCreatedEvent,
+    RelationDepartedEvent,
     WorkloadEvent,
 )
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
-from ops.pebble import ChangeError, ExecError, Layer, Error
+from ops.pebble import ChangeError, Error, ExecError, Layer
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +109,7 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
 
+        self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
         self.framework.observe(self.oauth.on.client_created, self._on_client_create)
         self.framework.observe(self.oauth.on.client_config_changed, self._on_client_config_changed)
 
@@ -335,6 +338,9 @@ class HydraCharm(CharmBase):
         self._update_hydra_endpoints_relation_data(event)
         self._update_endpoint_info()
 
+    def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
+        self._update_endpoint_info()
+
     def _on_client_create(self, event: ClientCreateEvent) -> None:
         if not self._container.can_connect():
             event.defer()
@@ -347,30 +353,51 @@ class HydraCharm(CharmBase):
             return
 
         client_config = event.to_client_config()
-        client = self._create_client(
-            client_config, metadata=f'{{"relation_id": {event.relation_id}}}'
-        )
+        try:
+            client = self._create_client(
+                client_config, metadata=f'{{"relation_id": {event.relation_id}}}'
+            )
+        except ExecError as err:
+            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            logger.info("Deferring the event")
+            event.defer()
+            return
 
         self.oauth.set_client_credentials_in_relation_data(
             event.relation_id, client["client_id"], client["client_secret"]
         )
 
     def _on_client_config_changed(self, event: ClientConfigChangedEvent) -> None:
-        ...
-        # client_config = event.to_client_config()
-        # self._create_client(client_config, metadata=f"{{\"relation_id\": {event.relation_id}}}")
+        if not self._container.can_connect():
+            event.defer()
+            return
 
-    def _create_client(
+        try:
+            self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            event.defer()
+            return
+
+        client_config = event.to_client_config()
+        try:
+            self._update_client(client_config, metadata=f'{{"relation_id": {event.relation_id}}}')
+        except ExecError as err:
+            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            logger.info("Deferring the event")
+            event.defer()
+            return
+
+    def _client_config_to_cmd(
         self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
-    ):
-        cmd = [
-            "hydra",
-            "create",
-            "client",
-            "--endpoint",
-            f"http://localhost:{HYDRA_ADMIN_PORT}",
-            "--format",
-            "json",
+    ) -> List[str]:
+        """Convert a ClientConfig object to a list of parameters"""
+        flags = [
             "--grant-type",
             ",".join(client_config.grant_types or ["authorization_code", "refresh_token"]),
             "--response-type",
@@ -379,33 +406,61 @@ class HydraCharm(CharmBase):
 
         if client_config.scope:
             for s in client_config.scope.split(" "):
-                cmd.append("--scope")
-                cmd.append(s)
+                flags.append("--scope")
+                flags.append(s)
         if client_config.redirect_uri:
-            cmd.append("--redirect-uri")
-            cmd.append(client_config.redirect_uri)
+            flags.append("--redirect-uri")
+            flags.append(client_config.redirect_uri)
         if metadata:
-            cmd.append("--metadata")
+            flags.append("--metadata")
             if isinstance(metadata, dict):
-                cmd.append(json.dumps(metadata))
+                flags.append(json.dumps(metadata))
             elif isinstance(metadata, str):
-                cmd.append(metadata)
+                flags.append(metadata)
             else:
                 raise ValueError("Invalid metadata")
+        return flags
 
-        logger.info(cmd)
+    def _create_client(
+        self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
+    ) -> Optional[str]:
+        cmd = [
+            "hydra",
+            "create",
+            "client",
+            "--endpoint",
+            f"http://localhost:{HYDRA_ADMIN_PORT}",
+            "--format",
+            "json",
+        ] + self._client_config_to_cmd(client_config, metadata)
 
-        try:
-            process = self._container.exec(cmd)
-            stdout, _ = process.wait_output()
-        except ExecError as err:
-            logger.error(f"Failed to create client: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            logger.error(f"Something went wrong when trying to run the commmand: {e}")
-            return
-        logger.info(f"Created client: {stdout}")
+        process = self._container.exec(cmd, timeout=20)
+        stdout, stderr = process.wait_output()
+        if not stderr:
+            logger.info(f"Successfully created client")
+        else:
+            logger.info(f"Failed to create client: {stderr}")
+        return json.loads(stdout)
 
+    def _update_client(
+        self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
+    ) -> Optional[str]:
+        cmd = [
+            "hydra",
+            "update",
+            "client",
+            "--endpoint",
+            f"http://localhost:{HYDRA_ADMIN_PORT}",
+            "--format",
+            "json",
+        ] + self._client_config_to_cmd(client_config, metadata)
+
+        process = self._container.exec(cmd, timeout=20)
+        stdout, stderr = process.wait_output()
+        if not stderr:
+            logger.info(f"Successfully updated client: {client_config.client_id}")
+        else:
+            logger.info(f"Failed to create client: {stderr}")
         return json.loads(stdout)
 
     def _update_endpoint_info(self):

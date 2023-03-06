@@ -1,6 +1,7 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from unittest.mock import MagicMock
 import pytest
 from ops.testing import Harness
 
@@ -27,6 +28,20 @@ def mocked_kubernetes_service_patcher(mocker):
 def mocked_sql_migration(mocker):
     mocked_sql_migration = mocker.patch("charm.HydraCharm._run_sql_migration")
     yield mocked_sql_migration
+
+
+@pytest.fixture()
+def mocked_create_client(mocker):
+    mock = mocker.patch("charm.HydraCharm._create_client")
+    mock.return_value = {"client_id": "client_id", "client_secret": "client_secret"}
+    yield mock
+
+
+@pytest.fixture()
+def mocked_updated_client(mocker):
+    mock = mocker.patch("charm.HydraCharm._update_client")
+    mock.return_value = {"client_id": "client_id", "client_secret": "client_secret"}
+    yield mock
 
 
 @pytest.fixture()

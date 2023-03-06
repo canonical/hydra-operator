@@ -56,9 +56,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
 import jsonschema
-from ops.charm import CharmBase, RelationChangedEvent, RelationCreatedEvent
+from ops.charm import CharmBase, RelationChangedEvent, RelationCreatedEvent, RelationDepartedEvent
 from ops.framework import EventBase, EventSource, Handle, Object, ObjectEvents
-from ops.model import Relation, Secret
+from ops.model import Relation, Secret, TooManyRelatedAppsError
 
 # The unique Charmhub library identifier, never change it
 LIBID = "a3a301e325e34aac80a2d633ef61fe97"
@@ -164,8 +164,6 @@ OAUTH_REQUIRER_JSON_SCHEMA = {
 class ClientConfigError(Exception):
     """Emitted when invalid client config is provided."""
 
-    pass
-
 
 class DataValidationError(RuntimeError):
     """Raised when data validation fails on relation data."""
@@ -221,6 +219,7 @@ class ClientConfig:
     grant_types: list[str]
     audience: list[str] = field(default_factory=lambda: [])
     token_endpoint_auth_method: str = "client_secret_basic"
+    client_id: Optional[str] = None
 
     def validate(self) -> None:
         """Validate the client configuration."""
@@ -241,6 +240,9 @@ class ClientConfig:
                 f"Invalid client auth method {self.token_endpoint_auth_method}, "
                 f"must be one of {ALLOWED_CLIENT_AUTHN_METHODS}"
             )
+
+    def to_dict(self) -> Dict:
+        return {k: v for k, v in asdict(self).items() if v is not None}
 
 
 class ClientCredentialsChangedEvent(EventBase):
@@ -268,11 +270,16 @@ class ProviderConfigChangedEvent(EventBase):
     """Event to notify the charm that the provider's configuration changed."""
 
 
+class InvalidClientConfigEvent(EventBase):
+    """Event to notify the charm that the client configuration is invalid."""
+
+
 class OAuthRequirerEvents(ObjectEvents):
     """Event descriptor for events raised by `OAuthRequirerEvents`."""
 
     client_credentials_changed = EventSource(ClientCredentialsChangedEvent)
     provider_config_changed = EventSource(ProviderConfigChangedEvent)
+    invalid_client_config = EventSource(InvalidClientConfigEvent)
 
 
 class OAuthRequirer(Object):
@@ -297,8 +304,8 @@ class OAuthRequirer(Object):
     def _on_relation_created_event(self, event: RelationCreatedEvent) -> None:
         try:
             self._update_relation_data(self._client_config, event.relation.id)
-        except Exception:
-            pass
+        except ClientConfigError:
+            self.on.invalid_client_config.emit()
 
     def _on_relation_changed_event(self, event: RelationChangedEvent) -> None:
         if not self.model.unit.is_leader():
@@ -317,14 +324,10 @@ class OAuthRequirer(Object):
             self.on.provider_config_changed.emit()
             return
 
-        if client_secret_id:
-            self.on.client_credentials_changed.emit(client_id, client_secret_id)
-        else:
-            # TODO: log some error?
-            pass
+        self.on.client_credentials_changed.emit(client_id, client_secret_id)
 
     def _update_relation_data(
-        self, client_config: Optional[ClientConfig], relation_id: int
+        self, client_config: Optional[ClientConfig], relation_id: Optional[int] = None
     ) -> None:
         if not self.model.unit.is_leader() or not client_config:
             return
@@ -332,21 +335,21 @@ class OAuthRequirer(Object):
         if not isinstance(client_config, ClientConfig):
             raise ValueError(f"Unexpected client_config type: {type(client_config)}")
 
-        try:
-            client_config.validate()
-        except ClientConfigError as e:
-            # emit error event
-            logger.info(e)
-            return
+        client_config.validate()
 
-        relation = self.model.get_relation(
-            relation_name=self._relation_name, relation_id=relation_id
-        )
+        try:
+            relation = self.model.get_relation(
+                relation_name=self._relation_name, relation_id=relation_id
+            )
+        except TooManyRelatedAppsError:
+            raise RuntimeError(
+                "More than one relations are defined. Please provide a relation_id"
+            )
 
         if not relation:
             return
 
-        data = _dump_data(asdict(client_config), OAUTH_REQUIRER_JSON_SCHEMA)
+        data = _dump_data(client_config.to_dict(), OAUTH_REQUIRER_JSON_SCHEMA)
         relation.data[self.model.app].update(data)
 
     def get_provider_info(self) -> Optional[Dict]:
@@ -367,9 +370,10 @@ class OAuthRequirer(Object):
         client_secret = self.model.get_secret(id=client_secret_id)
         return client_secret
 
-    def update_client_config(self, client_config: ClientConfig) -> None:
+    def update_client_config(self, client_config: ClientConfig, relation_id=None) -> None:
         """Update the client config stored in the object."""
         self._client_config = client_config
+        self._update_relation_data(client_config)
 
 
 class ClientCreateEvent(EventBase):
@@ -477,7 +481,28 @@ class ClientConfigChangedEvent(EventBase):
             self.grant_types,
             self.audience,
             self.token_endpoint_auth_method,
+            self.client_id,
         )
+
+
+class ClientDeletedEvent(EventBase):
+    """Event to notify the Provider charm that the client was deleted."""
+
+    def __init__(
+        self,
+        handle: Handle,
+        relation_id: int,
+    ) -> None:
+        super().__init__(handle)
+        self.relation_id = relation_id
+
+    def snapshot(self) -> Dict:
+        """Save event."""
+        return {"relation_id": self.relation_id}
+
+    def restore(self, snapshot: Dict) -> None:
+        """Restore event."""
+        self.relation_id = snapshot["relation_id"]
 
 
 class OAuthProviderEvents(ObjectEvents):
@@ -485,6 +510,7 @@ class OAuthProviderEvents(ObjectEvents):
 
     client_created = EventSource(ClientCreateEvent)
     client_config_changed = EventSource(ClientConfigChangedEvent)
+    client_deleted = EventSource(ClientDeletedEvent)
 
 
 class OAuthProvider(Object):
@@ -497,9 +523,14 @@ class OAuthProvider(Object):
         self._charm = charm
         self._relation_name = relation_name
 
+        events = self._charm.on[relation_name]
         self.framework.observe(
-            charm.on[relation_name].relation_changed,
+            events.relation_changed,
             self._get_client_config_from_relation_data,
+        )
+        self.framework.observe(
+            events.relation_departed,
+            self._on_relation_departed,
         )
 
     def _get_client_config_from_relation_data(self, event: RelationChangedEvent) -> None:
@@ -536,6 +567,10 @@ class OAuthProvider(Object):
             self.on.client_created.emit(
                 redirect_uri, scope, grant_types, audience, token_endpoint_auth_method, relation_id
             )
+
+    def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
+        # Since the relation has been departed the provider needs to delete the client
+        self.on.client_deleted.emit(event.relation.id)
 
     def _create_juju_secret(self, client_secret: str, relation: Relation) -> Secret:
         """Create a juju secret and grant it to a relation."""

@@ -2,10 +2,14 @@
 # See LICENSE file for licensing details.
 
 import json
+import logging
 
 import pytest
 import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
+from ops.pebble import ExecError, Error
+
+from tests.unit.test_oauth_requirer import CLIENT_CONFIG
 
 CONTAINER_NAME = "hydra"
 DB_USERNAME = "test-username"
@@ -39,6 +43,13 @@ def setup_ingress_relation(harness, type):
         {"ingress": json.dumps({"url": f"http://{type}:80/{harness.model.name}-hydra"})},
     )
     return relation_id
+
+
+def setup_oauth_relation(harness):
+    app_name = "requirer"
+    relation_id = harness.add_relation("oauth", app_name)
+    harness.add_relation_unit(relation_id, f"requirer/0")
+    return relation_id, app_name
 
 
 def test_not_leader(harness):
@@ -346,3 +357,166 @@ def test_hydra_endpoint_info_relation_data_with_ingress_relation_data(harness) -
     }
 
     assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
+
+
+def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness):
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_ingress_relation(harness, "public")
+    setup_ingress_relation(harness, "admin")
+
+    harness.begin()
+    relation_id, _ = setup_oauth_relation(harness)
+
+    app_data = harness.get_relation_data(relation_id, harness.charm.app)
+
+    assert app_data == {
+        "authorization_endpoint": "http://public:80/testing-hydra/oauth2/auth",
+        "introspection_endpoint": "http://admin:80/testing-hydra/admin/oauth2/introspect",
+        "issuer_url": "http://public:80/testing-hydra",
+        "jwks_endpoint": "http://public:80/testing-hydra/.well-known/jwks.json",
+        "scope": "openid profile email phone",
+        "token_endpoint": "http://public:80/testing-hydra/oauth2/token",
+        "userinfo_endpoint": "http://public:80/testing-hydra/userinfo",
+    }
+
+
+def test_provider_info_in_databag_when_oauth_relation_then_ingress(harness):
+    harness.begin()
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    setup_ingress_relation(harness, "public")
+    setup_ingress_relation(harness, "admin")
+
+    app_data = harness.get_relation_data(relation_id, harness.charm.app)
+
+    assert app_data == {
+        "authorization_endpoint": "http://public:80/testing-hydra/oauth2/auth",
+        "introspection_endpoint": "http://admin:80/testing-hydra/admin/oauth2/introspect",
+        "issuer_url": "http://public:80/testing-hydra",
+        "jwks_endpoint": "http://public:80/testing-hydra/.well-known/jwks.json",
+        "scope": "openid profile email phone",
+        "token_endpoint": "http://public:80/testing-hydra/oauth2/token",
+        "userinfo_endpoint": "http://public:80/testing-hydra/userinfo",
+    }
+
+
+def test_client_created_event(harness, mocked_create_client):
+    harness.begin_with_initial_hooks()
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+    app_data = harness.get_relation_data(relation_id, harness.charm.app)
+
+    assert mocked_create_client.called
+    assert "client_id" in app_data
+    assert "client_secret_id" in app_data
+
+
+def test_client_created_event_when_cannot_connect(harness, mocked_create_client):
+    harness.begin_with_initial_hooks()
+    harness.set_can_connect(CONTAINER_NAME, False)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert not mocked_create_client.called
+
+
+def test_client_created_event_when_no_service(harness, mocked_create_client):
+    harness.begin()
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert not mocked_create_client.called
+
+
+def test_client_created_event_when_exec_error(harness, mocked_create_client, caplog):
+    caplog.set_level(logging.ERROR)
+    harness.begin_with_initial_hooks()
+    harness.set_can_connect(CONTAINER_NAME, True)
+    err = ExecError(command="hydra client client 1234", exit_code=1, stdout="Out", stderr="Error")
+    mocked_create_client.side_effect = err
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert len(caplog.record_tuples) == 1
+    assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+
+
+def test_client_created_event_when_error(harness, mocked_create_client, caplog):
+    caplog.set_level(logging.ERROR)
+    harness.begin_with_initial_hooks()
+    harness.set_can_connect(CONTAINER_NAME, True)
+    err = Error("Some error")
+    mocked_create_client.side_effect = err
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert len(caplog.record_tuples) == 1
+    assert caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
+
+
+def test_client_config_changed_event(harness, mocked_updated_client):
+    harness.begin_with_initial_hooks()
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+    app_data = harness.get_relation_data(relation_id, harness.charm.app)
+
+    assert mocked_updated_client.called
+
+
+def test_client_config_changed_event_when_cannot_connect(harness, mocked_kubernetes_service_patcher, mocked_updated_client):
+    harness.begin_with_initial_hooks()
+    harness.set_can_connect(CONTAINER_NAME, False)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+
+    assert not mocked_updated_client.called
+
+
+def test_client_config_changed_event_when_no_service(harness, mocked_kubernetes_service_patcher, mocked_updated_client):
+    harness.begin()
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+
+    assert not mocked_updated_client.called
+
+
+def test_client_config_changed_event_when_exec_error(harness, mocked_kubernetes_service_patcher, mocked_updated_client, caplog):
+    caplog.set_level(logging.ERROR)
+    harness.begin_with_initial_hooks()
+    harness.set_can_connect(CONTAINER_NAME, True)
+    err = ExecError(command="hydra client client 1234", exit_code=1, stdout="Out", stderr="Error")
+    mocked_updated_client.side_effect = err
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+
+    assert len(caplog.record_tuples) == 1
+    assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+
+
+def test_client_config_changed_event_when_error(harness, mocked_kubernetes_service_patcher, mocked_updated_client, caplog):
+    caplog.set_level(logging.ERROR)
+    harness.begin_with_initial_hooks()
+    harness.set_can_connect(CONTAINER_NAME, True)
+    err = Error("Some error")
+    mocked_updated_client.side_effect = err
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_config_changed.emit(relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG)
+
+    assert len(caplog.record_tuples) == 1
+    assert caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"

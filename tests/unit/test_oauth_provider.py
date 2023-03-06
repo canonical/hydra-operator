@@ -4,7 +4,7 @@
 from os.path import join
 
 import pytest
-from charms.hydra.v0.oauth import CLIENT_SECRET_FIELD, OAuthProvider
+from charms.hydra.v0.oauth import CLIENT_SECRET_FIELD, ClientConfigChangedEvent, ClientCreateEvent, ClientDeletedEvent, OAuthProvider
 from ops.charm import CharmBase
 from ops.testing import Harness
 
@@ -22,9 +22,13 @@ class OAuthProviderCharm(CharmBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args)
         self.oauth = OAuthProvider(self)
+        self.events = []
 
         self.framework.observe(self.on.oauth_relation_created, self._on_relation_created)
         self.framework.observe(self.oauth.on.client_created, self._on_client_create)
+        self.framework.observe(self.oauth.on.client_created, self._record_event)
+        self.framework.observe(self.oauth.on.client_config_changed, self._record_event)
+        self.framework.observe(self.oauth.on.client_deleted, self._record_event)
 
     def _on_client_create(self, event):
         self.oauth.set_client_credentials_in_relation_data(
@@ -44,6 +48,9 @@ class OAuthProviderCharm(CharmBase):
                 "scope": "openid profile email phone",
             }
         )
+
+    def _record_event(self, event):
+        self.events.append(event)
 
 
 @pytest.fixture()
@@ -89,6 +96,8 @@ def test_client_credentials_in_relation_databag(harness):
     client_secret_id = relation_data.pop("client_secret_id")
     secret = harness.model.get_secret(id=client_secret_id)
 
+    assert len(harness.charm.events) == 1
+    assert isinstance(harness.charm.events[0], ClientCreateEvent)
     assert secret.get_content()[CLIENT_SECRET_FIELD] == CLIENT_SECRET
     assert relation_data == {
         "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
@@ -100,3 +109,61 @@ def test_client_credentials_in_relation_databag(harness):
         "userinfo_endpoint": "https://example.oidc.com/userinfo",
         "client_id": CLIENT_ID,
     }
+
+
+def test_client_config_changed(harness):
+    relation_id = harness.add_relation("oauth", "requirer")
+    harness.add_relation_unit(relation_id, "requirer/0")
+    harness.update_relation_data(
+        relation_id,
+        "requirer",
+        {
+            "redirect_uri": "https://oidc-client.com/callback",
+            "scope": "openid email",
+            "grant_types": '["authorization_code"]',
+            "audience": "[]",
+            "token_endpoint_auth_method": "client_secret_basic",
+        },
+    )
+    assert len(harness.charm.events) == 1
+    assert isinstance(harness.charm.events[0], ClientCreateEvent)
+
+    redirect_uri = "https://oidc-client.com/callback2"
+    harness.update_relation_data(
+        relation_id,
+        "requirer",
+        {
+            "redirect_uri": redirect_uri,
+            "scope": "openid email",
+            "grant_types": '["authorization_code"]',
+            "audience": "[]",
+            "token_endpoint_auth_method": "client_secret_basic",
+        },
+    )
+
+    assert len(harness.charm.events) == 2
+    assert isinstance(harness.charm.events[1], ClientConfigChangedEvent)
+    assert harness.charm.events[1].redirect_uri == redirect_uri
+
+
+def test_client_config_deleted(harness):
+    relation_id = harness.add_relation("oauth", "requirer")
+    harness.add_relation_unit(relation_id, "requirer/0")
+    harness.update_relation_data(
+        relation_id,
+        "requirer",
+        {
+            "redirect_uri": "https://oidc-client.com/callback",
+            "scope": "openid email",
+            "grant_types": '["authorization_code"]',
+            "audience": "[]",
+            "token_endpoint_auth_method": "client_secret_basic",
+        },
+    )
+    assert len(harness.charm.events) == 1
+    assert isinstance(harness.charm.events[0], ClientCreateEvent)
+
+    harness.remove_relation(relation_id)
+
+    assert len(harness.charm.events) == 2
+    assert isinstance(harness.charm.events[1], ClientDeletedEvent)
