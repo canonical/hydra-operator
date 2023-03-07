@@ -18,9 +18,9 @@ from charms.data_platform_libs.v0.data_interfaces import (
 )
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.hydra.v0.oauth import (
+    ClientChangedEvent,
     ClientConfig,
-    ClientConfigChangedEvent,
-    ClientCreateEvent,
+    ClientCreatedEvent,
     OAuthProvider,
 )
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
@@ -119,8 +119,8 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
 
         self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
-        self.framework.observe(self.oauth.on.client_created, self._on_client_create)
-        self.framework.observe(self.oauth.on.client_config_changed, self._on_client_config_changed)
+        self.framework.observe(self.oauth.on.client_created, self._on_client_created)
+        self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -350,7 +350,7 @@ class HydraCharm(CharmBase):
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
         self._update_endpoint_info()
 
-    def _on_client_create(self, event: ClientCreateEvent) -> None:
+    def _on_client_created(self, event: ClientCreatedEvent) -> None:
         if not self._container.can_connect():
             event.defer()
             return
@@ -379,7 +379,7 @@ class HydraCharm(CharmBase):
             event.relation_id, client["client_id"], client["client_secret"]
         )
 
-    def _on_client_config_changed(self, event: ClientConfigChangedEvent) -> None:
+    def _on_client_changed(self, event: ClientChangedEvent) -> None:
         if not self._container.can_connect():
             event.defer()
             return

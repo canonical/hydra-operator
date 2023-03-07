@@ -31,8 +31,7 @@ class SomeCharm(CharmBase):
     # ...
     self.oauth = OAuthRequirer(self, client_config, relation_name=OAUTH)
 
-    self.framework.observe(self.oauth.on.client_credentials_changed, self._configure_application)
-    self.framework.observe(self.oauth.on.provider_config_changed, self._configure_application)
+    self.framework.observe(self.oauth.on.oauth_info_changed, self._configure_application)
     # ...
 
     def _on_ingress_ready(self, event):
@@ -246,8 +245,8 @@ class ClientConfig:
         return {k: v for k, v in asdict(self).items() if v is not None}
 
 
-class ClientCredentialsChangedEvent(EventBase):
-    """Event to notify the charm that the client credentials changed."""
+class OAuthInfoChangedEvent(EventBase):
+    """Event to notify the charm that the information in the databag changed."""
 
     def __init__(self, handle: Handle, client_id: str, client_secret_id: str):
         super().__init__(handle)
@@ -267,19 +266,28 @@ class ClientCredentialsChangedEvent(EventBase):
         self.client_secret_id = snapshot["client_secret_id"]
 
 
-class ProviderConfigChangedEvent(EventBase):
-    """Event to notify the charm that the provider's configuration changed."""
-
-
 class InvalidClientConfigEvent(EventBase):
     """Event to notify the charm that the client configuration is invalid."""
+
+    def __init__(self, handle: Handle, error: str):
+        super().__init__(handle)
+        self.error = error
+
+    def snapshot(self) -> Dict:
+        """Save event."""
+        return {
+            "error": self.error,
+        }
+
+    def restore(self, snapshot: Dict) -> None:
+        """Restore event."""
+        self.error = snapshot["error"]
 
 
 class OAuthRequirerEvents(ObjectEvents):
     """Event descriptor for events raised by `OAuthRequirerEvents`."""
 
-    client_credentials_changed = EventSource(ClientCredentialsChangedEvent)
-    provider_config_changed = EventSource(ProviderConfigChangedEvent)
+    oauth_info_changed = EventSource(OAuthInfoChangedEvent)
     invalid_client_config = EventSource(InvalidClientConfigEvent)
 
 
@@ -305,8 +313,8 @@ class OAuthRequirer(Object):
     def _on_relation_created_event(self, event: RelationCreatedEvent) -> None:
         try:
             self._update_relation_data(self._client_config, event.relation.id)
-        except ClientConfigError:
-            self.on.invalid_client_config.emit()
+        except ClientConfigError as e:
+            self.on.invalid_client_config.emit(e.args[0])
 
     def _on_relation_changed_event(self, event: RelationChangedEvent) -> None:
         if not self.model.unit.is_leader():
@@ -317,15 +325,12 @@ class OAuthRequirer(Object):
         client_id = data.get("client_id")
         client_secret_id = data.get("client_secret_id")
         if not client_id or not client_secret_id:
-            # This probably means that the Provider just set its endpoint,
-            # but it could also mean that the providers removed the client credentials
-            # from the databag. We could do something similar to
-            # data_platform_libs/v0/data_interfaces:diff if we wanted to
-            # TODO
-            self.on.provider_config_changed.emit()
+            # The client credentials are not ready yet, so we do nothing
+            # This could mean that the client credentials were removed from the databag,
+            # but we don't allow that (for now), so we don't have to check for it.
             return
 
-        self.on.client_credentials_changed.emit(client_id, client_secret_id)
+        self.on.oauth_info_changed.emit(client_id, client_secret_id)
 
     def _update_relation_data(
         self, client_config: Optional[ClientConfig], relation_id: Optional[int] = None
@@ -374,10 +379,10 @@ class OAuthRequirer(Object):
     ) -> None:
         """Update the client config stored in the object."""
         self._client_config = client_config
-        self._update_relation_data(client_config)
+        self._update_relation_data(client_config, relation_id=relation_id)
 
 
-class ClientCreateEvent(EventBase):
+class ClientCreatedEvent(EventBase):
     """Event to notify the Provider charm that to create a new client."""
 
     def __init__(
@@ -429,7 +434,7 @@ class ClientCreateEvent(EventBase):
         )
 
 
-class ClientConfigChangedEvent(EventBase):
+class ClientChangedEvent(EventBase):
     """Event to notify the Provider charm that the client config changed."""
 
     def __init__(
@@ -509,8 +514,8 @@ class ClientDeletedEvent(EventBase):
 class OAuthProviderEvents(ObjectEvents):
     """Event descriptor for events raised by `OAuthProviderEvents`."""
 
-    client_created = EventSource(ClientCreateEvent)
-    client_config_changed = EventSource(ClientConfigChangedEvent)
+    client_created = EventSource(ClientCreatedEvent)
+    client_changed = EventSource(ClientChangedEvent)
     client_deleted = EventSource(ClientDeletedEvent)
 
 
@@ -554,7 +559,7 @@ class OAuthProvider(Object):
 
         if client_id:
             # Modify an existing client
-            self.on.client_config_changed.emit(
+            self.on.client_changed.emit(
                 redirect_uri,
                 scope,
                 grant_types,

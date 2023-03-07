@@ -6,9 +6,9 @@ from charms.hydra.v0.oauth import (
     CLIENT_SECRET_FIELD,
     ClientConfig,
     ClientConfigError,
-    ClientCredentialsChangedEvent,
+    InvalidClientConfigEvent,
+    OAuthInfoChangedEvent,
     OAuthRequirer,
-    ProviderConfigChangedEvent,
     _load_data,
 )
 from ops.charm import CharmBase
@@ -31,6 +31,19 @@ def harness():
     harness.cleanup()
 
 
+@pytest.fixture()
+def provider_info():
+    return {
+        "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
+        "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
+        "issuer_url": "https://example.oidc.com",
+        "jwks_endpoint": "https://example.oidc.com/.well-known/jwks.json",
+        "scope": "openid profile email phone",
+        "token_endpoint": "https://example.oidc.com/oauth2/token",
+        "userinfo_endpoint": "https://example.oidc.com/userinfo",
+    }
+
+
 CLIENT_CONFIG = {
     "redirect_uri": "https://example.oidc.client/callback",
     "scope": "openid email offline_access",
@@ -47,8 +60,7 @@ class OAuthRequirerCharm(CharmBase):
         self.oauth = OAuthRequirer(self, client_config=client_config)
 
         self.events = []
-        self.framework.observe(self.oauth.on.client_credentials_changed, self._record_event)
-        self.framework.observe(self.oauth.on.provider_config_changed, self._record_event)
+        self.framework.observe(self.oauth.on.oauth_info_changed, self._record_event)
         self.framework.observe(self.oauth.on.invalid_client_config, self._record_event)
 
     def _record_event(self, event):
@@ -63,37 +75,37 @@ def test_data_in_relation_bag_on_joined(harness):
     assert _load_data(relation_data) == CLIENT_CONFIG
 
 
-def test_client_credentials_changed_emitted_on_client_creation(harness):
+def test_oauth_info_changed_emitted_on_client_creation(harness, provider_info):
     client_secret = "s3cR#T"
 
     relation_id = harness.add_relation("oauth", "provider")
     harness.add_relation_unit(relation_id, "provider/0")
+    harness.update_relation_data(
+        relation_id,
+        "provider",
+        provider_info,
+    )
+    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
+    events = harness.charm.events
+
+    assert _load_data(relation_data) == CLIENT_CONFIG
+    assert len(events) == 0
+
     secret_id = harness.add_model_secret("provider", {CLIENT_SECRET_FIELD: client_secret})
     harness.grant_secret(secret_id, "requirer-tester")
     harness.update_relation_data(
         relation_id,
         "provider",
         {
-            "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
-            "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
-            "issuer_url": "https://example.oidc.com",
-            "jwks_endpoint": "https://example.oidc.com/.well-known/jwks.json",
-            "scope": "openid profile email phone",
-            "token_endpoint": "https://example.oidc.com/oauth2/token",
-            "userinfo_endpoint": "https://example.oidc.com/userinfo",
             "client_id": "client_id",
             "client_secret_id": secret_id,
         },
     )
-    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
-    events = harness.charm.events
 
-    assert _load_data(relation_data) == CLIENT_CONFIG
     assert len(events) == 1
-
     event = events[0]
 
-    assert isinstance(event, ClientCredentialsChangedEvent)
+    assert isinstance(event, OAuthInfoChangedEvent)
     assert event.client_id == "client_id"
     assert event.client_secret_id == secret_id
 
@@ -102,40 +114,16 @@ def test_client_credentials_changed_emitted_on_client_creation(harness):
     assert secret.get_content() == {"secret": client_secret}
 
 
-def test_provider_endpoints_changed_emitted(harness):
+def test_get_provider_info(harness, provider_info):
     relation_id = harness.add_relation("oauth", "provider")
     harness.add_relation_unit(relation_id, "provider/0")
     harness.update_relation_data(
         relation_id,
         "provider",
-        {
-            "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
-            "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
-            "issuer_url": "https://example.oidc.com",
-            "jwks_endpoint": "https://example.oidc.com/.well-known/jwks.json",
-            "scope": "openid profile email phone",
-            "token_endpoint": "https://example.oidc.com/oauth2/token",
-            "userinfo_endpoint": "https://example.oidc.com/userinfo",
-        },
+        provider_info,
     )
-    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
-    events = harness.charm.events
 
-    assert _load_data(relation_data) == CLIENT_CONFIG
-    assert len(events) == 1
-
-    event = events[0]
-
-    assert isinstance(event, ProviderConfigChangedEvent)
-    assert harness.charm.oauth.get_provider_info() == {
-        "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
-        "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
-        "issuer_url": "https://example.oidc.com",
-        "jwks_endpoint": "https://example.oidc.com/.well-known/jwks.json",
-        "scope": "openid profile email phone",
-        "token_endpoint": "https://example.oidc.com/oauth2/token",
-        "userinfo_endpoint": "https://example.oidc.com/userinfo",
-    }
+    assert harness.charm.oauth.get_provider_info() == provider_info
 
 
 def test_malformed_redirect_url(harness):
@@ -160,3 +148,29 @@ def test_invalid_client_authn_method(harness):
 
     with pytest.raises(ClientConfigError, match="Invalid client auth method"):
         harness.charm.oauth.update_client_config(client_config=client_config)
+
+
+class InvalidConfigOAuthRequirerCharm(CharmBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        client_config = ClientConfig(**CLIENT_CONFIG)
+        client_config.redirect_uri = "http://some.callback"
+        self.oauth = OAuthRequirer(self, client_config=client_config)
+
+        self.events = []
+        self.framework.observe(self.oauth.on.oauth_info_changed, self._record_event)
+        self.framework.observe(self.oauth.on.invalid_client_config, self._record_event)
+
+    def _record_event(self, event):
+        self.events.append(event)
+
+
+def test_invalid_client_config(harness):
+    harness = Harness(InvalidConfigOAuthRequirerCharm, meta=METADATA)
+    harness.set_leader(True)
+    harness.begin_with_initial_hooks()
+
+    harness.add_relation("oauth", "provider")
+
+    assert len(harness.charm.events) == 1
+    assert isinstance(harness.charm.events[0], InvalidClientConfigEvent)

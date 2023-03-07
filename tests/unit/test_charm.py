@@ -465,47 +465,47 @@ def test_client_created_event_when_error(harness, mocked_create_client, caplog):
     )
 
 
-def test_client_config_changed_event(harness, mocked_hydra_cli):
+def test_client_changed_event(harness, mocked_hydra_cli):
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(
+    harness.charm.oauth.on.client_changed.emit(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
     assert mocked_hydra_cli.called
 
 
-def test_client_config_changed_event_when_cannot_connect(
+def test_client_changed_event_when_cannot_connect(
     harness, mocked_kubernetes_service_patcher, mocked_hydra_cli
 ):
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, False)
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(
+    harness.charm.oauth.on.client_changed.emit(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
     assert not mocked_hydra_cli.called
 
 
-def test_client_config_changed_event_when_no_service(
+def test_client_changed_event_when_no_service(
     harness, mocked_kubernetes_service_patcher, mocked_hydra_cli
 ):
     harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(
+    harness.charm.oauth.on.client_changed.emit(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
     assert not mocked_hydra_cli.called
 
 
-def test_client_config_changed_event_when_exec_error(
+def test_client_changed_event_when_exec_error(
     harness, mocked_kubernetes_service_patcher, mocked_hydra_cli, caplog
 ):
     caplog.set_level(logging.ERROR)
@@ -515,7 +515,7 @@ def test_client_config_changed_event_when_exec_error(
     mocked_hydra_cli.side_effect = err
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(
+    harness.charm.oauth.on.client_changed.emit(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
@@ -523,7 +523,7 @@ def test_client_config_changed_event_when_exec_error(
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
 
 
-def test_client_config_changed_event_when_error(
+def test_client_changed_event_when_error(
     harness, mocked_kubernetes_service_patcher, mocked_hydra_cli, caplog
 ):
     caplog.set_level(logging.ERROR)
@@ -533,7 +533,7 @@ def test_client_config_changed_event_when_error(
     mocked_hydra_cli.side_effect = err
 
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_config_changed.emit(
+    harness.charm.oauth.on.client_changed.emit(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 

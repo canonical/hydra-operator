@@ -6,8 +6,8 @@ from os.path import join
 import pytest
 from charms.hydra.v0.oauth import (
     CLIENT_SECRET_FIELD,
-    ClientConfigChangedEvent,
-    ClientCreateEvent,
+    ClientChangedEvent,
+    ClientCreatedEvent,
     ClientDeletedEvent,
     OAuthProvider,
 )
@@ -31,12 +31,12 @@ class OAuthProviderCharm(CharmBase):
         self.events = []
 
         self.framework.observe(self.on.oauth_relation_created, self._on_relation_created)
-        self.framework.observe(self.oauth.on.client_created, self._on_client_create)
+        self.framework.observe(self.oauth.on.client_created, self._on_client_created)
         self.framework.observe(self.oauth.on.client_created, self._record_event)
-        self.framework.observe(self.oauth.on.client_config_changed, self._record_event)
+        self.framework.observe(self.oauth.on.client_changed, self._record_event)
         self.framework.observe(self.oauth.on.client_deleted, self._record_event)
 
-    def _on_client_create(self, event):
+    def _on_client_created(self, event):
         self.oauth.set_client_credentials_in_relation_data(
             event.relation_id, CLIENT_ID, CLIENT_SECRET
         )
@@ -103,7 +103,7 @@ def test_client_credentials_in_relation_databag(harness):
     secret = harness.model.get_secret(id=client_secret_id)
 
     assert len(harness.charm.events) == 1
-    assert isinstance(harness.charm.events[0], ClientCreateEvent)
+    assert isinstance(harness.charm.events[0], ClientCreatedEvent)
     assert secret.get_content()[CLIENT_SECRET_FIELD] == CLIENT_SECRET
     assert relation_data == {
         "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
@@ -117,7 +117,7 @@ def test_client_credentials_in_relation_databag(harness):
     }
 
 
-def test_client_config_changed(harness):
+def test_client_changed(harness):
     relation_id = harness.add_relation("oauth", "requirer")
     harness.add_relation_unit(relation_id, "requirer/0")
     harness.update_relation_data(
@@ -132,7 +132,7 @@ def test_client_config_changed(harness):
         },
     )
     assert len(harness.charm.events) == 1
-    assert isinstance(harness.charm.events[0], ClientCreateEvent)
+    assert isinstance(harness.charm.events[0], ClientCreatedEvent)
 
     redirect_uri = "https://oidc-client.com/callback2"
     harness.update_relation_data(
@@ -148,7 +148,7 @@ def test_client_config_changed(harness):
     )
 
     assert len(harness.charm.events) == 2
-    assert isinstance(harness.charm.events[1], ClientConfigChangedEvent)
+    assert isinstance(harness.charm.events[1], ClientChangedEvent)
     assert harness.charm.events[1].redirect_uri == redirect_uri
 
 
@@ -167,7 +167,7 @@ def test_client_config_deleted(harness):
         },
     )
     assert len(harness.charm.events) == 1
-    assert isinstance(harness.charm.events[0], ClientCreateEvent)
+    assert isinstance(harness.charm.events[0], ClientCreatedEvent)
 
     harness.remove_relation(relation_id)
 
