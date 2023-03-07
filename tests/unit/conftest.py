@@ -1,6 +1,8 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
+
 import pytest
 from ops.testing import Harness
 
@@ -30,17 +32,19 @@ def mocked_sql_migration(mocker):
 
 
 @pytest.fixture()
-def mocked_create_client(mocker):
-    mock = mocker.patch("charm.HydraCharm._create_client")
-    mock.return_value = {"client_id": "client_id", "client_secret": "client_secret"}
+def mocked_hydra_cli(mocker):
+    mock = mocker.patch("charm.HydraCLI._run_cmd")
+    mock.return_value = ("{}", None)
     yield mock
 
 
 @pytest.fixture()
-def mocked_updated_client(mocker):
-    mock = mocker.patch("charm.HydraCharm._update_client")
-    mock.return_value = {"client_id": "client_id", "client_secret": "client_secret"}
-    yield mock
+def mocked_create_client(mocked_hydra_cli):
+    mocked_hydra_cli.return_value = (
+        json.dumps({"client_id": "client_id", "client_secret": "client_secret"}),
+        None,
+    )
+    yield mocked_hydra_cli
 
 
 @pytest.fixture()

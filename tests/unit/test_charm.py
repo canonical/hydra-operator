@@ -465,7 +465,7 @@ def test_client_created_event_when_error(harness, mocked_create_client, caplog):
     )
 
 
-def test_client_config_changed_event(harness, mocked_updated_client):
+def test_client_config_changed_event(harness, mocked_hydra_cli):
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
 
@@ -474,11 +474,11 @@ def test_client_config_changed_event(harness, mocked_updated_client):
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
-    assert mocked_updated_client.called
+    assert mocked_hydra_cli.called
 
 
 def test_client_config_changed_event_when_cannot_connect(
-    harness, mocked_kubernetes_service_patcher, mocked_updated_client
+    harness, mocked_kubernetes_service_patcher, mocked_hydra_cli
 ):
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, False)
@@ -488,11 +488,11 @@ def test_client_config_changed_event_when_cannot_connect(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
-    assert not mocked_updated_client.called
+    assert not mocked_hydra_cli.called
 
 
 def test_client_config_changed_event_when_no_service(
-    harness, mocked_kubernetes_service_patcher, mocked_updated_client
+    harness, mocked_kubernetes_service_patcher, mocked_hydra_cli
 ):
     harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -502,17 +502,17 @@ def test_client_config_changed_event_when_no_service(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
-    assert not mocked_updated_client.called
+    assert not mocked_hydra_cli.called
 
 
 def test_client_config_changed_event_when_exec_error(
-    harness, mocked_kubernetes_service_patcher, mocked_updated_client, caplog
+    harness, mocked_kubernetes_service_patcher, mocked_hydra_cli, caplog
 ):
     caplog.set_level(logging.ERROR)
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
     err = ExecError(command="hydra client client 1234", exit_code=1, stdout="Out", stderr="Error")
-    mocked_updated_client.side_effect = err
+    mocked_hydra_cli.side_effect = err
 
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_config_changed.emit(
@@ -524,13 +524,13 @@ def test_client_config_changed_event_when_exec_error(
 
 
 def test_client_config_changed_event_when_error(
-    harness, mocked_kubernetes_service_patcher, mocked_updated_client, caplog
+    harness, mocked_kubernetes_service_patcher, mocked_hydra_cli, caplog
 ):
     caplog.set_level(logging.ERROR)
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
     err = Error("Some error")
-    mocked_updated_client.side_effect = err
+    mocked_hydra_cli.side_effect = err
 
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_config_changed.emit(

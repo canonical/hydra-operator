@@ -369,7 +369,9 @@ class OAuthRequirer(Object):
         client_secret = self.model.get_secret(id=client_secret_id)
         return client_secret
 
-    def update_client_config(self, client_config: ClientConfig, relation_id=None) -> None:
+    def update_client_config(
+        self, client_config: ClientConfig, relation_id: Optional[int] = None
+    ) -> None:
         """Update the client config stored in the object."""
         self._client_config = client_config
         self._update_relation_data(client_config)

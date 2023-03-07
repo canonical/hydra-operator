@@ -42,7 +42,14 @@ from ops.charm import (
     WorkloadEvent,
 )
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
+from ops.model import (
+    ActiveStatus,
+    BlockedStatus,
+    Container,
+    MaintenanceStatus,
+    ModelError,
+    WaitingStatus,
+)
 from ops.pebble import ChangeError, Error, ExecError, Layer
 
 logger = logging.getLogger(__name__)
@@ -64,6 +71,8 @@ class HydraCharm(CharmBase):
         self._hydra_config_path = "/etc/config/hydra.yaml"
         self._db_name = f"{self.model.name}_{self.app.name}"
         self._db_relation_name = "pg-database"
+
+        self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
 
         self.service_patcher = KubernetesServicePatch(
             self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
@@ -354,7 +363,7 @@ class HydraCharm(CharmBase):
 
         client_config = event.to_client_config()
         try:
-            client = self._create_client(
+            client = self._hydra_cli.create_client(
                 client_config, metadata=f'{{"relation_id": {event.relation_id}}}'
             )
         except ExecError as err:
@@ -383,7 +392,9 @@ class HydraCharm(CharmBase):
 
         client_config = event.to_client_config()
         try:
-            self._update_client(client_config, metadata=f'{{"relation_id": {event.relation_id}}}')
+            self._hydra_cli.update_client(
+                client_config, metadata=f'{{"relation_id": {event.relation_id}}}'
+            )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
             return
@@ -392,6 +403,30 @@ class HydraCharm(CharmBase):
             logger.info("Deferring the event")
             event.defer()
             return
+
+    def _update_endpoint_info(self) -> None:
+        if not self.admin_ingress.url or not self.public_ingress.url:
+            return
+
+        self.oauth.set_provider_info_in_relation_data(
+            {
+                "issuer_url": self.public_ingress.url,
+                "authorization_endpoint": join(self.public_ingress.url, "oauth2/auth"),
+                "token_endpoint": join(self.public_ingress.url, "oauth2/token"),
+                "introspection_endpoint": join(self.admin_ingress.url, "admin/oauth2/introspect"),
+                "userinfo_endpoint": join(self.public_ingress.url, "userinfo"),
+                "jwks_endpoint": join(self.public_ingress.url, ".well-known/jwks.json"),
+                "scope": SUPPORTED_SCOPES,
+            }
+        )
+
+
+class HydraCLI:
+    """Helper object for running hydra CLI commands."""
+
+    def __init__(self, hydra_admin_url: str, container: Container):
+        self.hydra_admin_url = hydra_admin_url
+        self.container = container
 
     def _client_config_to_cmd(
         self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
@@ -421,63 +456,55 @@ class HydraCharm(CharmBase):
                 raise ValueError("Invalid metadata")
         return flags
 
-    def _create_client(
-        self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
-    ) -> Optional[str]:
-        cmd = [
+    def _client_cmd_prefix(self, action: str):
+        return [
             "hydra",
-            "create",
+            action,
             "client",
             "--endpoint",
-            f"http://localhost:{HYDRA_ADMIN_PORT}",
+            self.hydra_admin_url,
             "--format",
             "json",
-        ] + self._client_config_to_cmd(client_config, metadata)
+        ]
 
-        process = self._container.exec(cmd, timeout=20)
-        stdout, stderr = process.wait_output()
-        if not stderr:
-            logger.info("Successfully created client")
-        else:
-            logger.info(f"Failed to create client: {stderr}")
-        return json.loads(stdout)
-
-    def _update_client(
+    def create_client(
         self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
-    ) -> Optional[str]:
-        cmd = [
-            "hydra",
-            "update",
-            "client",
-            "--endpoint",
-            f"http://localhost:{HYDRA_ADMIN_PORT}",
-            "--format",
-            "json",
-        ] + self._client_config_to_cmd(client_config, metadata)
-
-        process = self._container.exec(cmd, timeout=20)
-        stdout, stderr = process.wait_output()
-        if not stderr:
-            logger.info(f"Successfully updated client: {client_config.client_id}")
-        else:
-            logger.info(f"Failed to create client: {stderr}")
-        return json.loads(stdout)
-
-    def _update_endpoint_info(self):
-        if not self.admin_ingress.url or not self.public_ingress.url:
-            return
-
-        self.oauth.set_provider_info_in_relation_data(
-            {
-                "issuer_url": self.public_ingress.url,
-                "authorization_endpoint": join(self.public_ingress.url, "oauth2/auth"),
-                "token_endpoint": join(self.public_ingress.url, "oauth2/token"),
-                "introspection_endpoint": join(self.admin_ingress.url, "admin/oauth2/introspect"),
-                "userinfo_endpoint": join(self.public_ingress.url, "userinfo"),
-                "jwks_endpoint": join(self.public_ingress.url, ".well-known/jwks.json"),
-                "scope": SUPPORTED_SCOPES,
-            }
+    ) -> Optional[Dict]:
+        """Create an oauth2 client."""
+        cmd = self._client_cmd_prefix("create") + self._client_config_to_cmd(
+            client_config, metadata
         )
+
+        stdout, _ = self._run_cmd(cmd)
+        logger.info("Successfully created client")
+        return json.loads(stdout)
+
+    def update_client(
+        self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
+    ) -> Optional[Dict]:
+        """Update an oauth2 client."""
+        cmd = self._client_cmd_prefix("update") + self._client_config_to_cmd(
+            client_config, metadata
+        )
+
+        stdout, _ = self._run_cmd(cmd)
+        logger.info(f"Successfully updated client: {client_config.client_id}")
+        return json.loads(stdout)
+
+    def delete_client(
+        self, client_ids: List[str], metadata: Optional[Union[Dict, str]] = None
+    ) -> Optional[Dict]:
+        """Delete one or more oauth2 client."""
+        cmd = self._client_cmd_prefix("delete") + client_ids
+
+        stdout, _ = self._run_cmd(cmd)
+        logger.info(f"Successfully deleted clients: {stdout}")
+        return json.loads(stdout)
+
+    def _run_cmd(self, cmd, timeout=20):
+        process = self.container.exec(cmd, timeout=timeout)
+        stdout, stderr = process.wait_output()
+        return stdout, stderr
 
 
 if __name__ == "__main__":
