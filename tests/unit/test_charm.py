@@ -477,9 +477,7 @@ def test_client_changed_event(harness, mocked_hydra_cli):
     assert mocked_hydra_cli.called
 
 
-def test_client_changed_event_when_cannot_connect(
-    harness, mocked_kubernetes_service_patcher, mocked_hydra_cli
-):
+def test_client_changed_event_when_cannot_connect(harness, mocked_hydra_cli):
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, False)
 
@@ -491,9 +489,7 @@ def test_client_changed_event_when_cannot_connect(
     assert not mocked_hydra_cli.called
 
 
-def test_client_changed_event_when_no_service(
-    harness, mocked_kubernetes_service_patcher, mocked_hydra_cli
-):
+def test_client_changed_event_when_no_service(harness, mocked_hydra_cli):
     harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
 
@@ -505,9 +501,7 @@ def test_client_changed_event_when_no_service(
     assert not mocked_hydra_cli.called
 
 
-def test_client_changed_event_when_exec_error(
-    harness, mocked_kubernetes_service_patcher, mocked_hydra_cli, caplog
-):
+def test_client_changed_event_when_exec_error(harness, mocked_hydra_cli, caplog):
     caplog.set_level(logging.ERROR)
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -523,9 +517,7 @@ def test_client_changed_event_when_exec_error(
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
 
 
-def test_client_changed_event_when_error(
-    harness, mocked_kubernetes_service_patcher, mocked_hydra_cli, caplog
-):
+def test_client_changed_event_when_error(harness, mocked_hydra_cli, caplog):
     caplog.set_level(logging.ERROR)
     harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)

@@ -35,10 +35,9 @@ from ops.charm import (
     CharmBase,
     ConfigChangedEvent,
     HookEvent,
-    RelationDepartedEvent,
-    RelationEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
+    RelationEvent,
     WorkloadEvent,
 )
 from ops.main import main
