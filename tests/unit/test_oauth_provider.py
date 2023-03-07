@@ -44,15 +44,13 @@ class OAuthProviderCharm(CharmBase):
     def _on_relation_created(self, _):
         public_ingress = "https://example.oidc.com"
         self.oauth.set_provider_info_in_relation_data(
-            {
-                "issuer_url": public_ingress,
-                "authorization_endpoint": join(public_ingress, "oauth2/auth"),
-                "token_endpoint": join(public_ingress, "oauth2/token"),
-                "introspection_endpoint": join(public_ingress, "admin/oauth2/introspect"),
-                "userinfo_endpoint": join(public_ingress, "userinfo"),
-                "jwks_endpoint": join(public_ingress, ".well-known/jwks.json"),
-                "scope": "openid profile email phone",
-            }
+            issuer_url=public_ingress,
+            authorization_endpoint=join(public_ingress, "oauth2/auth"),
+            token_endpoint=join(public_ingress, "oauth2/token"),
+            introspection_endpoint=join(public_ingress, "admin/oauth2/introspect"),
+            userinfo_endpoint=join(public_ingress, "userinfo"),
+            jwks_endpoint=join(public_ingress, ".well-known/jwks.json"),
+            scope="openid profile email phone",
         )
 
     def _record_event(self, event):

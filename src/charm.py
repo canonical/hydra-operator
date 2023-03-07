@@ -408,15 +408,13 @@ class HydraCharm(CharmBase):
             return
 
         self.oauth.set_provider_info_in_relation_data(
-            {
-                "issuer_url": self.public_ingress.url,
-                "authorization_endpoint": join(self.public_ingress.url, "oauth2/auth"),
-                "token_endpoint": join(self.public_ingress.url, "oauth2/token"),
-                "introspection_endpoint": join(self.admin_ingress.url, "admin/oauth2/introspect"),
-                "userinfo_endpoint": join(self.public_ingress.url, "userinfo"),
-                "jwks_endpoint": join(self.public_ingress.url, ".well-known/jwks.json"),
-                "scope": SUPPORTED_SCOPES,
-            }
+            issuer_url=self.public_ingress.url,
+            authorization_endpoint=join(self.public_ingress.url, "oauth2/auth"),
+            token_endpoint=join(self.public_ingress.url, "oauth2/token"),
+            introspection_endpoint=join(self.admin_ingress.url, "admin/oauth2/introspect"),
+            userinfo_endpoint=join(self.public_ingress.url, "userinfo"),
+            jwks_endpoint=join(self.public_ingress.url, ".well-known/jwks.json"),
+            scope=SUPPORTED_SCOPES,
         )
 
 

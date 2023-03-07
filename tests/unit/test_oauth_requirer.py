@@ -75,9 +75,7 @@ def test_data_in_relation_bag_on_joined(harness):
     assert _load_data(relation_data) == CLIENT_CONFIG
 
 
-def test_oauth_info_changed_emitted_on_client_creation(harness, provider_info):
-    client_secret = "s3cR#T"
-
+def test_no_event_emitted_when_provider_info_available_but_not_client_id(harness, provider_info):
     relation_id = harness.add_relation("oauth", "provider")
     harness.add_relation_unit(relation_id, "provider/0")
     harness.update_relation_data(
@@ -91,6 +89,17 @@ def test_oauth_info_changed_emitted_on_client_creation(harness, provider_info):
     assert _load_data(relation_data) == CLIENT_CONFIG
     assert len(events) == 0
 
+
+def test_oauth_info_changed_emitted_on_client_creation(harness, provider_info):
+    client_secret = "s3cR#T"
+
+    relation_id = harness.add_relation("oauth", "provider")
+    harness.add_relation_unit(relation_id, "provider/0")
+    harness.update_relation_data(
+        relation_id,
+        "provider",
+        provider_info,
+    )
     secret_id = harness.add_model_secret("provider", {CLIENT_SECRET_FIELD: client_secret})
     harness.grant_secret(secret_id, "requirer-tester")
     harness.update_relation_data(
@@ -102,7 +111,10 @@ def test_oauth_info_changed_emitted_on_client_creation(harness, provider_info):
         },
     )
 
+    events = harness.charm.events
+
     assert len(events) == 1
+
     event = events[0]
 
     assert isinstance(event, OAuthInfoChangedEvent)
@@ -124,6 +136,25 @@ def test_get_provider_info(harness, provider_info):
     )
 
     assert harness.charm.oauth.get_provider_info() == provider_info
+
+
+def test_get_client_credentials(harness, provider_info):
+    client_id = "client_id"
+    client_secret = "s3cR#T"
+    relation_id = harness.add_relation("oauth", "provider")
+    harness.add_relation_unit(relation_id, "provider/0")
+    secret_id = harness.add_model_secret("provider", {CLIENT_SECRET_FIELD: client_secret})
+    harness.grant_secret(secret_id, "requirer-tester")
+
+    harness.update_relation_data(
+        relation_id,
+        "provider",
+        dict(client_id=client_id, client_secret_id=secret_id, **provider_info),
+    )
+
+    assert harness.charm.oauth.get_client_credentials() == dict(
+        client_id=client_id, client_secret=client_secret
+    )
 
 
 def test_malformed_redirect_url(harness):
@@ -165,12 +196,17 @@ class InvalidConfigOAuthRequirerCharm(CharmBase):
         self.events.append(event)
 
 
-def test_invalid_client_config(harness):
+@pytest.fixture()
+def harness_invalid_config():
     harness = Harness(InvalidConfigOAuthRequirerCharm, meta=METADATA)
     harness.set_leader(True)
     harness.begin_with_initial_hooks()
+    yield harness
+    harness.cleanup()
 
-    harness.add_relation("oauth", "provider")
 
-    assert len(harness.charm.events) == 1
-    assert isinstance(harness.charm.events[0], InvalidClientConfigEvent)
+def test_invalid_client_config(harness_invalid_config):
+    harness_invalid_config.add_relation("oauth", "provider")
+
+    assert len(harness_invalid_config.charm.events) == 1
+    assert isinstance(harness_invalid_config.charm.events[0], InvalidClientConfigEvent)

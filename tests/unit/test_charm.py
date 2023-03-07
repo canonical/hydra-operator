@@ -155,6 +155,7 @@ def test_update_container_config(harness, mocked_sql_migration):
                 "public": "http://127.0.0.1:4444/",
             },
         },
+        "webfinger": {"oidc_discovery": {"supported_scope": "openid profile email phone"}},
     }
 
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
@@ -212,7 +213,7 @@ def test_config_updated_on_config_changed(harness, mocked_sql_migration) -> None
                 "public": "http://127.0.0.1:4444/",
             },
         },
-        "webfinger": {"oidc_discovery": {"supported_scope": "openid profile email " "phone"}},
+        "webfinger": {"oidc_discovery": {"supported_scope": "openid profile email phone"}},
     }
 
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
@@ -270,6 +271,7 @@ def test_config_updated_on_ingress_relation_joined(harness) -> None:
                 "public": "http://public:80/testing-hydra",
             },
         },
+        "webfinger": {"oidc_discovery": {"supported_scope": "openid profile email phone"}},
     }
 
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
@@ -342,7 +344,7 @@ def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness
     assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
 
 
-def test_hydra_endpoint_info_relation_data_with_ingress_relation_data(harness) -> None:
+def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness):
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_ingress_relation(harness, "public")
@@ -382,7 +384,6 @@ def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness):
 
 
 def test_provider_info_in_databag_when_oauth_relation_then_ingress(harness):
-    harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -403,8 +404,8 @@ def test_provider_info_in_databag_when_oauth_relation_then_ingress(harness):
 
 
 def test_client_created_event(harness, mocked_create_client):
-    harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
@@ -416,7 +417,6 @@ def test_client_created_event(harness, mocked_create_client):
 
 
 def test_client_created_event_when_cannot_connect(harness, mocked_create_client):
-    harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, False)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -426,7 +426,6 @@ def test_client_created_event_when_cannot_connect(harness, mocked_create_client)
 
 
 def test_client_created_event_when_no_service(harness, mocked_create_client):
-    harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -437,8 +436,8 @@ def test_client_created_event_when_no_service(harness, mocked_create_client):
 
 def test_client_created_event_when_exec_error(harness, mocked_create_client, caplog):
     caplog.set_level(logging.ERROR)
-    harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = ExecError(command="hydra client client 1234", exit_code=1, stdout="Out", stderr="Error")
     mocked_create_client.side_effect = err
 
@@ -451,8 +450,8 @@ def test_client_created_event_when_exec_error(harness, mocked_create_client, cap
 
 def test_client_created_event_when_error(harness, mocked_create_client, caplog):
     caplog.set_level(logging.ERROR)
-    harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = Error("Some error")
     mocked_create_client.side_effect = err
 
@@ -466,8 +465,8 @@ def test_client_created_event_when_error(harness, mocked_create_client, caplog):
 
 
 def test_client_changed_event(harness, mocked_hydra_cli):
-    harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_changed.emit(
@@ -478,7 +477,6 @@ def test_client_changed_event(harness, mocked_hydra_cli):
 
 
 def test_client_changed_event_when_cannot_connect(harness, mocked_hydra_cli):
-    harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, False)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -490,7 +488,6 @@ def test_client_changed_event_when_cannot_connect(harness, mocked_hydra_cli):
 
 
 def test_client_changed_event_when_no_service(harness, mocked_hydra_cli):
-    harness.begin()
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -503,8 +500,8 @@ def test_client_changed_event_when_no_service(harness, mocked_hydra_cli):
 
 def test_client_changed_event_when_exec_error(harness, mocked_hydra_cli, caplog):
     caplog.set_level(logging.ERROR)
-    harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = ExecError(command="hydra client client 1234", exit_code=1, stdout="Out", stderr="Error")
     mocked_hydra_cli.side_effect = err
 
@@ -519,8 +516,8 @@ def test_client_changed_event_when_exec_error(harness, mocked_hydra_cli, caplog)
 
 def test_client_changed_event_when_error(harness, mocked_hydra_cli, caplog):
     caplog.set_level(logging.ERROR)
-    harness.begin_with_initial_hooks()
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = Error("Some error")
     mocked_hydra_cli.side_effect = err
 

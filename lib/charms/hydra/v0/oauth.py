@@ -325,6 +325,7 @@ class OAuthRequirer(Object):
         client_id = data.get("client_id")
         client_secret_id = data.get("client_secret_id")
         if not client_id or not client_secret_id:
+            logger.info("OAuth Provider info is available, waiting for client to be registered.")
             # The client credentials are not ready yet, so we do nothing
             # This could mean that the client credentials were removed from the databag,
             # but we don't allow that (for now), so we don't have to check for it.
@@ -373,6 +374,26 @@ class OAuthRequirer(Object):
         """Get the client_secret."""
         client_secret = self.model.get_secret(id=client_secret_id)
         return client_secret
+
+    def get_client_credentials(self, relation_id: Optional[int] = None) -> Dict:
+        """Get the client credentials."""
+        try:
+            relation = self.model.get_relation(
+                relation_name=self._relation_name, relation_id=relation_id
+            )
+        except TooManyRelatedAppsError:
+            raise RuntimeError("More than one relations are defined. Please provide a relation_id")
+
+        data = _load_data(relation.data[relation.app], OAUTH_PROVIDER_JSON_SCHEMA)
+
+        client_id = data.get("client_id")
+        client_secret_id = data.get("client_secret_id")
+        if not client_id or not client_secret_id:
+            return
+
+        _client_secret = self.get_client_secret(client_secret_id)
+        client_secret = _client_secret.get_content()[CLIENT_SECRET_FIELD]
+        return dict(client_id=client_id, client_secret=client_secret)
 
     def update_client_config(
         self, client_config: ClientConfig, relation_id: Optional[int] = None
@@ -585,10 +606,35 @@ class OAuthProvider(Object):
         juju_secret.grant(relation)
         return juju_secret
 
-    def set_provider_info_in_relation_data(self, data: Dict) -> None:
+    def set_provider_info_in_relation_data(
+        self,
+        issuer_url: str,
+        authorization_endpoint: str,
+        token_endpoint: str,
+        introspection_endpoint: str,
+        userinfo_endpoint: str,
+        jwks_endpoint: str,
+        scope: str,
+        groups: Optional[str] = None,
+        ca_chain: Optional[str] = None,
+    ) -> None:
         """Put the provider information in the the databag."""
         if not self.model.unit.is_leader():
             return
+
+        data = {
+            "issuer_url": issuer_url,
+            "authorization_endpoint": authorization_endpoint,
+            "token_endpoint": token_endpoint,
+            "introspection_endpoint": introspection_endpoint,
+            "userinfo_endpoint": userinfo_endpoint,
+            "jwks_endpoint": jwks_endpoint,
+            "scope": scope,
+        }
+        if groups:
+            data["groups"] = groups
+        if ca_chain:
+            data["ca_chain"] = ca_chain
 
         for relation in self.model.relations[self._relation_name]:
             relation.data[self.model.app].update(_dump_data(data))
