@@ -44,10 +44,7 @@ Class SomeCharm(CharmBase):
 
 import logging
 
-from ops.charm import (
-    CharmBase,
-    RelationCreatedEvent,
-)
+from ops.charm import CharmBase, RelationCreatedEvent
 from ops.framework import EventBase, EventSource, Object, ObjectEvents
 from ops.model import Application
 
@@ -88,7 +85,9 @@ class HydraEndpointsProvider(Object):
         self._relation_name = relation_name
 
         events = self._charm.on[relation_name]
-        self.framework.observe(events.relation_created, self._on_provider_endpoint_relation_created)
+        self.framework.observe(
+            events.relation_created, self._on_provider_endpoint_relation_created
+        )
 
     def _on_provider_endpoint_relation_created(self, event: RelationCreatedEvent):
         self.on.ready.emit()
@@ -111,16 +110,22 @@ class HydraEndpointsProvider(Object):
 
 
 class HydraEndpointsRelationError(Exception):
+    """Base class for the relation exceptions."""
+
     pass
 
 
 class HydraEndpointsRelationMissingError(HydraEndpointsRelationError):
+    """Raised when the relation is missing."""
+
     def __init__(self):
         self.message = "Missing endpoint-info relation with hydra"
         super().__init__(self.message)
 
 
 class HydraEndpointsRelationDataMissingError(HydraEndpointsRelationError):
+    """Raised when information is missing from the relation."""
+
     def __init__(self, message):
         self.message = message
         super().__init__(self.message)
@@ -135,6 +140,7 @@ class HydraEndpointsRequirer(Object):
         self.relation_name = relation_name
 
     def get_hydra_endpoints(self) -> dict:
+        """Get the hydra endpoints."""
         if not self.model.unit.is_leader():
             return
         endpoints = self.model.relations[self.relation_name]
@@ -149,7 +155,7 @@ class HydraEndpointsRequirer(Object):
 
         data = endpoints[0].data[remote_app]
 
-        if not "admin_endpoint" in data:
+        if "admin_endpoint" not in data:
             raise HydraEndpointsRelationDataMissingError(
                 "Missing admin endpoint in endpoint-info relation data"
             )
