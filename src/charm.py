@@ -9,7 +9,7 @@
 import json
 import logging
 from os.path import join
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -453,7 +453,7 @@ class HydraCLI:
                 raise ValueError("Invalid metadata")
         return flags
 
-    def _client_cmd_prefix(self, action: str):
+    def _client_cmd_prefix(self, action: str) -> List[str]:
         return [
             "hydra",
             action,
@@ -488,17 +488,18 @@ class HydraCLI:
         logger.info(f"Successfully updated client: {client_config.client_id}")
         return json.loads(stdout)
 
-    def delete_client(
-        self, client_ids: List[str], metadata: Optional[Union[Dict, str]] = None
-    ) -> Optional[Dict]:
+    def delete_client(self, client_id: str) -> Optional[Dict]:
         """Delete one or more oauth2 client."""
-        cmd = self._client_cmd_prefix("delete") + client_ids
+        cmd = self._client_cmd_prefix("delete")
+        cmd.append(client_id)
 
         stdout, _ = self._run_cmd(cmd)
         logger.info(f"Successfully deleted clients: {stdout}")
         return json.loads(stdout)
 
-    def _run_cmd(self, cmd, timeout=20):
+    def _run_cmd(
+        self, cmd: List[str], timeout: float = 20
+    ) -> Tuple[Union[str, bytes], Union[str, bytes]]:
         process = self.container.exec(cmd, timeout=timeout)
         stdout, stderr = process.wait_output()
         return stdout, stderr

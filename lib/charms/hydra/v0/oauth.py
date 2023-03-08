@@ -375,7 +375,7 @@ class OAuthRequirer(Object):
         client_secret = self.model.get_secret(id=client_secret_id)
         return client_secret
 
-    def get_client_credentials(self, relation_id: Optional[int] = None) -> Dict:
+    def get_client_credentials(self, relation_id: Optional[int] = None) -> Optional[Dict]:
         """Get the client credentials."""
         try:
             relation = self.model.get_relation(
