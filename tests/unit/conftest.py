@@ -48,6 +48,16 @@ def mocked_create_client(mocked_hydra_cli):
 
 
 @pytest.fixture()
+def mocked_set_provider_info(mocker):
+    yield mocker.patch("charm.OAuthProvider.set_provider_info_in_relation_data")
+
+
+@pytest.fixture()
+def mocked_set_client_credentials(mocker):
+    yield mocker.patch("charm.OAuthProvider.set_client_credentials_in_relation_data")
+
+
+@pytest.fixture()
 def mocked_fqdn(mocker):
     mocked_fqdn = mocker.patch("socket.getfqdn")
     mocked_fqdn.return_value = "hydra"

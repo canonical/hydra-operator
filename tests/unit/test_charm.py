@@ -344,7 +344,7 @@ def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness
     assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
 
 
-def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness):
+def test_provider_info_called_when_ingress_then_oauth_relation(harness, mocked_set_provider_info):
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_ingress_relation(harness, "public")
@@ -361,59 +361,56 @@ def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness):
     assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
 
 
-def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness):
+def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness, mocked_set_provider_info):
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_ingress_relation(harness, "public")
     setup_ingress_relation(harness, "admin")
 
     harness.begin()
-    relation_id, _ = setup_oauth_relation(harness)
+    setup_oauth_relation(harness)
 
-    app_data = harness.get_relation_data(relation_id, harness.charm.app)
-
-    assert app_data == {
-        "authorization_endpoint": "http://public:80/testing-hydra/oauth2/auth",
-        "introspection_endpoint": "http://admin:80/testing-hydra/admin/oauth2/introspect",
-        "issuer_url": "http://public:80/testing-hydra",
-        "jwks_endpoint": "http://public:80/testing-hydra/.well-known/jwks.json",
-        "scope": "openid profile email phone",
-        "token_endpoint": "http://public:80/testing-hydra/oauth2/token",
-        "userinfo_endpoint": "http://public:80/testing-hydra/userinfo",
-    }
+    mocked_set_provider_info.assert_called_with(
+        authorization_endpoint="http://public:80/testing-hydra/oauth2/auth",
+        introspection_endpoint="http://admin:80/testing-hydra/admin/oauth2/introspect",
+        issuer_url="http://public:80/testing-hydra",
+        jwks_endpoint="http://public:80/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="http://public:80/testing-hydra/oauth2/token",
+        userinfo_endpoint="http://public:80/testing-hydra/userinfo",
+    )
 
 
-def test_provider_info_in_databag_when_oauth_relation_then_ingress(harness):
+def test_provider_info_called_when_oauth_relation_then_ingress(harness, mocked_set_provider_info):
     harness.set_can_connect(CONTAINER_NAME, True)
 
-    relation_id, _ = setup_oauth_relation(harness)
+    setup_oauth_relation(harness)
     setup_ingress_relation(harness, "public")
     setup_ingress_relation(harness, "admin")
 
-    app_data = harness.get_relation_data(relation_id, harness.charm.app)
-
-    assert app_data == {
-        "authorization_endpoint": "http://public:80/testing-hydra/oauth2/auth",
-        "introspection_endpoint": "http://admin:80/testing-hydra/admin/oauth2/introspect",
-        "issuer_url": "http://public:80/testing-hydra",
-        "jwks_endpoint": "http://public:80/testing-hydra/.well-known/jwks.json",
-        "scope": "openid profile email phone",
-        "token_endpoint": "http://public:80/testing-hydra/oauth2/token",
-        "userinfo_endpoint": "http://public:80/testing-hydra/userinfo",
-    }
+    mocked_set_provider_info.assert_called_once_with(
+        authorization_endpoint="http://public:80/testing-hydra/oauth2/auth",
+        introspection_endpoint="http://admin:80/testing-hydra/admin/oauth2/introspect",
+        issuer_url="http://public:80/testing-hydra",
+        jwks_endpoint="http://public:80/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="http://public:80/testing-hydra/oauth2/token",
+        userinfo_endpoint="http://public:80/testing-hydra/userinfo",
+    )
 
 
-def test_client_created_event(harness, mocked_create_client):
+def test_client_created_event(harness, mocked_create_client, mocked_set_client_credentials):
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    client_credentials = json.loads(mocked_create_client.return_value[0])
 
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-    app_data = harness.get_relation_data(relation_id, harness.charm.app)
 
     assert mocked_create_client.called
-    assert "client_id" in app_data
-    assert "client_secret_id" in app_data
+    mocked_set_client_credentials.assert_called_once_with(
+        relation_id, client_credentials["client_id"], client_credentials["client_secret"]
+    )
 
 
 def test_client_created_event_when_cannot_connect(harness, mocked_create_client):
