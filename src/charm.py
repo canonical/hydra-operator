@@ -217,7 +217,7 @@ class HydraCharm(CharmBase):
         )
         public_endpoint = (
             self.public_ingress.url
-            if self.admin_ingress.is_ready()
+            if self.public_ingress.is_ready()
             else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}",
         )
 
