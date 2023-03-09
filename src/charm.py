@@ -170,7 +170,7 @@ class HydraCharm(CharmBase):
             hydra_public_url=self.public_ingress.url
             if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
-            supported_scopes=SUPPORTED_SCOPES,
+            supported_scopes=SUPPORTED_SCOPES.split(" "),
         )
         return rendered
 
