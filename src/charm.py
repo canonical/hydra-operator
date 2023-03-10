@@ -483,6 +483,7 @@ class HydraCLI:
         cmd = self._client_cmd_prefix("update") + self._client_config_to_cmd(
             client_config, metadata
         )
+        cmd.append(client_config.client_id)
 
         stdout, _ = self._run_cmd(cmd)
         logger.info(f"Successfully updated client: {client_config.client_id}")
@@ -500,6 +501,7 @@ class HydraCLI:
     def _run_cmd(
         self, cmd: List[str], timeout: float = 20
     ) -> Tuple[Union[str, bytes], Union[str, bytes]]:
+        logger.debug(f"Running cmd: {cmd}")
         process = self.container.exec(cmd, timeout=timeout)
         stdout, stderr = process.wait_output()
         return stdout, stderr

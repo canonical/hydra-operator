@@ -215,8 +215,8 @@ class ClientConfig:
 
     redirect_uri: str
     scope: str
-    grant_types: list[str]
-    audience: list[str] = field(default_factory=lambda: [])
+    grant_types: List[str]
+    audience: List[str] = field(default_factory=lambda: [])
     token_endpoint_auth_method: str = "client_secret_basic"
     client_id: Optional[str] = None
 
@@ -320,7 +320,11 @@ class OAuthRequirer(Object):
         if not self.model.unit.is_leader():
             return
 
-        data = _load_data(event.relation.data[event.app], OAUTH_PROVIDER_JSON_SCHEMA)
+        data = event.relation.data[event.app]
+        if not data:
+            return
+
+        data = _load_data(data, OAUTH_PROVIDER_JSON_SCHEMA)
 
         client_id = data.get("client_id")
         client_secret_id = data.get("client_secret_id")
@@ -564,16 +568,21 @@ class OAuthProvider(Object):
         if not self.model.unit.is_leader():
             return
 
-        client_data = _load_data(event.relation.data[event.app], OAUTH_REQUIRER_JSON_SCHEMA)
+        data = event.relation.data[event.app]
+        if not data:
+            return
+
+        client_data = _load_data(data, OAUTH_REQUIRER_JSON_SCHEMA)
         redirect_uri = client_data.get("redirect_uri")
         scope = client_data.get("scope")
         grant_types = client_data.get("grant_types")
         audience = client_data.get("audience")
         token_endpoint_auth_method = client_data.get("token_endpoint_auth_method")
 
-        provider_data = _load_data(
-            event.relation.data[self._charm.app], OAUTH_PROVIDER_JSON_SCHEMA
-        )
+        data = event.relation.data[self._charm.app]
+        if not data:
+            return
+        provider_data = _load_data(data, OAUTH_PROVIDER_JSON_SCHEMA)
         client_id = provider_data.get("client_id")
 
         relation_id = event.relation.id
@@ -602,7 +611,7 @@ class OAuthProvider(Object):
     def _create_juju_secret(self, client_secret: str, relation: Relation) -> Secret:
         """Create a juju secret and grant it to a relation."""
         secret = {CLIENT_SECRET_FIELD: client_secret}
-        juju_secret = self.model.app.add_secret(secret, label="client_secret")
+        juju_secret = self.model.app.add_secret(secret, label=f"client_secret_{relation.id}")
         juju_secret.grant(relation)
         return juju_secret
 
