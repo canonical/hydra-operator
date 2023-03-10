@@ -16,7 +16,12 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
 )
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
-from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
+from charms.hydra.v0.oauth import (
+    ClientChangedEvent,
+    ClientCreatedEvent,
+    ClientDeletedEvent,
+    OAuthProvider,
+)
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -46,6 +51,7 @@ EXTRA_USER_ROLES = "SUPERUSER"
 HYDRA_ADMIN_PORT = 4445
 HYDRA_PUBLIC_PORT = 4444
 SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
+PEER = "hydra"
 
 
 class HydraCharm(CharmBase):
@@ -93,6 +99,7 @@ class HydraCharm(CharmBase):
         self.framework.observe(
             self.endpoints_provider.on.ready, self._update_hydra_endpoints_relation_data
         )
+
         self.framework.observe(self.database.on.database_created, self._on_database_created)
         self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
         self.framework.observe(self.on.run_migration_action, self._on_run_migration)
@@ -109,6 +116,7 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
         self.framework.observe(self.oauth.on.client_created, self._on_client_created)
         self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
+        self.framework.observe(self.oauth.on.client_deleted, self._on_client_deleted)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -194,6 +202,44 @@ class HydraCharm(CharmBase):
 
         stdout, _ = process.wait_output()
         logger.info(f"Executing automigration: {stdout}")
+
+    def _oauth_relation_peer_data_key(self, relation_id: int) -> str:
+        return f"oauth_{relation_id}"
+
+    @property
+    def _peers(self):
+        """Fetch the peer relation."""
+        return self.model.get_relation(PEER)
+
+    def _set_peer_data(self, key: str, data: Dict) -> None:
+        """Put information into the peer data bucket instead of `StoredState`."""
+        self._peers.data[self.app][key] = json.dumps(data)
+
+    def _get_peer_data(self, key: str) -> Dict:
+        """Retrieve information from the peer data bucket instead of `StoredState`."""
+        if not self._peers:
+            return {}
+        data = self._peers.data[self.app].get(key, "")
+        return json.loads(data) if data else {}
+
+    def _pop_peer_data(self, key: str) -> Dict:
+        """Retrieve information from the peer data bucket."""
+        if not self._peers:
+            return {}
+        data = self._peers.data[self.app].pop(key, "")
+        return json.loads(data) if data else {}
+
+    def _set_oauth_relation_peer_data(self, relation_id: int, data: Dict) -> None:
+        key = self._oauth_relation_peer_data_key(relation_id)
+        self._set_peer_data(key, data)
+
+    def _get_oauth_relation_peer_data(self, relation_id: int) -> None:
+        key = self._oauth_relation_peer_data_key(relation_id)
+        return self._get_peer_data(key)
+
+    def _pop_oauth_relation_peer_data(self, relation_id: int) -> None:
+        key = self._oauth_relation_peer_data_key(relation_id)
+        return self._pop_peer_data(key)
 
     def _handle_status_update_config(self, event: HookEvent) -> None:
         if not self._container.can_connect():
@@ -369,6 +415,7 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
+        self._set_oauth_relation_peer_data(event.relation_id, dict(client_id=client["client_id"]))
         self.oauth.set_client_credentials_in_relation_data(
             event.relation_id, client["client_id"], client["client_secret"]
         )
@@ -394,6 +441,34 @@ class HydraCharm(CharmBase):
             logger.info("Deferring the event")
             event.defer()
             return
+
+    def _on_client_deleted(self, event: ClientDeletedEvent) -> None:
+        if not self._container.can_connect():
+            event.defer()
+            return
+
+        try:
+            self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            event.defer()
+            return
+
+        client = self._get_oauth_relation_peer_data(event.relation_id)
+        if not client:
+            logger.error("No client found in peer data")
+
+        try:
+            self._hydra_cli.delete_client(client["client_id"])
+        except ExecError as err:
+            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            logger.info("Deferring the event")
+            event.defer()
+            return
+
+        self._pop_oauth_relation_peer_data(event.relation_id)
 
     def _update_endpoint_info(self) -> None:
         if not self.admin_ingress.url or not self.public_ingress.url:

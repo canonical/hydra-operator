@@ -54,6 +54,12 @@ def setup_oauth_relation(harness: Harness) -> Tuple[int, str]:
     return relation_id, app_name
 
 
+def setup_peer_relation(harness):
+    app_name = "hydra"
+    relation_id = harness.add_relation("hydra", app_name)
+    return relation_id, app_name
+
+
 def test_not_leader(harness: Harness) -> None:
     harness.set_leader(False)
     setup_postgres_relation(harness)
@@ -427,10 +433,14 @@ def test_set_client_credentials_on_client_created_event_emitted(
     harness.set_can_connect(CONTAINER_NAME, True)
     client_credentials = mocked_create_client.return_value
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    peer_relation_id, _ = setup_peer_relation(harness)
     relation_id, _ = setup_oauth_relation(harness)
 
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+    peer_data = harness.get_relation_data(peer_relation_id, harness.charm.app)
 
+    assert peer_data
     mocked_set_client_credentials.assert_called_once_with(
         relation_id, client_credentials["client_id"], client_credentials["client_secret"]
     )
@@ -580,3 +590,32 @@ def test_error_on_client_changed_event_emitted(
     assert (
         caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
     )
+
+
+def test_client_deleted_when_client_deleted_event_is_emitted(harness, mocked_hydra_cli):
+    client_id = "client_id"
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    mocked_hydra_cli.return_value = (
+        json.dumps({"client_id": client_id, "client_secret": "client_secret"}),
+        None,
+    )
+
+    peer_relation_id, _ = setup_peer_relation(harness)
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    mocked_hydra_cli.return_value = (json.dumps(dict(client_id=client_id)), None)
+    harness.charm.oauth.on.client_deleted.emit(relation_id)
+
+    assert mocked_hydra_cli.call_args[0][0] == [
+        "hydra",
+        "delete",
+        "client",
+        "--endpoint",
+        "http://localhost:4445",
+        "--format",
+        "json",
+        client_id,
+    ]
+    assert harness.get_relation_data(peer_relation_id, harness.charm.app) == {}

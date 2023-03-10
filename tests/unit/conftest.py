@@ -17,7 +17,8 @@ def harness(mocked_kubernetes_service_patcher: MagicMock) -> Harness:
     harness.set_model_name("testing")
     harness.set_leader(True)
     harness.begin()
-    return harness
+    yield harness
+    harness.cleanup()
 
 
 @pytest.fixture()

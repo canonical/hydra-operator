@@ -612,8 +612,7 @@ class OAuthProvider(Object):
         return f"client_secret_{relation.id}"
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
-        secret = self.model.get_secret(label=self._get_secret_label(event.relation))
-        secret.remove_all_revisions()
+        self._delete_juju_secret(event.relation)
         self.on.client_deleted.emit(event.relation.id)
 
     def _create_juju_secret(self, client_secret: str, relation: Relation) -> Secret:
@@ -622,6 +621,10 @@ class OAuthProvider(Object):
         juju_secret = self.model.app.add_secret(secret, label=self._get_secret_label(relation))
         juju_secret.grant(relation)
         return juju_secret
+
+    def _delete_juju_secret(self, relation: Relation) -> None:
+        secret = self.model.get_secret(label=self._get_secret_label(relation))
+        secret.remove_all_revisions()
 
     def set_provider_info_in_relation_data(
         self,

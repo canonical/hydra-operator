@@ -29,3 +29,7 @@ provides:
       Provides API endpoints to a related application
   oauth:
     interface: oauth
+
+peers:
+  hydra:
+    interface: hydra_peers
