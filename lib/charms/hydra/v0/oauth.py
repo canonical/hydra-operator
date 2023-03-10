@@ -604,14 +604,20 @@ class OAuthProvider(Object):
                 redirect_uri, scope, grant_types, audience, token_endpoint_auth_method, relation_id
             )
 
+    def _get_secret_label(self, relation: Relation) -> str:
+        return f"client_secret_{relation.id}"
+
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
-        # Since the relation has been departed the provider needs to delete the client
+        # The relation has been departed, delete the juju secret
+        secret = self.model.get_secret(label=self._get_secret_label(event.relation))
+        secret.remove_all_revisions()
+        # The provider needs to delete the client
         self.on.client_deleted.emit(event.relation.id)
 
     def _create_juju_secret(self, client_secret: str, relation: Relation) -> Secret:
         """Create a juju secret and grant it to a relation."""
         secret = {CLIENT_SECRET_FIELD: client_secret}
-        juju_secret = self.model.app.add_secret(secret, label=f"client_secret_{relation.id}")
+        juju_secret = self.model.app.add_secret(secret, label=self._get_secret_label(relation))
         juju_secret.grant(relation)
         return juju_secret
 

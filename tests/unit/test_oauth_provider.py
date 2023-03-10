@@ -12,6 +12,7 @@ from charms.hydra.v0.oauth import (
     OAuthProvider,
 )
 from ops.charm import CharmBase
+from ops.model import SecretNotFoundError
 from ops.testing import Harness
 
 METADATA = """
@@ -150,7 +151,7 @@ def test_client_changed(harness):
     assert harness.charm.events[1].redirect_uri == redirect_uri
 
 
-def test_client_config_deleted(harness):
+def test_on_client_config_deleted_event_emitted(harness):
     relation_id = harness.add_relation("oauth", "requirer")
     harness.add_relation_unit(relation_id, "requirer/0")
     harness.update_relation_data(
@@ -171,3 +172,29 @@ def test_client_config_deleted(harness):
 
     assert len(harness.charm.events) == 2
     assert isinstance(harness.charm.events[1], ClientDeletedEvent)
+
+
+def test_on_client_config_deleted_secret_removed(harness):
+    relation_id = harness.add_relation("oauth", "requirer")
+    harness.add_relation_unit(relation_id, "requirer/0")
+    harness.update_relation_data(
+        relation_id,
+        "requirer",
+        {
+            "redirect_uri": "https://oidc-client.com/callback",
+            "scope": "openid email",
+            "grant_types": '["authorization_code"]',
+            "audience": "[]",
+            "token_endpoint_auth_method": "client_secret_basic",
+        },
+    )
+    assert len(harness.charm.events) == 1
+    assert isinstance(harness.charm.events[0], ClientCreatedEvent)
+
+    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
+    client_secret_id = relation_data.pop("client_secret_id")
+
+    harness.remove_relation(relation_id)
+
+    with pytest.raises(SecretNotFoundError, match="Secret not found by ID"):
+        harness.model.get_secret(id=client_secret_id)
