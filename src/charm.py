@@ -144,7 +144,7 @@ class HydraCharm(CharmBase):
             error_url=join(self.config.get("login_ui_url"), "oidc_error"),
             login_url=join(self.config.get("login_ui_url"), "login"),
             hydra_public_url=self.public_ingress.url
-            if self.model.relations["public-ingress"]
+            if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
         )
         return rendered
