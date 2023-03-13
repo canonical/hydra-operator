@@ -144,7 +144,7 @@ class HydraCharm(CharmBase):
             error_url=join(self.config.get("login_ui_url"), "oidc_error"),
             login_url=join(self.config.get("login_ui_url"), "login"),
             hydra_public_url=self.public_ingress.url
-            if self.model.relations["public-ingress"]
+            if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
         )
         return rendered
@@ -212,20 +212,21 @@ class HydraCharm(CharmBase):
     def _update_hydra_endpoints_relation_data(self, event: RelationEvent) -> None:
         admin_endpoint = (
             self.admin_ingress.url
-            if self.model.relations["admin-ingress"]
+            if self.admin_ingress.is_ready()
             else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}",
         )
         public_endpoint = (
             self.public_ingress.url
-            if self.model.relations["public-ingress"]
+            if self.public_ingress.is_ready()
             else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}",
-        )
-        self.endpoints_provider.send_endpoint_relation_data(
-            self.app, admin_endpoint[0], public_endpoint[0]
         )
 
         logger.info(
-            f"Sent endpoints info: public - {public_endpoint[0]} admin - {admin_endpoint[0]}"
+            f"Sending endpoints info: public - {public_endpoint[0]} admin - {admin_endpoint[0]}"
+        )
+
+        self.endpoints_provider.send_endpoint_relation_data(
+            self.app, admin_endpoint[0], public_endpoint[0]
         )
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:

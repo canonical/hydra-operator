@@ -261,3 +261,87 @@ def test_config_updated_on_ingress_relation_joined(harness) -> None:
     }
 
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
+
+
+def test_hydra_config_on_pebble_ready_without_ingress_relation_data(harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    # set relation without data
+    relation_id = harness.add_relation("public-ingress", "public-traefik")
+    harness.add_relation_unit(relation_id, "public-traefik/0")
+
+    setup_postgres_relation(harness)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    expected_config = {
+        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
+        "log": {"level": "trace"},
+        "secrets": {
+            "cookie": ["my-cookie-secret"],
+            "system": ["my-system-secret"],
+        },
+        "serve": {
+            "admin": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+            "public": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+        },
+        "urls": {
+            "consent": "http://127.0.0.1:4455/consent",
+            "error": "http://127.0.0.1:4455/oidc_error",
+            "login": "http://127.0.0.1:4455/login",
+            "self": {
+                "issuer": "http://127.0.0.1:4444/",
+                "public": "http://127.0.0.1:4444/",
+            },
+        },
+    }
+
+    container = harness.model.unit.get_container(CONTAINER_NAME)
+    container_config = container.pull(path="/etc/config/hydra.yaml", encoding="utf-8")
+    assert yaml.load(container_config.read(), yaml.Loader) == expected_config
+
+
+def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    # set relations without data
+    public_ingress_relation_id = harness.add_relation("public-ingress", "public-traefik")
+    harness.add_relation_unit(public_ingress_relation_id, "public-traefik/0")
+    admin_ingress_relation_id = harness.add_relation("admin-ingress", "admin-traefik")
+    harness.add_relation_unit(admin_ingress_relation_id, "admin-traefik/0")
+
+    endpoint_info_relation_id = harness.add_relation("endpoint-info", "kratos")
+    harness.add_relation_unit(endpoint_info_relation_id, "kratos/0")
+
+    expected_data = {
+        "admin_endpoint": "hydra.testing.svc.cluster.local:4445",
+        "public_endpoint": "hydra.testing.svc.cluster.local:4444",
+    }
+
+    assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
+
+
+def test_hydra_endpoint_info_relation_data_with_ingress_relation_data(harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_ingress_relation(harness, "public")
+    setup_ingress_relation(harness, "admin")
+
+    endpoint_info_relation_id = harness.add_relation("endpoint-info", "kratos")
+    harness.add_relation_unit(endpoint_info_relation_id, "kratos/0")
+
+    expected_data = {
+        "admin_endpoint": "http://admin:80/testing-hydra",
+        "public_endpoint": "http://public:80/testing-hydra",
+    }
+
+    assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
