@@ -5,14 +5,12 @@
 """Interface library for sharing hydra endpoints.
 
 This library provides a Python API for both requesting and providing public and admin endpoints.
-
 ## Getting Started
 To get started using the library, you need to fetch the library using `charmcraft`.
 ```shell
 cd some-charm
 charmcraft fetch-lib charms.hydra.v0.hydra_endpoints
 ```
-
 To use the library from the requirer side:
 In the `metadata.yaml` of the charm, add the following:
 ```yaml
@@ -27,7 +25,6 @@ from charms.hydra.v0.hydra_endpoints import (
     HydraEndpointsRelationError,
     HydraEndpointsRequirer,
 )
-
 Class SomeCharm(CharmBase):
     def __init__(self, *args):
         self.hydra_endpoints_relation = HydraEndpointsRequirer(self)
@@ -39,7 +36,6 @@ Class SomeCharm(CharmBase):
         except HydraEndpointsRelationError as error:
             ...
 ```
-
 """
 
 import logging
@@ -56,7 +52,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 1
+LIBPATCH = 2
 
 RELATION_NAME = "endpoint-info"
 INTERFACE_NAME = "hydra_endpoints"
