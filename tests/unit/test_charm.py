@@ -323,6 +323,9 @@ def test_hydra_config_on_pebble_ready_without_ingress_relation_data(harness) -> 
                 "public": "http://127.0.0.1:4444/",
             },
         },
+        "webfinger": {
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+        },
     }
 
     container = harness.model.unit.get_container(CONTAINER_NAME)
@@ -372,8 +375,6 @@ def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness, mock
 
     setup_ingress_relation(harness, "public")
     setup_ingress_relation(harness, "admin")
-
-    harness.begin()
     setup_oauth_relation(harness)
 
     mocked_set_provider_info.assert_called_with(
