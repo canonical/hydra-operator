@@ -370,7 +370,9 @@ def test_provider_info_called_when_ingress_then_oauth_relation(harness, mocked_s
     assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
 
 
-def test_provider_info_in_databag_when_ingress_then_oauth_relation(harness, mocked_set_provider_info):
+def test_provider_info_in_databag_when_ingress_then_oauth_relation(
+    harness, mocked_set_provider_info
+):
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_ingress_relation(harness, "public")

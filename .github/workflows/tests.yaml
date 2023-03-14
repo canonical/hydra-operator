@@ -46,7 +46,7 @@ jobs:
         run: juju status --relations
         if: failure()
 
-      - name: Get juju status
+      - name: Get juju logs
         run: juju debug-log --replay --include hydra/0
         if: failure()
 

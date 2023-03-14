@@ -354,9 +354,7 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
+        if not self._hydra_service_is_created:
             event.defer()
             return
 
@@ -383,9 +381,7 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
+        if not self._hydra_service_is_created:
             event.defer()
             return
 
@@ -473,8 +469,9 @@ class HydraCLI:
         )
 
         stdout, _ = self._run_cmd(cmd)
-        logger.info("Successfully created client")
-        return json.loads(stdout)
+        stdout = json.loads(stdout)
+        logger.info(f"Successfully created client: {stdout.get('client_id')}")
+        return stdout
 
     def update_client(
         self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None

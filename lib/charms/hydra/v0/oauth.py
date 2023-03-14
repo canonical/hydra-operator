@@ -1,4 +1,4 @@
-# Copyright 2021 Canonical Ltd.
+# Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """# Oauth Library.
@@ -35,7 +35,7 @@ class SomeCharm(CharmBase):
     # ...
 
     def _on_ingress_ready(self, event):
-        self.external_url = "https://example.com
+        self.external_url = "https://example.com"
         self._set_client_config()
 
     def _set_client_config(self):
@@ -322,6 +322,7 @@ class OAuthRequirer(Object):
 
         data = event.relation.data[event.app]
         if not data:
+            logger.info("No relation data available.")
             return
 
         data = _load_data(data, OAUTH_PROVIDER_JSON_SCHEMA)
