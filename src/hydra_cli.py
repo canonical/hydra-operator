@@ -12,6 +12,7 @@ from charms.hydra.v0.oauth import ClientConfig
 from ops.model import Container
 
 logger = logging.getLogger(__name__)
+SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 
 
 class HydraCLI:
@@ -21,27 +22,48 @@ class HydraCLI:
         self.hydra_admin_url = hydra_admin_url
         self.container = container
 
-    def _client_config_to_cmd(
-        self, client_config: ClientConfig, metadata: Optional[Dict] = None
+    def _dump_list_or_dict(self, o):
+        if isinstance(o, dict):
+            return json.dumps(o, separators=(',', ':'))
+        if isinstance(o, list):
+            return (",").join(o)
+        elif isinstance(o, str):
+            return o
+        else:
+            raise ValueError(f"Invalid type: {type(o)}")
+
+    def _build_client_cmd_flags(
+        self,
+        audience: Optional[List[str]] = None,
+        grant_type: Optional[List[str]] = None,
+        redirect_uri: Optional[str] = None,
+        response_type: Optional[List[str]] = None,
+        scope: List[str] = SUPPORTED_SCOPES,
+        client_secret: Optional[str] = None,
+        token_endpoint_auth_method: Optional[str] = None,
+        metadata: Optional[Dict] = None,
     ) -> List[str]:
         """Convert a ClientConfig object to a list of parameters."""
-        flags = [
-            "--grant-type",
-            ",".join(client_config.grant_types or ["authorization_code", "refresh_token"]),
-            "--response-type",
-            "code",
-        ]
+        flag_mapping = {
+            "--audience": audience,
+            "--grant-type": grant_type,
+            "--redirect-uri": redirect_uri,
+            "--response-type": response_type,
+            "--secret": client_secret,
+            "--token-endpoint-auth-method": token_endpoint_auth_method,
+            "--metadata": metadata,
+        }
+        flags = []
 
-        if client_config.scope:
-            for scope in client_config.scope.split(" "):
+        for k, v in flag_mapping.items():
+            if v:
+                flags.append(k)
+                flags.append(self._dump_list_or_dict(v))
+
+        if scope:
+            for s in scope:
                 flags.append("--scope")
-                flags.append(scope)
-        if client_config.redirect_uri:
-            flags.append("--redirect-uri")
-            flags.append(client_config.redirect_uri)
-        if metadata:
-            flags.append("--metadata")
-            flags.append(json.dumps(metadata))
+                flags.append(s)
         return flags
 
     def _client_cmd_prefix(self, action: str) -> List[str]:
@@ -55,10 +77,27 @@ class HydraCLI:
             "json",
         ]
 
-    def create_client(self, client_config: ClientConfig, metadata: Optional[Dict] = None) -> Dict:
+    def create_client(
+        self,
+        audience: Optional[List[str]] = None,
+        grant_type: Optional[List[str]] = None,
+        redirect_uri: Optional[str] = None,
+        response_type: Optional[List[str]] = None,
+        scope: List[str] = SUPPORTED_SCOPES,
+        client_secret: Optional[str] = None,
+        token_endpoint_auth_method: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> Dict:
         """Create an oauth2 client."""
-        cmd = self._client_cmd_prefix("create") + self._client_config_to_cmd(
-            client_config, metadata
+        cmd = self._client_cmd_prefix("create") + self._build_client_cmd_flags(
+            audience=audience,
+            grant_type=grant_type,
+            redirect_uri=redirect_uri,
+            response_type=response_type,
+            scope=scope,
+            client_secret=client_secret,
+            token_endpoint_auth_method=token_endpoint_auth_method,
+            metadata=metadata,
         )
 
         stdout, _ = self._run_cmd(cmd)
@@ -66,15 +105,42 @@ class HydraCLI:
         logger.info(f"Successfully created client: {json_stdout.get('client_id')}")
         return json_stdout
 
-    def update_client(self, client_config: ClientConfig, metadata: Optional[Dict] = None) -> Dict:
-        """Update an oauth2 client."""
-        cmd = self._client_cmd_prefix("update") + self._client_config_to_cmd(
-            client_config, metadata
-        )
-        cmd.append(client_config.client_id)
+    def get_client(self, client_id):
+        """Get an oauth2 client."""
+        cmd = self._client_cmd_prefix("get")
+        cmd.append(client_id)
 
         stdout, _ = self._run_cmd(cmd)
-        logger.info(f"Successfully updated client: {client_config.client_id}")
+        logger.info(f"Successfully fetched client: {client_id}")
+        return json.loads(stdout)
+
+    def update_client(
+        self,
+        client_id: str,
+        audience: Optional[List[str]] = None,
+        grant_type: Optional[List[str]] = None,
+        redirect_uri: Optional[str] = None,
+        response_type: Optional[List[str]] = None,
+        scope: List[str] = SUPPORTED_SCOPES,
+        client_secret: Optional[str] = None,
+        token_endpoint_auth_method: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> Dict:
+        """Update an oauth2 client."""
+        cmd = self._client_cmd_prefix("update") + self._build_client_cmd_flags(
+            audience=audience,
+            grant_type=grant_type,
+            redirect_uri=redirect_uri,
+            response_type=response_type,
+            scope=scope,
+            client_secret=client_secret,
+            token_endpoint_auth_method=token_endpoint_auth_method,
+            metadata=metadata,
+        )
+        cmd.append(client_id)
+
+        stdout, _ = self._run_cmd(cmd)
+        logger.info(f"Successfully updated client: {client_id}")
         return json.loads(stdout)
 
     def delete_client(self, client_id: str) -> Dict:
@@ -85,6 +151,58 @@ class HydraCLI:
         stdout, _ = self._run_cmd(cmd)
         logger.info(f"Successfully deleted client: {stdout}")
         return json.loads(stdout)
+
+    def list_clients(self) -> Optional[Dict]:
+        """Delete one or more oauth2 client."""
+        cmd = [
+            "hydra",
+            "list",
+            "clients",
+            "--endpoint",
+            self.hydra_admin_url,
+            "--format",
+            "json",
+        ]
+
+        stdout, _ = self._run_cmd(cmd)
+        logger.info(f"Successfully listed clients")
+        return json.loads(stdout)
+
+    def delete_client_access_tokens(self, client_id: str) -> Optional[Dict]:
+        """Delete one or more oauth2 client."""
+        cmd = [
+            "hydra",
+            "delete",
+            "access-tokens",
+            "--endpoint",
+            self.hydra_admin_url,
+            "--format",
+            "json",
+            client_id
+        ]
+
+        stdout, _ = self._run_cmd(cmd)
+        logger.info(f"Successfully deleted all the access tokens for client: {stdout}")
+        return json.loads(stdout)
+
+    def create_jwk(self, set_id, alg="RS256"):
+        cmd = [
+            "hydra",
+            "create",
+            "jwk",
+            "--endpoint",
+            self.hydra_admin_url,
+            "--format",
+            "json",
+            "--alg",
+            alg,
+            set_id,
+        ]
+
+        stdout, _ = self._run_cmd(cmd)
+        stdout = json.loads(stdout)
+        logger.info(f"Successfully created jwk: {stdout['keys'][0]['kid']}")
+        return stdout
 
     def _run_cmd(
         self, cmd: List[str], timeout: float = 20

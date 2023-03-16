@@ -126,6 +126,14 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
         self.framework.observe(self.oauth.on.client_deleted, self._on_client_deleted)
 
+        self.framework.observe(self.on.create_oauth_client_action, self._on_create_oauth_client_action)
+        self.framework.observe(self.on.get_oauth_client_action, self._on_get_oauth_client_action)
+        self.framework.observe(self.on.update_oauth_client_action, self._on_update_oauth_client_action)
+        self.framework.observe(self.on.delete_oauth_client_action, self._on_delete_oauth_client_action)
+        self.framework.observe(self.on.list_oauth_clients_action, self._on_list_oauth_clients_action)
+        self.framework.observe(self.on.revoke_oauth_client_access_tokens_action, self._on_revoke_oauth_client_access_tokens_action)
+        self.framework.observe(self.on.rotate_key_action, self._on_rotate_key_action)
+
     @property
     def _hydra_layer(self) -> Layer:
         """Returns a pre-configured Pebble layer."""
@@ -481,6 +489,234 @@ class HydraCharm(CharmBase):
             return
 
         self._pop_oauth_relation_peer_data(event.relation_id)
+
+
+    def _on_create_oauth_client_action(self, event: ActionEvent) -> None:
+        if not self._container.can_connect():
+            event.fail("Cannot connect to the container.")
+            return
+
+        if not self._hydra_service_is_running:
+            event.fail("Service is not ready.")
+            return
+
+        event.log("Creating client")
+        try:
+            client = self._hydra_cli.create_client(
+                audience=event.params.get("audience"),
+                grant_type=event.params.get("grant-types"),
+                redirect_uri=event.params.get("redirect-uris"),
+                response_type=event.params.get("response-types"),
+                scope=event.params.get("scope"),
+                client_secret=event.params.get("client-secret"),
+                token_endpoint_auth_method=event.params.get("token-endpoint-auth-method"),
+            )
+        except ExecError as err:
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            event.fail(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        event.log("Successfully created client")
+        event.set_results({
+            "client-id": client.get("client_id"),
+            "client-secret": client.get("client_secret"),
+            "audience": client.get("audience"),
+            "grant-types": ", ".join(client.get("grant_types", [])),
+            "redirect-uris": ", ".join(client.get("redirect_uris", [])),
+            "response-types": ", ".join(client.get("response_types", [])),
+            "scope": client.get("scope"),
+            "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
+        })
+
+    def _on_get_oauth_client_action(self, event: ActionEvent) -> None:
+        if not self._container.can_connect():
+            event.fail("Cannot connect to the container.")
+            return
+
+        if not self._hydra_service_is_running:
+            event.fail("Service is not ready.")
+            return
+
+        client_id = event.params["client-id"]
+        event.log(f"Getting client: {client_id}")
+
+        try:
+            client = self._hydra_cli.get_client(client_id)
+        except ExecError as err:
+            if "Unable to locate the resource" in err.stderr:
+                event.fail(f"No such client: {client_id}")
+                return
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            event.fail(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        event.log(f"Successfully fetched client: {client_id}")
+        # We dump everything in the result, but we have to first convert it to the
+        # format the juju action expects
+        event.set_results({
+            k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v
+            for k, v in client.items()
+        })
+
+    def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
+        if not self._container.can_connect():
+            event.fail("Cannot connect to the container.")
+            return
+
+        if not self._hydra_service_is_running:
+            event.fail("Service is not ready.")
+            return
+
+        client_id = event.params["client-id"]
+        event.log(f"Fetching client: {client_id}")
+        try:
+            client = self._hydra_cli.get_client(client_id)
+        except ExecError as err:
+            if "Unable to locate the resource" in err.stderr:
+                event.fail(f"No such client: {client_id}")
+                return
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            event.fail(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        if client.get("metadata", {}).get("relation_id"):
+            event.fail("Cannot edit clients created from juju relations.")
+            return
+
+        event.log(f"Updating client: {client_id}")
+        try:
+            client = self._hydra_cli.update_client(
+                client_id,
+                audience=event.params.get("audience") or client.get("audience"),
+                grant_type=event.params.get("grant-types") or client.get("grant_types"),
+                redirect_uri=event.params.get("redirect-uris") or client.get("redirect_uris"),
+                response_type=event.params.get("response-types") or client.get("response_types"),
+                scope=event.params.get("scope") or client.get("scope").split(" "),
+                client_secret=event.params.get("client-secret") or client.get("client_secret"),
+                token_endpoint_auth_method=event.params.get("token-endpoint-auth-method") or client.get("token_endpoint_auth_method"),
+            )
+        except ExecError as err:
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            event.fail(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        event.log(f"Successfully updated client: {client_id}")
+        event.set_results({
+            "client-id": client.get("client_id"),
+            "client-secret": client.get("client_secret"),
+            "audience": client.get("audience"),
+            "grant-types": ", ".join(client.get("grant_types", [])),
+            "redirect-uris": ", ".join(client.get("redirect_uris", [])),
+            "response-types": ", ".join(client.get("response_types", [])),
+            "scope": client.get("scope"),
+            "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
+        })
+
+    def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
+        if not self._container.can_connect():
+            event.fail("Cannot connect to the container.")
+            return
+
+        if not self._hydra_service_is_running:
+            event.fail("Service is not ready.")
+            return
+
+        client_id = event.params["client-id"]
+        event.log(f"Deleting client: {client_id}")
+        try:
+            self._hydra_cli.delete_client(client_id)
+        except ExecError as err:
+            if "Unable to locate the resource" in err.stderr:
+                event.fail(f"No such client: {client_id}")
+                return
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            event.fail(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        event.log(f"Successfully deleted client: {client_id}")
+        event.set_results({"client-id": client_id})
+
+    def _on_list_oauth_clients_action(self, event: ActionEvent) -> None:
+        if not self._container.can_connect():
+            event.fail("Cannot connect to the container.")
+            return
+
+        if not self._hydra_service_is_running:
+            event.fail("Service is not ready.")
+            return
+
+        event.log(f"Fetching clients")
+        try:
+            clients = self._hydra_cli.list_clients()
+        except ExecError as err:
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            event.fail(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        event.log(f"Successfully listed clients")
+        event.set_results({str(i): c["client_id"] for i, c in enumerate(clients['items'])})
+
+    def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
+        if not self._container.can_connect():
+            event.fail("Cannot connect to the container.")
+            return
+
+        if not self._hydra_service_is_running:
+            event.fail("Service is not ready.")
+            return
+
+        client_id = event.params["client-id"]
+        event.log(f"Deleting all access tokens for client: {client_id}")
+        try:
+            client = self._hydra_cli.delete_client_access_tokens(client_id)
+        except ExecError as err:
+            if "Unable to locate the resource" in err.stderr:
+                event.fail(f"No such client: {client_id}")
+                return
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            event.fail(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        event.log(f"Successfully deleted all access tokens for client: {client_id}")
+        event.set_results({"client-id": client})
+
+    def _on_rotate_key_action(self, event: ActionEvent) -> None:
+        if not self._container.can_connect():
+            event.fail("Cannot connect to the container.")
+            return
+
+        if not self._hydra_service_is_running:
+            event.fail("Service is not ready.")
+            return
+
+        event.log("Rotating keys")
+        try:
+            jwk = self._hydra_cli.create_jwk(
+                "hydra.openid.id-token", alg=event.params.get("alg")
+            )
+        except ExecError as err:
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            event.fail(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        event.log(f"Successfully created new key")
+        event.set_results({"new-key-id": jwk["keys"][0]["kid"]})
 
     def _update_endpoint_info(self) -> None:
         if not self.admin_ingress.url or not self.public_ingress.url:
