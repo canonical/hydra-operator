@@ -212,11 +212,11 @@ class HydraCharm(CharmBase):
         return self.model.get_relation(PEER)
 
     def _set_peer_data(self, key: str, data: Dict) -> None:
-        """Put information into the peer data bucket instead of `StoredState`."""
+        """Put information into the peer data bucket."""
         self._peers.data[self.app][key] = json.dumps(data)
 
     def _get_peer_data(self, key: str) -> Dict:
-        """Retrieve information from the peer data bucket instead of `StoredState`."""
+        """Retrieve information from the peer data bucket."""
         if not self._peers:
             return {}
         data = self._peers.data[self.app].get(key, "")
