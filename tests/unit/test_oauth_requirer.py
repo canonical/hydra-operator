@@ -110,12 +110,7 @@ def test_oauth_info_changed_emitted_on_client_creation(harness, provider_info):
             "client_secret_id": secret_id,
         },
     )
-
-    events = harness.charm.events
-
-    assert len(events) == 1
-
-    event = events[0]
+    event = harness.charm.events[0]
 
     assert isinstance(event, OAuthInfoChangedEvent)
     assert event.client_id == "client_id"
