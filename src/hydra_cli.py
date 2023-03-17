@@ -8,7 +8,6 @@ import json
 import logging
 from typing import Dict, List, Optional, Tuple, Union
 
-from charms.hydra.v0.oauth import ClientConfig
 from ops.model import Container
 
 logger = logging.getLogger(__name__)
