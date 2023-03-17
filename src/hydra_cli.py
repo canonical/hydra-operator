@@ -14,7 +14,6 @@ from ops.model import Container
 logger = logging.getLogger(__name__)
 
 
-
 class HydraCLI:
     """Helper object for running hydra CLI commands."""
 

@@ -592,30 +592,21 @@ def test_error_on_client_changed_event_emitted(
     )
 
 
-def test_client_deleted_when_client_deleted_event_is_emitted(harness, mocked_hydra_cli):
+def test_client_deleted_when_client_deleted_event_is_emitted(
+    harness,
+    mocked_create_client: MagicMock,
+    mocked_delete_client: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+):
     client_id = "client_id"
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    mocked_hydra_cli.return_value = (
-        json.dumps({"client_id": client_id, "client_secret": "client_secret"}),
-        None,
-    )
 
     peer_relation_id, _ = setup_peer_relation(harness)
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
-    mocked_hydra_cli.return_value = (json.dumps(dict(client_id=client_id)), None)
     harness.charm.oauth.on.client_deleted.emit(relation_id)
 
-    assert mocked_hydra_cli.call_args[0][0] == [
-        "hydra",
-        "delete",
-        "client",
-        "--endpoint",
-        "http://localhost:4445",
-        "--format",
-        "json",
-        client_id,
-    ]
+    mocked_delete_client.assert_called_with(client_id)
     assert harness.get_relation_data(peer_relation_id, harness.charm.app) == {}
