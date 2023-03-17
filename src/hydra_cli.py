@@ -14,6 +14,7 @@ from ops.model import Container
 logger = logging.getLogger(__name__)
 
 
+
 class HydraCLI:
     """Helper object for running hydra CLI commands."""
 
@@ -78,12 +79,12 @@ class HydraCLI:
         return json.loads(stdout)
 
     def delete_client(self, client_id: str) -> Dict:
-        """Delete one or more oauth2 client."""
+        """Delete an oauth2 client."""
         cmd = self._client_cmd_prefix("delete")
         cmd.append(client_id)
 
         stdout, _ = self._run_cmd(cmd)
-        logger.info(f"Successfully deleted clients: {stdout}")
+        logger.info(f"Successfully deleted client: {stdout}")
         return json.loads(stdout)
 
     def _run_cmd(

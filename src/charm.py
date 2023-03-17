@@ -6,9 +6,10 @@
 
 """A Juju charm for Ory Hydra."""
 
+import json
 import logging
 from os.path import join
-from typing import Any
+from typing import Any, Dict
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -456,6 +457,7 @@ class HydraCharm(CharmBase):
         client = self._get_oauth_relation_peer_data(event.relation_id)
         if not client:
             logger.error("No client found in peer data")
+            return
 
         try:
             self._hydra_cli.delete_client(client["client_id"])
