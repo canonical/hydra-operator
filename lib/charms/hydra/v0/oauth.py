@@ -612,10 +612,8 @@ class OAuthProvider(Object):
         return f"client_secret_{relation.id}"
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
-        # The relation has been departed, delete the juju secret
         secret = self.model.get_secret(label=self._get_secret_label(event.relation))
         secret.remove_all_revisions()
-        # The provider needs to delete the client
         self.on.client_deleted.emit(event.relation.id)
 
     def _create_juju_secret(self, client_secret: str, relation: Relation) -> Secret:
