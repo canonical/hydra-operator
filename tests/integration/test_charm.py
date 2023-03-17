@@ -102,3 +102,14 @@ async def test_has_admin_ingress(ops_test: OpsTest) -> None:
     resp = requests.get(f"http://{admin_address}/{ops_test.model.name}-{APP_NAME}/admin/clients")
 
     assert resp.status_code == 200
+
+
+async def test_client_actions(ops_test: OpsTest):
+    action = await ops_test.model.applications[APP_NAME].units[0].run_action(
+        "create-oauth-client",
+        redirect_uris=["https://example.com"],
+        client_secret="secret",
+    )
+    res = await action.wait()
+    breakpoint()
+    pass

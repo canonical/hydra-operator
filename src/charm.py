@@ -126,12 +126,23 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
         self.framework.observe(self.oauth.on.client_deleted, self._on_client_deleted)
 
-        self.framework.observe(self.on.create_oauth_client_action, self._on_create_oauth_client_action)
+        self.framework.observe(
+            self.on.create_oauth_client_action, self._on_create_oauth_client_action
+        )
         self.framework.observe(self.on.get_oauth_client_action, self._on_get_oauth_client_action)
-        self.framework.observe(self.on.update_oauth_client_action, self._on_update_oauth_client_action)
-        self.framework.observe(self.on.delete_oauth_client_action, self._on_delete_oauth_client_action)
-        self.framework.observe(self.on.list_oauth_clients_action, self._on_list_oauth_clients_action)
-        self.framework.observe(self.on.revoke_oauth_client_access_tokens_action, self._on_revoke_oauth_client_access_tokens_action)
+        self.framework.observe(
+            self.on.update_oauth_client_action, self._on_update_oauth_client_action
+        )
+        self.framework.observe(
+            self.on.delete_oauth_client_action, self._on_delete_oauth_client_action
+        )
+        self.framework.observe(
+            self.on.list_oauth_clients_action, self._on_list_oauth_clients_action
+        )
+        self.framework.observe(
+            self.on.revoke_oauth_client_access_tokens_action,
+            self._on_revoke_oauth_client_access_tokens_action,
+        )
         self.framework.observe(self.on.rotate_key_action, self._on_rotate_key_action)
 
     @property
@@ -428,7 +439,12 @@ class HydraCharm(CharmBase):
         client_config = event.to_client_config()
         try:
             client = self._hydra_cli.create_client(
-                client_config, metadata={"relation_id": {event.relation_id}}
+                audience=event.audience,
+                grant_type=event.grant_types,
+                redirect_uri=event.redirect_uri,
+                scope=event.scope,
+                token_endpoint_auth_method=event.token_endpoint_auth_method,
+                metadata={"relation_id": {event.relation_id}},
             )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -450,10 +466,15 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        client_config = event.to_client_config()
         try:
             self._hydra_cli.update_client(
-                client_config, metadata={"relation_id": {event.relation_id}}
+                event.client_id,
+                audience=event.audience,
+                grant_type=event.grant_types,
+                redirect_uri=event.redirect_uri,
+                scope=event.scope,
+                token_endpoint_auth_method=event.token_endpoint_auth_method,
+                metadata={"relation_id": {event.relation_id}},
             )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -519,16 +540,18 @@ class HydraCharm(CharmBase):
             return
 
         event.log("Successfully created client")
-        event.set_results({
-            "client-id": client.get("client_id"),
-            "client-secret": client.get("client_secret"),
-            "audience": client.get("audience"),
-            "grant-types": ", ".join(client.get("grant_types", [])),
-            "redirect-uris": ", ".join(client.get("redirect_uris", [])),
-            "response-types": ", ".join(client.get("response_types", [])),
-            "scope": client.get("scope"),
-            "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
-        })
+        event.set_results(
+            {
+                "client-id": client.get("client_id"),
+                "client-secret": client.get("client_secret"),
+                "audience": client.get("audience"),
+                "grant-types": ", ".join(client.get("grant_types", [])),
+                "redirect-uris": ", ".join(client.get("redirect_uris", [])),
+                "response-types": ", ".join(client.get("response_types", [])),
+                "scope": client.get("scope"),
+                "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
+            }
+        )
 
     def _on_get_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._container.can_connect():
@@ -557,10 +580,12 @@ class HydraCharm(CharmBase):
         event.log(f"Successfully fetched client: {client_id}")
         # We dump everything in the result, but we have to first convert it to the
         # format the juju action expects
-        event.set_results({
-            k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v
-            for k, v in client.items()
-        })
+        event.set_results(
+            {
+                k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v
+                for k, v in client.items()
+            }
+        )
 
     def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._container.can_connect():
@@ -599,7 +624,8 @@ class HydraCharm(CharmBase):
                 response_type=event.params.get("response-types") or client.get("response_types"),
                 scope=event.params.get("scope") or client.get("scope").split(" "),
                 client_secret=event.params.get("client-secret") or client.get("client_secret"),
-                token_endpoint_auth_method=event.params.get("token-endpoint-auth-method") or client.get("token_endpoint_auth_method"),
+                token_endpoint_auth_method=event.params.get("token-endpoint-auth-method")
+                or client.get("token_endpoint_auth_method"),
             )
         except ExecError as err:
             event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -609,16 +635,18 @@ class HydraCharm(CharmBase):
             return
 
         event.log(f"Successfully updated client: {client_id}")
-        event.set_results({
-            "client-id": client.get("client_id"),
-            "client-secret": client.get("client_secret"),
-            "audience": client.get("audience"),
-            "grant-types": ", ".join(client.get("grant_types", [])),
-            "redirect-uris": ", ".join(client.get("redirect_uris", [])),
-            "response-types": ", ".join(client.get("response_types", [])),
-            "scope": client.get("scope"),
-            "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
-        })
+        event.set_results(
+            {
+                "client-id": client.get("client_id"),
+                "client-secret": client.get("client_secret"),
+                "audience": client.get("audience"),
+                "grant-types": ", ".join(client.get("grant_types", [])),
+                "redirect-uris": ", ".join(client.get("redirect_uris", [])),
+                "response-types": ", ".join(client.get("response_types", [])),
+                "scope": client.get("scope"),
+                "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
+            }
+        )
 
     def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._container.can_connect():
@@ -666,7 +694,7 @@ class HydraCharm(CharmBase):
             return
 
         event.log(f"Successfully listed clients")
-        event.set_results({str(i): c["client_id"] for i, c in enumerate(clients['items'])})
+        event.set_results({str(i): c["client_id"] for i, c in enumerate(clients["items"])})
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
         if not self._container.can_connect():
@@ -705,9 +733,7 @@ class HydraCharm(CharmBase):
 
         event.log("Rotating keys")
         try:
-            jwk = self._hydra_cli.create_jwk(
-                "hydra.openid.id-token", alg=event.params.get("alg")
-            )
+            jwk = self._hydra_cli.create_jwk(alg=event.params.get("alg"))
         except ExecError as err:
             event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
             return

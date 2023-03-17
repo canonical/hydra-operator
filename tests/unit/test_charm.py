@@ -3,7 +3,7 @@
 
 import json
 import logging
-from typing import Tuple
+from typing import Dict, Tuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -647,3 +647,156 @@ def test_exec_error_on_client_deleted_event_emitted(
     harness.charm.oauth.on.client_deleted.emit(relation_id)
 
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "_on_create_oauth_client_action",
+        "_on_get_oauth_client_action",
+        "_on_update_oauth_client_action",
+        "_on_delete_oauth_client_action",
+        "_on_list_oauth_clients_action",
+        "_on_revoke_oauth_client_access_tokens_action",
+        "_on_rotate_key_action",
+    ],
+)
+def test_actions_when_cannot_connect(harness: Harness, action) -> None:
+    harness.set_can_connect(CONTAINER_NAME, False)
+    event = MagicMock()
+
+    getattr(harness.charm, action)(event)
+
+    event.fail.assert_called_with("Cannot connect to the container.")
+
+
+def test_create_oauth_client_action(
+    harness: Harness, mocked_service_running: MagicMock, mocked_create_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    event = MagicMock()
+    event.params = {}
+
+    harness.charm._on_create_oauth_client_action(event)
+
+    ret = json.loads(mocked_create_client.return_value[0])
+    event.set_results.assert_called_with(
+        {
+            "client-id": ret.get("client_id"),
+            "client-secret": ret.get("client_secret"),
+            "audience": ret.get("audience"),
+            "grant-types": ", ".join(ret.get("grant_types")),
+            "redirect-uris": ", ".join(ret.get("redirect_uris")),
+            "response-types": ", ".join(ret.get("response_types")),
+            "scope": ret.get("scope"),
+            "token-endpoint-auth-method": ret.get("token_endpoint_auth_method"),
+        }
+    )
+
+
+def test_get_oauth_client_action(
+    harness: Harness, mocked_service_running: MagicMock, mocked_get_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    ret = json.loads(mocked_get_client.return_value[0])
+    event = MagicMock()
+    event.params = {
+        "client-id": ret.get("client_id"),
+    }
+
+    harness.charm._on_get_oauth_client_action(event)
+
+    event.set_results.assert_called_with(
+        {k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v for k, v in ret.items()}
+    )
+
+
+def test_update_oauth_client_action(
+    harness: Harness, mocked_service_running: MagicMock, mocked_update_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    ret = json.loads(mocked_update_client.return_value[0])
+    event = MagicMock()
+    event.params = {
+        "client-id": ret.get("client_id"),
+    }
+
+    harness.charm._on_update_oauth_client_action(event)
+
+    event.set_results.assert_called_with(
+        {
+            "client-id": ret.get("client_id"),
+            "client-secret": ret.get("client_secret"),
+            "audience": ret.get("audience"),
+            "grant-types": ", ".join(ret.get("grant_types")),
+            "redirect-uris": ", ".join(ret.get("redirect_uris")),
+            "response-types": ", ".join(ret.get("response_types")),
+            "scope": ret.get("scope"),
+            "token-endpoint-auth-method": ret.get("token_endpoint_auth_method"),
+        }
+    )
+
+
+def test_delete_oauth_client_action(
+    harness: Harness, mocked_service_running: MagicMock, mocked_hydra_cli: MagicMock
+) -> None:
+    client_id = "client_id"
+    harness.set_can_connect(CONTAINER_NAME, True)
+    mocked_hydra_cli.return_value = (f'"{client_id}"', None)
+    event = MagicMock()
+    event.params = {
+        "client-id": client_id,
+    }
+
+    harness.charm._on_delete_oauth_client_action(event)
+
+    event.set_results.assert_called_with({'client-id': client_id})
+
+
+def test_list_oauth_client_action(
+    harness: Harness, mocked_service_running: MagicMock, mocked_list_client: MagicMock
+) -> None:
+    client_id = "client_id"
+    harness.set_can_connect(CONTAINER_NAME, True)
+    event = MagicMock()
+    event.params = {
+        "client-id": client_id,
+    }
+
+    harness.charm._on_list_oauth_clients_action(event)
+
+    ret = json.loads(mocked_list_client.return_value[0])
+    expected_output = {
+        i["client_id"] for i in ret["items"]
+    }
+    assert set(event.set_results.call_args_list[0][0][0].values()) == expected_output
+
+
+def test_revoke_oauth_client_access_tokens_action(
+    harness: Harness, mocked_service_running: MagicMock, mocked_hydra_cli: MagicMock
+) -> None:
+    client_id = "client_id"
+    harness.set_can_connect(CONTAINER_NAME, True)
+    mocked_hydra_cli.return_value = (f'"{client_id}"', None)
+    event = MagicMock()
+    event.params = {
+        "client-id": client_id,
+    }
+
+    harness.charm._on_revoke_oauth_client_access_tokens_action(event)
+
+    event.set_results.assert_called_with({'client-id': client_id})
+
+
+def test_rotate_key_action(
+    harness: Harness, mocked_service_running: MagicMock, mocked_create_jwk: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    ret = json.loads(mocked_create_jwk.return_value[0])
+    event = MagicMock()
+    event.params = {}
+
+    harness.charm._on_rotate_key_action(event)
+
+    event.set_results.assert_called_with({'new-key-id': ret["keys"][0]["kid"]})
+

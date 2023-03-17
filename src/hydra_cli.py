@@ -24,7 +24,7 @@ class HydraCLI:
 
     def _dump_list_or_dict(self, o):
         if isinstance(o, dict):
-            return json.dumps(o, separators=(',', ':'))
+            return json.dumps(o, separators=(",", ":"))
         if isinstance(o, list):
             return (",").join(o)
         elif isinstance(o, str):
@@ -82,7 +82,7 @@ class HydraCLI:
         audience: Optional[List[str]] = None,
         grant_type: Optional[List[str]] = None,
         redirect_uri: Optional[str] = None,
-        response_type: Optional[List[str]] = None,
+        response_type: Optional[List[str]] = ["code"],
         scope: List[str] = SUPPORTED_SCOPES,
         client_secret: Optional[str] = None,
         token_endpoint_auth_method: Optional[str] = None,
@@ -120,7 +120,7 @@ class HydraCLI:
         audience: Optional[List[str]] = None,
         grant_type: Optional[List[str]] = None,
         redirect_uri: Optional[str] = None,
-        response_type: Optional[List[str]] = None,
+        response_type: Optional[List[str]] = ["code"],
         scope: List[str] = SUPPORTED_SCOPES,
         client_secret: Optional[str] = None,
         token_endpoint_auth_method: Optional[str] = None,
@@ -178,14 +178,14 @@ class HydraCLI:
             self.hydra_admin_url,
             "--format",
             "json",
-            client_id
+            client_id,
         ]
 
         stdout, _ = self._run_cmd(cmd)
         logger.info(f"Successfully deleted all the access tokens for client: {stdout}")
         return json.loads(stdout)
 
-    def create_jwk(self, set_id, alg="RS256"):
+    def create_jwk(self, set_id="hydra.openid.id-token", alg="RS256"):
         cmd = [
             "hydra",
             "create",
