@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 EXTRA_USER_ROLES = "SUPERUSER"
 HYDRA_ADMIN_PORT = 4445
 HYDRA_PUBLIC_PORT = 4444
-SUPPORTED_SCOPES = "openid profile email phone"
+SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 
 
 class HydraCharm(CharmBase):
@@ -170,7 +170,7 @@ class HydraCharm(CharmBase):
             hydra_public_url=self.public_ingress.url
             if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
-            supported_scopes=SUPPORTED_SCOPES.split(" "),
+            supported_scopes=SUPPORTED_SCOPES,
         )
         return rendered
 
@@ -350,6 +350,9 @@ class HydraCharm(CharmBase):
         self._update_endpoint_info()
 
     def _on_client_created(self, event: ClientCreatedEvent) -> None:
+        if not self.unit.is_leader():
+            return
+
         if not self._container.can_connect():
             event.defer()
             return
@@ -377,6 +380,9 @@ class HydraCharm(CharmBase):
         )
 
     def _on_client_changed(self, event: ClientChangedEvent) -> None:
+        if not self.unit.is_leader():
+            return
+
         if not self._container.can_connect():
             event.defer()
             return
@@ -410,7 +416,7 @@ class HydraCharm(CharmBase):
             introspection_endpoint=join(self.admin_ingress.url, "admin/oauth2/introspect"),
             userinfo_endpoint=join(self.public_ingress.url, "userinfo"),
             jwks_endpoint=join(self.public_ingress.url, ".well-known/jwks.json"),
-            scope=SUPPORTED_SCOPES,
+            scope=" ".join(SUPPORTED_SCOPES),
         )
 
 
@@ -462,20 +468,20 @@ class HydraCLI:
 
     def create_client(
         self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
-    ) -> Optional[Dict]:
+    ) -> Dict:
         """Create an oauth2 client."""
         cmd = self._client_cmd_prefix("create") + self._client_config_to_cmd(
             client_config, metadata
         )
 
         stdout, _ = self._run_cmd(cmd)
-        stdout = json.loads(stdout)
-        logger.info(f"Successfully created client: {stdout.get('client_id')}")
-        return stdout
+        json_stdout = json.loads(stdout)
+        logger.info(f"Successfully created client: {json_stdout.get('client_id')}")
+        return json_stdout
 
     def update_client(
         self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
-    ) -> Optional[Dict]:
+    ) -> Dict:
         """Update an oauth2 client."""
         cmd = self._client_cmd_prefix("update") + self._client_config_to_cmd(
             client_config, metadata
@@ -486,7 +492,7 @@ class HydraCLI:
         logger.info(f"Successfully updated client: {client_config.client_id}")
         return json.loads(stdout)
 
-    def delete_client(self, client_id: str) -> Optional[Dict]:
+    def delete_client(self, client_id: str) -> Dict:
         """Delete one or more oauth2 client."""
         cmd = self._client_cmd_prefix("delete")
         cmd.append(client_id)

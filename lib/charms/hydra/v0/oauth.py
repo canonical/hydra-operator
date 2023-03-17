@@ -362,11 +362,14 @@ class OAuthRequirer(Object):
         data = _dump_data(client_config.to_dict(), OAUTH_REQUIRER_JSON_SCHEMA)
         relation.data[self.model.app].update(data)
 
-    def get_provider_info(self) -> Optional[Dict]:
+    def get_provider_info(self, relation_id: Optional[int] = None) -> Optional[Dict]:
         """Get the provider information from the databag."""
         if len(self.model.relations) == 0:
             return None
-        relation = self.model.get_relation(self._relation_name)
+        try:
+            relation = self.model.get_relation(self._relation_name, relation_id=relation_id)
+        except TooManyRelatedAppsError:
+            raise RuntimeError("More than one relations are defined. Please provide a relation_id")
         if not relation:
             return None
 
@@ -394,7 +397,7 @@ class OAuthRequirer(Object):
         client_id = data.get("client_id")
         client_secret_id = data.get("client_secret_id")
         if not client_id or not client_secret_id:
-            return
+            return None
 
         _client_secret = self.get_client_secret(client_secret_id)
         client_secret = _client_secret.get_content()[CLIENT_SECRET_FIELD]
@@ -664,7 +667,7 @@ class OAuthProvider(Object):
 
         relation = self.model.get_relation(self._relation_name, relation_id)
         if not relation:
-            return None
+            return
         # TODO: What if we are refreshing the client_secret? We need to add a
         # new revision for that
         secret = self._create_juju_secret(client_secret, relation)
