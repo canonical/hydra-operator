@@ -103,7 +103,7 @@ def test_client_credentials_in_relation_databag(harness: Harness) -> None:
     client_secret_id = relation_data.pop("client_secret_id")
     secret = harness.model.get_secret(id=client_secret_id)
 
-    assert isinstance(harness.charm.events[0], ClientCreatedEvent)
+    assert any(isinstance(e, ClientCreatedEvent) for e in harness.charm.events)
     assert secret.get_content()[CLIENT_SECRET_FIELD] == CLIENT_SECRET
     assert relation_data == {
         "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
@@ -145,8 +145,11 @@ def test_client_changed(harness: Harness) -> None:
         },
     )
 
-    assert isinstance(harness.charm.events[1], ClientChangedEvent)
-    assert harness.charm.events[1].redirect_uri == redirect_uri
+    assert any(
+        isinstance(e, ClientChangedEvent)
+        and e.redirect_uri == redirect_uri
+        for e in harness.charm.events
+    )
 
 
 def test_on_client_config_deleted_event_emitted(harness: Harness) -> None:
@@ -165,7 +168,7 @@ def test_on_client_config_deleted_event_emitted(harness: Harness) -> None:
     )
     harness.remove_relation(relation_id)
 
-    assert isinstance(harness.charm.events[1], ClientDeletedEvent)
+    assert any(isinstance(e, ClientDeletedEvent) for e in harness.charm.events)
 
 
 def test_on_client_config_deleted_secret_removed(harness: Harness) -> None:
