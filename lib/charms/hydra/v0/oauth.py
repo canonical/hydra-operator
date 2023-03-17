@@ -52,7 +52,7 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 
 import jsonschema
 from ops.charm import CharmBase, RelationChangedEvent, RelationCreatedEvent, RelationDepartedEvent
@@ -168,7 +168,7 @@ class DataValidationError(RuntimeError):
     """Raised when data validation fails on relation data."""
 
 
-def _load_data(data: Dict, schema: Optional[Dict] = None) -> Dict:
+def _load_data(data: Mapping, schema: Optional[Dict] = None) -> Dict:
     """Parses nested fields and checks whether `data` matches `schema`."""
     ret = {}
     for k, v in data.items():
@@ -474,7 +474,7 @@ class ClientChangedEvent(EventBase):
         grant_types: List,
         audience: List,
         token_endpoint_auth_method: str,
-        relation_id: str,
+        relation_id: int,
         client_id: str,
     ) -> None:
         super().__init__(handle)

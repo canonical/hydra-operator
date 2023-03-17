@@ -1,6 +1,8 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from typing import Any, Dict, Generator
+
 import pytest
 from charms.hydra.v0.oauth import (
     CLIENT_SECRET_FIELD,
@@ -12,6 +14,7 @@ from charms.hydra.v0.oauth import (
     _load_data,
 )
 from ops.charm import CharmBase
+from ops.framework import EventBase
 from ops.testing import Harness
 
 METADATA = """
@@ -23,7 +26,7 @@ requires:
 
 
 @pytest.fixture()
-def harness():
+def harness() -> Generator:
     harness = Harness(OAuthRequirerCharm, meta=METADATA)
     harness.set_leader(True)
     harness.begin_with_initial_hooks()
@@ -32,7 +35,7 @@ def harness():
 
 
 @pytest.fixture()
-def provider_info():
+def provider_info() -> Dict:
     return {
         "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
         "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
@@ -54,7 +57,7 @@ CLIENT_CONFIG = {
 
 
 class OAuthRequirerCharm(CharmBase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any) -> None:
         super().__init__(*args)
         client_config = ClientConfig(**CLIENT_CONFIG)
         self.oauth = OAuthRequirer(self, client_config=client_config)
@@ -63,11 +66,11 @@ class OAuthRequirerCharm(CharmBase):
         self.framework.observe(self.oauth.on.oauth_info_changed, self._record_event)
         self.framework.observe(self.oauth.on.invalid_client_config, self._record_event)
 
-    def _record_event(self, event):
+    def _record_event(self, event: EventBase) -> None:
         self.events.append(event)
 
 
-def test_data_in_relation_bag_on_joined(harness):
+def test_data_in_relation_bag_on_joined(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "provider")
 
     relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
@@ -75,7 +78,9 @@ def test_data_in_relation_bag_on_joined(harness):
     assert _load_data(relation_data) == CLIENT_CONFIG
 
 
-def test_no_event_emitted_when_provider_info_available_but_not_client_id(harness, provider_info):
+def test_no_event_emitted_when_provider_info_available_but_not_client_id(
+    harness: Harness, provider_info: Dict
+) -> None:
     relation_id = harness.add_relation("oauth", "provider")
     harness.add_relation_unit(relation_id, "provider/0")
     harness.update_relation_data(
@@ -90,7 +95,9 @@ def test_no_event_emitted_when_provider_info_available_but_not_client_id(harness
     assert len(events) == 0
 
 
-def test_oauth_info_changed_emitted_on_client_creation(harness, provider_info):
+def test_oauth_info_changed_emitted_on_client_creation(
+    harness: Harness, provider_info: Dict
+) -> None:
     client_secret = "s3cR#T"
 
     relation_id = harness.add_relation("oauth", "provider")
@@ -121,7 +128,7 @@ def test_oauth_info_changed_emitted_on_client_creation(harness, provider_info):
     assert secret.get_content() == {"secret": client_secret}
 
 
-def test_get_provider_info(harness, provider_info):
+def test_get_provider_info(harness: Harness, provider_info: Dict) -> None:
     relation_id = harness.add_relation("oauth", "provider")
     harness.add_relation_unit(relation_id, "provider/0")
     harness.update_relation_data(
@@ -133,7 +140,7 @@ def test_get_provider_info(harness, provider_info):
     assert harness.charm.oauth.get_provider_info() == provider_info
 
 
-def test_get_client_credentials(harness, provider_info):
+def test_get_client_credentials(harness: Harness, provider_info: Dict) -> None:
     client_id = "client_id"
     client_secret = "s3cR#T"
     relation_id = harness.add_relation("oauth", "provider")
@@ -152,7 +159,7 @@ def test_get_client_credentials(harness, provider_info):
     )
 
 
-def test_malformed_redirect_url(harness):
+def test_malformed_redirect_url(harness: Harness) -> None:
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.redirect_uri = "http://some.callback"
 
@@ -160,7 +167,7 @@ def test_malformed_redirect_url(harness):
         harness.charm.oauth.update_client_config(client_config=client_config)
 
 
-def test_invalid_grant_type(harness):
+def test_invalid_grant_type(harness: Harness) -> None:
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.grant_types = ["authorization_code", "token_exchange"]
 
@@ -168,7 +175,7 @@ def test_invalid_grant_type(harness):
         harness.charm.oauth.update_client_config(client_config=client_config)
 
 
-def test_invalid_client_authn_method(harness):
+def test_invalid_client_authn_method(harness: Harness) -> None:
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.token_endpoint_auth_method = "private_key_jwt"
 
@@ -177,7 +184,7 @@ def test_invalid_client_authn_method(harness):
 
 
 class InvalidConfigOAuthRequirerCharm(CharmBase):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any) -> None:
         super().__init__(*args)
         client_config = ClientConfig(**CLIENT_CONFIG)
         client_config.redirect_uri = "http://some.callback"
@@ -187,12 +194,12 @@ class InvalidConfigOAuthRequirerCharm(CharmBase):
         self.framework.observe(self.oauth.on.oauth_info_changed, self._record_event)
         self.framework.observe(self.oauth.on.invalid_client_config, self._record_event)
 
-    def _record_event(self, event):
+    def _record_event(self, event: EventBase) -> None:
         self.events.append(event)
 
 
 @pytest.fixture()
-def harness_invalid_config():
+def harness_invalid_config() -> Generator:
     harness = Harness(InvalidConfigOAuthRequirerCharm, meta=METADATA)
     harness.set_leader(True)
     harness.begin_with_initial_hooks()
@@ -200,7 +207,7 @@ def harness_invalid_config():
     harness.cleanup()
 
 
-def test_invalid_client_config(harness_invalid_config):
+def test_invalid_client_config(harness_invalid_config: Harness) -> None:
     harness_invalid_config.add_relation("oauth", "provider")
 
     assert len(harness_invalid_config.charm.events) == 1

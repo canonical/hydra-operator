@@ -3,11 +3,14 @@
 
 import json
 import logging
+from typing import Tuple
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.pebble import Error, ExecError
+from ops.testing import Harness
 
 from tests.unit.test_oauth_requirer import CLIENT_CONFIG
 
@@ -45,7 +48,7 @@ def setup_ingress_relation(harness, type):
     return relation_id
 
 
-def setup_oauth_relation(harness):
+def setup_oauth_relation(harness: Harness) -> Tuple[int, str]:
     app_name = "requirer"
     relation_id = harness.add_relation("oauth", app_name)
     harness.add_relation_unit(relation_id, "requirer/0")
@@ -353,7 +356,7 @@ def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness
     assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
 
 
-def test_provider_info_called_when_ingress_then_oauth_relation(harness, mocked_set_provider_info):
+def test_hydra_endpoint_info_relation_data_with_ingress_relation_data(harness) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_ingress_relation(harness, "public")
@@ -371,8 +374,8 @@ def test_provider_info_called_when_ingress_then_oauth_relation(harness, mocked_s
 
 
 def test_provider_info_in_databag_when_ingress_then_oauth_relation(
-    harness, mocked_set_provider_info
-):
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_ingress_relation(harness, "public")
@@ -390,7 +393,9 @@ def test_provider_info_in_databag_when_ingress_then_oauth_relation(
     )
 
 
-def test_provider_info_called_when_oauth_relation_then_ingress(harness, mocked_set_provider_info):
+def test_provider_info_called_when_oauth_relation_then_ingress(
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_oauth_relation(harness)
@@ -408,7 +413,9 @@ def test_provider_info_called_when_oauth_relation_then_ingress(harness, mocked_s
     )
 
 
-def test_client_created_event(harness, mocked_create_client, mocked_set_client_credentials):
+def test_client_created_event(
+    harness: Harness, mocked_create_client: MagicMock, mocked_set_client_credentials: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     client_credentials = json.loads(mocked_create_client.return_value[0])
@@ -422,7 +429,9 @@ def test_client_created_event(harness, mocked_create_client, mocked_set_client_c
     )
 
 
-def test_client_created_event_when_cannot_connect(harness, mocked_create_client):
+def test_client_created_event_when_cannot_connect(
+    harness: Harness, mocked_create_client: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, False)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -431,7 +440,9 @@ def test_client_created_event_when_cannot_connect(harness, mocked_create_client)
     assert not mocked_create_client.called
 
 
-def test_client_created_event_when_no_service(harness, mocked_create_client):
+def test_client_created_event_when_no_service(
+    harness: Harness, mocked_create_client: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -440,11 +451,15 @@ def test_client_created_event_when_no_service(harness, mocked_create_client):
     assert not mocked_create_client.called
 
 
-def test_client_created_event_when_exec_error(harness, mocked_create_client, caplog):
+def test_client_created_event_when_exec_error(
+    harness: Harness, mocked_create_client: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    err = ExecError(command="hydra client client 1234", exit_code=1, stdout="Out", stderr="Error")
+    err = ExecError(
+        command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
+    )
     mocked_create_client.side_effect = err
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -454,7 +469,9 @@ def test_client_created_event_when_exec_error(harness, mocked_create_client, cap
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
 
 
-def test_client_created_event_when_error(harness, mocked_create_client, caplog):
+def test_client_created_event_when_error(
+    harness: Harness, mocked_create_client: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -470,7 +487,7 @@ def test_client_created_event_when_error(harness, mocked_create_client, caplog):
     )
 
 
-def test_client_changed_event(harness, mocked_hydra_cli):
+def test_client_changed_event(harness: Harness, mocked_hydra_cli: MagicMock) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
@@ -482,7 +499,9 @@ def test_client_changed_event(harness, mocked_hydra_cli):
     assert mocked_hydra_cli.called
 
 
-def test_client_changed_event_when_cannot_connect(harness, mocked_hydra_cli):
+def test_client_changed_event_when_cannot_connect(
+    harness: Harness, mocked_hydra_cli: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, False)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -493,7 +512,9 @@ def test_client_changed_event_when_cannot_connect(harness, mocked_hydra_cli):
     assert not mocked_hydra_cli.called
 
 
-def test_client_changed_event_when_no_service(harness, mocked_hydra_cli):
+def test_client_changed_event_when_no_service(
+    harness: Harness, mocked_hydra_cli: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -504,11 +525,15 @@ def test_client_changed_event_when_no_service(harness, mocked_hydra_cli):
     assert not mocked_hydra_cli.called
 
 
-def test_client_changed_event_when_exec_error(harness, mocked_hydra_cli, caplog):
+def test_client_changed_event_when_exec_error(
+    harness: Harness, mocked_hydra_cli: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    err = ExecError(command="hydra client client 1234", exit_code=1, stdout="Out", stderr="Error")
+    err = ExecError(
+        command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
+    )
     mocked_hydra_cli.side_effect = err
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -520,7 +545,9 @@ def test_client_changed_event_when_exec_error(harness, mocked_hydra_cli, caplog)
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
 
 
-def test_client_changed_event_when_error(harness, mocked_hydra_cli, caplog):
+def test_client_changed_event_when_error(
+    harness: Harness, mocked_hydra_cli: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
