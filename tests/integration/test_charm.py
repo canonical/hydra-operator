@@ -17,6 +17,8 @@ APP_NAME = METADATA["name"]
 TRAEFIK = "traefik-k8s"
 TRAEFIK_ADMIN_APP = "traefik-admin"
 TRAEFIK_PUBLIC_APP = "traefik-public"
+CLIENT_SECRET = "secret"
+CLIENT_REDIRECT_URIS = ["https://example.com"]
 
 
 async def get_unit_address(ops_test: OpsTest, app_name: str, unit_num: int) -> str:
@@ -104,12 +106,186 @@ async def test_has_admin_ingress(ops_test: OpsTest) -> None:
     assert resp.status_code == 200
 
 
-async def test_client_actions(ops_test: OpsTest):
-    action = await ops_test.model.applications[APP_NAME].units[0].run_action(
-        "create-oauth-client",
-        redirect_uris=["https://example.com"],
-        client_secret="secret",
+@pytest.mark.dependency()
+async def test_create_client_action(ops_test: OpsTest) -> None:
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "create-oauth-client",
+            **{
+                "redirect-uris": CLIENT_REDIRECT_URIS,
+                "client-secret": CLIENT_SECRET,
+            },
+        )
+    )
+    res = (await action.wait()).results
+
+    assert res["client-secret"] == CLIENT_SECRET
+    assert res["redirect-uris"] == "https://example.com"
+
+
+@pytest.mark.dependency(depends=["test_create_client_action"])
+async def test_list_client(ops_test: OpsTest) -> None:
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "list-oauth-clients",
+        )
+    )
+    res = (await action.wait()).results
+
+    assert len(res) > 0
+
+
+@pytest.mark.dependency(depends=["test_create_client_action"])
+async def test_get_client(ops_test: OpsTest) -> None:
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "list-oauth-clients",
+        )
+    )
+    res = (await action.wait()).results
+    client_id = res["0"]
+
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "get-oauth-client",
+            **{
+                "client-id": client_id,
+            },
+        )
+    )
+    res = (await action.wait()).results
+
+    assert res["redirect-uris"] == " ,".join(CLIENT_REDIRECT_URIS)
+
+
+@pytest.mark.dependency(depends=["test_create_client_action"])
+async def test_update_client(ops_test: OpsTest) -> None:
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "list-oauth-clients",
+        )
+    )
+    res = (await action.wait()).results
+    client_id = res["0"]
+
+    redirect_uris = ["https://other.app/oauth/callback"]
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "update-oauth-client",
+            **{
+                "client-id": client_id,
+                "redirect-uris": redirect_uris,
+            },
+        )
+    )
+    res = (await action.wait()).results
+
+    assert res["redirect-uris"] == " ,".join(redirect_uris)
+
+
+@pytest.mark.dependency(depends=["test_create_client_action"])
+async def test_revoke_access_tokens_client(ops_test: OpsTest) -> None:
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "list-oauth-clients",
+        )
+    )
+    res = (await action.wait()).results
+    client_id = res["0"]
+
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "revoke-oauth-client-access-tokens",
+            **{
+                "client-id": client_id,
+            },
+        )
+    )
+    res = (await action.wait()).results
+
+    # TODO: Test that tokens are actually deleted?
+    assert res["client-id"] == client_id
+
+
+@pytest.mark.dependency(depends=["test_create_client_action"])
+async def test_delete_client(ops_test: OpsTest) -> None:
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "list-oauth-clients",
+        )
+    )
+    res = (await action.wait()).results
+    client_id = res["0"]
+
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "delete-oauth-client",
+            **{
+                "client-id": client_id,
+            },
+        )
+    )
+    res = (await action.wait()).results
+
+    assert res["client-id"] == client_id
+
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "get-oauth-client",
+            **{
+                "client-id": client_id,
+            },
+        )
     )
     res = await action.wait()
-    breakpoint()
-    pass
+
+    assert res.status == "failed"
+    assert res.data["message"] == f"No such client: {client_id}"
+
+
+@pytest.mark.dependency(depends=["test_create_client_action"])
+async def test_rotate_keys(ops_test: OpsTest) -> None:
+    public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
+
+    jwks = requests.get(
+        f"http://{public_address}/{ops_test.model.name}-{APP_NAME}/.well-known/jwks.json"
+    )
+
+    action = (
+        await ops_test.model.applications[APP_NAME]
+        .units[0]
+        .run_action(
+            "rotate-key",
+        )
+    )
+    res = (await action.wait()).results
+
+    new_kid = res["new-key-id"]
+    new_jwks = requests.get(
+        f"http://{public_address}/{ops_test.model.name}-{APP_NAME}/.well-known/jwks.json"
+    )
+
+    assert any(jwk["kid"] == new_kid for jwk in new_jwks.json()["keys"])
+    assert len(new_jwks.json()["keys"]) == len(jwks.json()["keys"]) + 1
