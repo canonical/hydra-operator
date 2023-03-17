@@ -436,7 +436,6 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        client_config = event.to_client_config()
         try:
             client = self._hydra_cli.create_client(
                 audience=event.audience,
@@ -568,7 +567,7 @@ class HydraCharm(CharmBase):
         try:
             client = self._hydra_cli.get_client(client_id)
         except ExecError as err:
-            if "Unable to locate the resource" in err.stderr:
+            if err.stderr and "Unable to locate the resource" in err.stderr:
                 event.fail(f"No such client: {client_id}")
                 return
             event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -600,22 +599,11 @@ class HydraCharm(CharmBase):
         event.log(f"Fetching client: {client_id}")
         try:
             client = self._hydra_cli.get_client(client_id)
-        except ExecError as err:
-            if "Unable to locate the resource" in err.stderr:
-                event.fail(f"No such client: {client_id}")
+            if client.get("metadata", {}).get("relation_id"):
+                event.fail("Cannot edit clients created from juju relations.")
                 return
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            event.fail(f"Something went wrong when trying to run the command: {e}")
-            return
 
-        if client.get("metadata", {}).get("relation_id"):
-            event.fail("Cannot edit clients created from juju relations.")
-            return
-
-        event.log(f"Updating client: {client_id}")
-        try:
+            event.log(f"Updating client: {client_id}")
             client = self._hydra_cli.update_client(
                 client_id,
                 audience=event.params.get("audience") or client.get("audience"),
@@ -628,6 +616,9 @@ class HydraCharm(CharmBase):
                 or client.get("token_endpoint_auth_method"),
             )
         except ExecError as err:
+            if err.stderr and "Unable to locate the resource" in err.stderr:
+                event.fail(f"No such client: {client_id}")
+                return
             event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
             return
         except Error as e:
@@ -662,7 +653,7 @@ class HydraCharm(CharmBase):
         try:
             self._hydra_cli.delete_client(client_id)
         except ExecError as err:
-            if "Unable to locate the resource" in err.stderr:
+            if err.stderr and "Unable to locate the resource" in err.stderr:
                 event.fail(f"No such client: {client_id}")
                 return
             event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -683,7 +674,7 @@ class HydraCharm(CharmBase):
             event.fail("Service is not ready.")
             return
 
-        event.log(f"Fetching clients")
+        event.log("Fetching clients")
         try:
             clients = self._hydra_cli.list_clients()
         except ExecError as err:
@@ -693,7 +684,7 @@ class HydraCharm(CharmBase):
             event.fail(f"Something went wrong when trying to run the command: {e}")
             return
 
-        event.log(f"Successfully listed clients")
+        event.log("Successfully listed clients")
         event.set_results({str(i): c["client_id"] for i, c in enumerate(clients["items"])})
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
@@ -710,7 +701,7 @@ class HydraCharm(CharmBase):
         try:
             client = self._hydra_cli.delete_client_access_tokens(client_id)
         except ExecError as err:
-            if "Unable to locate the resource" in err.stderr:
+            if err.stderr and "Unable to locate the resource" in err.stderr:
                 event.fail(f"No such client: {client_id}")
                 return
             event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -741,7 +732,7 @@ class HydraCharm(CharmBase):
             event.fail(f"Something went wrong when trying to run the command: {e}")
             return
 
-        event.log(f"Successfully created new key")
+        event.log("Successfully created new key")
         event.set_results({"new-key-id": jwk["keys"][0]["kid"]})
 
     def _update_endpoint_info(self) -> None:

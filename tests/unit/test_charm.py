@@ -3,7 +3,7 @@
 
 import json
 import logging
-from typing import Dict, Tuple
+from typing import Tuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -661,7 +661,7 @@ def test_exec_error_on_client_deleted_event_emitted(
         "_on_rotate_key_action",
     ],
 )
-def test_actions_when_cannot_connect(harness: Harness, action) -> None:
+def test_actions_when_cannot_connect(harness: Harness, action: str) -> None:
     harness.set_can_connect(CONTAINER_NAME, False)
     event = MagicMock()
 
@@ -750,7 +750,7 @@ def test_delete_oauth_client_action(
 
     harness.charm._on_delete_oauth_client_action(event)
 
-    event.set_results.assert_called_with({'client-id': client_id})
+    event.set_results.assert_called_with({"client-id": client_id})
 
 
 def test_list_oauth_client_action(
@@ -766,9 +766,7 @@ def test_list_oauth_client_action(
     harness.charm._on_list_oauth_clients_action(event)
 
     ret = json.loads(mocked_list_client.return_value[0])
-    expected_output = {
-        i["client_id"] for i in ret["items"]
-    }
+    expected_output = {i["client_id"] for i in ret["items"]}
     assert set(event.set_results.call_args_list[0][0][0].values()) == expected_output
 
 
@@ -785,7 +783,7 @@ def test_revoke_oauth_client_access_tokens_action(
 
     harness.charm._on_revoke_oauth_client_access_tokens_action(event)
 
-    event.set_results.assert_called_with({'client-id': client_id})
+    event.set_results.assert_called_with({"client-id": client_id})
 
 
 def test_rotate_key_action(
@@ -798,5 +796,4 @@ def test_rotate_key_action(
 
     harness.charm._on_rotate_key_action(event)
 
-    event.set_results.assert_called_with({'new-key-id': ret["keys"][0]["kid"]})
-
+    event.set_results.assert_called_with({"new-key-id": ret["keys"][0]["kid"]})

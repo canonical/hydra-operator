@@ -107,10 +107,7 @@ def mocked_list_client(mocked_hydra_cli, hydra_cli_client_json):
     hydra_cli_client_json.pop("client_secret")
     hydra_cli_client_json.pop("registration_access_token")
     hydra_cli_client_json.pop("registration_client_uri")
-    ret = {"items": [
-        dict(hydra_cli_client_json, client_id=f"client-{i}")
-        for i in range(20)
-    ]}
+    ret = {"items": [dict(hydra_cli_client_json, client_id=f"client-{i}") for i in range(20)]}
     mocked_hydra_cli.return_value = (
         json.dumps(ret),
         None,
@@ -127,25 +124,27 @@ def mocked_delete_client(mocker: MockerFixture, hydra_cli_client_json) -> Genera
 @pytest.fixture()
 def mocked_create_jwk(mocked_hydra_cli):
     mocked_hydra_cli.return_value = (
-        json.dumps({
-            "set": "hydra.openid.id-token",
-            "keys": [
-                {
-                "alg": "RS256",
-                "d": "a",
-                "dp": "b",
-                "dq": "c",
-                "e": "AQAB",
-                "kid": "183d04f5-9e7b-4d2e-91e6-5b91d17db16d",
-                "kty": "RSA",
-                "n": "d",
-                "p": "e",
-                "q": "f",
-                "qi": "g",
-                "use": "sig"
-                }
-            ]
-            }),
+        json.dumps(
+            {
+                "set": "hydra.openid.id-token",
+                "keys": [
+                    {
+                        "alg": "RS256",
+                        "d": "a",
+                        "dp": "b",
+                        "dq": "c",
+                        "e": "AQAB",
+                        "kid": "183d04f5-9e7b-4d2e-91e6-5b91d17db16d",
+                        "kty": "RSA",
+                        "n": "d",
+                        "p": "e",
+                        "q": "f",
+                        "qi": "g",
+                        "use": "sig",
+                    }
+                ],
+            }
+        ),
         None,
     )
     yield mocked_hydra_cli

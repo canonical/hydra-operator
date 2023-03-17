@@ -22,7 +22,7 @@ class HydraCLI:
         self.hydra_admin_url = hydra_admin_url
         self.container = container
 
-    def _dump_list_or_dict(self, o):
+    def _dump_list_or_dict(self, o: Union[Dict, List, str]) -> str:
         if isinstance(o, dict):
             return json.dumps(o, separators=(",", ":"))
         if isinstance(o, list):
@@ -41,7 +41,7 @@ class HydraCLI:
         scope: List[str] = SUPPORTED_SCOPES,
         client_secret: Optional[str] = None,
         token_endpoint_auth_method: Optional[str] = None,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[Union[Dict, str]] = None,
     ) -> List[str]:
         """Convert a ClientConfig object to a list of parameters."""
         flag_mapping = {
@@ -105,7 +105,7 @@ class HydraCLI:
         logger.info(f"Successfully created client: {json_stdout.get('client_id')}")
         return json_stdout
 
-    def get_client(self, client_id):
+    def get_client(self, client_id: str) -> Dict:
         """Get an oauth2 client."""
         cmd = self._client_cmd_prefix("get")
         cmd.append(client_id)
@@ -165,7 +165,7 @@ class HydraCLI:
         ]
 
         stdout, _ = self._run_cmd(cmd)
-        logger.info(f"Successfully listed clients")
+        logger.info("Successfully listed clients")
         return json.loads(stdout)
 
     def delete_client_access_tokens(self, client_id: str) -> Optional[Dict]:
@@ -185,7 +185,8 @@ class HydraCLI:
         logger.info(f"Successfully deleted all the access tokens for client: {stdout}")
         return json.loads(stdout)
 
-    def create_jwk(self, set_id="hydra.openid.id-token", alg="RS256"):
+    def create_jwk(self, set_id: str = "hydra.openid.id-token", alg: str = "RS256") -> Dict:
+        """Add a new key to a jwks."""
         cmd = [
             "hydra",
             "create",
@@ -200,9 +201,9 @@ class HydraCLI:
         ]
 
         stdout, _ = self._run_cmd(cmd)
-        stdout = json.loads(stdout)
-        logger.info(f"Successfully created jwk: {stdout['keys'][0]['kid']}")
-        return stdout
+        json_stdout = json.loads(stdout)
+        logger.info(f"Successfully created jwk: {json_stdout['keys'][0]['kid']}")
+        return json_stdout
 
     def _run_cmd(
         self, cmd: List[str], timeout: float = 20
