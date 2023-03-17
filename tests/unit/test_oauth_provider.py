@@ -146,8 +146,7 @@ def test_client_changed(harness: Harness) -> None:
     )
 
     assert any(
-        isinstance(e, ClientChangedEvent)
-        and e.redirect_uri == redirect_uri
+        isinstance(e, ClientChangedEvent) and e.redirect_uri == redirect_uri
         for e in harness.charm.events
     )
 

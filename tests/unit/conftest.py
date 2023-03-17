@@ -1,7 +1,7 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import json
+from typing import Generator
 
 import pytest
 from ops.testing import Harness
@@ -26,25 +26,35 @@ def mocked_kubernetes_service_patcher(mocker):
 
 
 @pytest.fixture()
+def mocked_hydra_is_running(mocker) -> Generator:
+    yield mocker.patch("charm.HydraCharm._hydra_service_is_running", return_value=True)
+
+
+@pytest.fixture()
 def mocked_sql_migration(mocker):
     mocked_sql_migration = mocker.patch("charm.HydraCharm._run_sql_migration")
     yield mocked_sql_migration
 
 
 @pytest.fixture()
-def mocked_hydra_cli(mocker):
-    mock = mocker.patch("charm.HydraCLI._run_cmd")
-    mock.return_value = ("{}", None)
+def mocked_create_client(mocker):
+    mock = mocker.patch("charm.HydraCLI.create_client")
+    mock.return_value = {"client_id": "client_id", "client_secret": "client_secret"}
     yield mock
 
 
 @pytest.fixture()
-def mocked_create_client(mocked_hydra_cli):
-    mocked_hydra_cli.return_value = (
-        json.dumps({"client_id": "client_id", "client_secret": "client_secret"}),
-        None,
-    )
-    yield mocked_hydra_cli
+def mocked_update_client(mocker):
+    mock = mocker.patch("charm.HydraCLI.update_client")
+    mock.return_value = {"client_id": "client_id", "client_secret": "client_secret"}
+    yield mock
+
+
+@pytest.fixture()
+def mocked_delete_client(mocker):
+    mock = mocker.patch("charm.HydraCLI.delete_client")
+    mock.return_value = "client_id"
+    yield mock
 
 
 @pytest.fixture()

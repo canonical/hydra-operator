@@ -157,6 +157,17 @@ class HydraCharm(CharmBase):
 
         return True
 
+    @property
+    def _hydra_service_is_running(self) -> bool:
+        if not self._container.can_connect():
+            return False
+
+        try:
+            service = self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            return False
+        return service.is_running()
+
     def _render_conf_file(self) -> None:
         """Render the Hydra configuration file."""
         with open("templates/hydra.yaml.j2", "r") as file:
@@ -353,18 +364,14 @@ class HydraCharm(CharmBase):
         if not self.unit.is_leader():
             return
 
-        if not self._container.can_connect():
-            event.defer()
-            return
-
-        if not self._hydra_service_is_created:
+        if not self._hydra_service_is_running:
             event.defer()
             return
 
         client_config = event.to_client_config()
         try:
             client = self._hydra_cli.create_client(
-                client_config, metadata=f'{{"relation_id": {event.relation_id}}}'
+                client_config, metadata={"relation_id": {event.relation_id}}
             )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -383,18 +390,14 @@ class HydraCharm(CharmBase):
         if not self.unit.is_leader():
             return
 
-        if not self._container.can_connect():
-            event.defer()
-            return
-
-        if not self._hydra_service_is_created:
+        if not self._hydra_service_is_running:
             event.defer()
             return
 
         client_config = event.to_client_config()
         try:
             self._hydra_cli.update_client(
-                client_config, metadata=f'{{"relation_id": {event.relation_id}}}'
+                client_config, metadata={"relation_id": {event.relation_id}}
             )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -428,7 +431,7 @@ class HydraCLI:
         self.container = container
 
     def _client_config_to_cmd(
-        self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
+        self, client_config: ClientConfig, metadata: Optional[Dict] = None
     ) -> List[str]:
         """Convert a ClientConfig object to a list of parameters."""
         flags = [
@@ -447,12 +450,7 @@ class HydraCLI:
             flags.append(client_config.redirect_uri)
         if metadata:
             flags.append("--metadata")
-            if isinstance(metadata, dict):
-                flags.append(json.dumps(metadata))
-            elif isinstance(metadata, str):
-                flags.append(metadata)
-            else:
-                raise ValueError("Invalid metadata")
+            flags.append(json.dumps(metadata))
         return flags
 
     def _client_cmd_prefix(self, action: str) -> List[str]:
