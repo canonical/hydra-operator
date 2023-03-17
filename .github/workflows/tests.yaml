@@ -50,13 +50,6 @@ jobs:
         run: juju debug-log --replay --include hydra/0
         if: failure()
 
-      # - name: Dump logs
-      #   uses: canonical/charm-logdump-action@main
-      #   if: failure()
-      #   with:
-      #     app: hydra
-      #     model: testing
-
       - name: Get hydra container logs
         run: kubectl logs hydra-0 -c hydra -n testing
 
