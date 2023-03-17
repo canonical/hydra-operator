@@ -1,11 +1,15 @@
+# Copyright 2023 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""A helper class for interacting with the hydra CLI."""
 
 
-import logging
 import json
+import logging
 from typing import Dict, List, Optional, Tuple, Union
-from ops.model import Container
-from charms.hydra.v0.oauth import ClientConfig
 
+from charms.hydra.v0.oauth import ClientConfig
+from ops.model import Container
 
 logger = logging.getLogger(__name__)
 

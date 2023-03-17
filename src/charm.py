@@ -15,11 +15,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
 )
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
-from charms.hydra.v0.oauth import (
-    ClientChangedEvent,
-    ClientCreatedEvent,
-    OAuthProvider,
-)
+from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -38,13 +34,7 @@ from ops.charm import (
     WorkloadEvent,
 )
 from ops.main import main
-from ops.model import (
-    ActiveStatus,
-    BlockedStatus,
-    MaintenanceStatus,
-    ModelError,
-    WaitingStatus,
-)
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
 from ops.pebble import ChangeError, Error, ExecError, Layer
 
 from hydra_cli import HydraCLI
