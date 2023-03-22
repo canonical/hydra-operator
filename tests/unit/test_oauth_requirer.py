@@ -1,6 +1,7 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 from typing import Any, Dict, Generator
 
 import pytest
@@ -11,7 +12,6 @@ from charms.hydra.v0.oauth import (
     InvalidClientConfigEvent,
     OAuthInfoChangedEvent,
     OAuthRequirer,
-    _load_data,
 )
 from ops.charm import CharmBase
 from ops.framework import EventBase
@@ -56,6 +56,10 @@ CLIENT_CONFIG = {
 }
 
 
+def dict_to_relation_data(dic):
+    return {k: json.dumps(v) if isinstance(v, (list, dict)) else v for k, v in dic.items()}
+
+
 class OAuthRequirerCharm(CharmBase):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
@@ -75,7 +79,7 @@ def test_data_in_relation_bag(harness: Harness) -> None:
 
     relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
 
-    assert _load_data(relation_data) == CLIENT_CONFIG
+    assert relation_data == dict_to_relation_data(CLIENT_CONFIG)
 
 
 def test_no_event_emitted_when_provider_info_available_but_no_client_id(
@@ -91,7 +95,7 @@ def test_no_event_emitted_when_provider_info_available_but_no_client_id(
     relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
     events = harness.charm.events
 
-    assert _load_data(relation_data) == CLIENT_CONFIG
+    assert relation_data == dict_to_relation_data(CLIENT_CONFIG)
     assert len(events) == 0
 
 
