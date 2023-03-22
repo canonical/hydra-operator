@@ -33,9 +33,9 @@ class HydraCLI:
         ]
 
         if client_config.scope:
-            for s in client_config.scope.split(" "):
+            for scope in client_config.scope.split(" "):
                 flags.append("--scope")
-                flags.append(s)
+                flags.append(scope)
         if client_config.redirect_uri:
             flags.append("--redirect-uri")
             flags.append(client_config.redirect_uri)
