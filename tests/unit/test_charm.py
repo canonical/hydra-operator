@@ -667,7 +667,7 @@ def test_actions_when_cannot_connect(harness: Harness, action: str) -> None:
 
     getattr(harness.charm, action)(event)
 
-    event.fail.assert_called_with("Cannot connect to the container.")
+    event.fail.assert_called_with("Service is not ready.")
 
 
 def test_create_oauth_client_action(
