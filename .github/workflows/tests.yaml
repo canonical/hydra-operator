@@ -46,12 +46,9 @@ jobs:
         run: juju status --relations
         if: failure()
 
-      - name: Dump logs
-        uses: canonical/charm-logdump-action@main
+      - name: Get juju logs
+        run: juju debug-log --replay --include hydra/0
         if: failure()
-        with:
-          app: hydra
-          model: testing
 
       - name: Get hydra container logs
         run: kubectl logs hydra-0 -c hydra -n testing

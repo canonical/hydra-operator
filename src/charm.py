@@ -15,6 +15,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
 )
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
+from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -27,19 +28,23 @@ from ops.charm import (
     CharmBase,
     ConfigChangedEvent,
     HookEvent,
+    RelationCreatedEvent,
     RelationDepartedEvent,
     RelationEvent,
     WorkloadEvent,
 )
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
-from ops.pebble import ChangeError, ExecError, Layer
+from ops.pebble import ChangeError, Error, ExecError, Layer
+
+from hydra_cli import HydraCLI
 
 logger = logging.getLogger(__name__)
 
 EXTRA_USER_ROLES = "SUPERUSER"
 HYDRA_ADMIN_PORT = 4445
 HYDRA_PUBLIC_PORT = 4444
+SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 
 
 class HydraCharm(CharmBase):
@@ -53,6 +58,8 @@ class HydraCharm(CharmBase):
         self._hydra_config_path = "/etc/config/hydra.yaml"
         self._db_name = f"{self.model.name}_{self.app.name}"
         self._db_relation_name = "pg-database"
+
+        self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
 
         self.service_patcher = KubernetesServicePatch(
             self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
@@ -76,6 +83,7 @@ class HydraCharm(CharmBase):
             port=HYDRA_PUBLIC_PORT,
             strip_prefix=True,
         )
+        self.oauth = OAuthProvider(self)
 
         self.endpoints_provider = HydraEndpointsProvider(self)
 
@@ -96,6 +104,10 @@ class HydraCharm(CharmBase):
 
         self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
+
+        self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
+        self.framework.observe(self.oauth.on.client_created, self._on_client_created)
+        self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -133,6 +145,17 @@ class HydraCharm(CharmBase):
 
         return True
 
+    @property
+    def _hydra_service_is_running(self) -> bool:
+        if not self._container.can_connect():
+            return False
+
+        try:
+            service = self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            return False
+        return service.is_running()
+
     def _render_conf_file(self) -> None:
         """Render the Hydra configuration file."""
         with open("templates/hydra.yaml.j2", "r") as file:
@@ -146,6 +169,7 @@ class HydraCharm(CharmBase):
             hydra_public_url=self.public_ingress.url
             if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
+            supported_scopes=SUPPORTED_SCOPES,
         )
         return rendered
 
@@ -303,6 +327,7 @@ class HydraCharm(CharmBase):
             logger.info("This app's admin ingress URL: %s", event.url)
 
         self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
 
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         if self.unit.is_leader():
@@ -310,6 +335,7 @@ class HydraCharm(CharmBase):
 
         self._handle_status_update_config(event)
         self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         if self.unit.is_leader():
@@ -317,6 +343,72 @@ class HydraCharm(CharmBase):
 
         self._handle_status_update_config(event)
         self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
+
+    def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
+        self._update_endpoint_info()
+
+    def _on_client_created(self, event: ClientCreatedEvent) -> None:
+        if not self.unit.is_leader():
+            return
+
+        if not self._hydra_service_is_running:
+            event.defer()
+            return
+
+        client_config = event.to_client_config()
+        try:
+            client = self._hydra_cli.create_client(
+                client_config, metadata={"relation_id": {event.relation_id}}
+            )
+        except ExecError as err:
+            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            logger.info("Deferring the event")
+            event.defer()
+            return
+
+        self.oauth.set_client_credentials_in_relation_data(
+            event.relation_id, client["client_id"], client["client_secret"]
+        )
+
+    def _on_client_changed(self, event: ClientChangedEvent) -> None:
+        if not self.unit.is_leader():
+            return
+
+        if not self._hydra_service_is_running:
+            event.defer()
+            return
+
+        client_config = event.to_client_config()
+        try:
+            self._hydra_cli.update_client(
+                client_config, metadata={"relation_id": {event.relation_id}}
+            )
+        except ExecError as err:
+            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            logger.info("Deferring the event")
+            event.defer()
+            return
+
+    def _update_endpoint_info(self) -> None:
+        if not self.admin_ingress.url or not self.public_ingress.url:
+            return
+
+        self.oauth.set_provider_info_in_relation_data(
+            issuer_url=self.public_ingress.url,
+            authorization_endpoint=join(self.public_ingress.url, "oauth2/auth"),
+            token_endpoint=join(self.public_ingress.url, "oauth2/token"),
+            introspection_endpoint=join(self.admin_ingress.url, "admin/oauth2/introspect"),
+            userinfo_endpoint=join(self.public_ingress.url, "userinfo"),
+            jwks_endpoint=join(self.public_ingress.url, ".well-known/jwks.json"),
+            scope=" ".join(SUPPORTED_SCOPES),
+        )
 
 
 if __name__ == "__main__":

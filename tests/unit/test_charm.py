@@ -2,10 +2,17 @@
 # See LICENSE file for licensing details.
 
 import json
+import logging
+from typing import Tuple
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
+from ops.pebble import Error, ExecError
+from ops.testing import Harness
+
+from tests.unit.test_oauth_requirer import CLIENT_CONFIG
 
 CONTAINER_NAME = "hydra"
 DB_USERNAME = "test-username"
@@ -39,6 +46,13 @@ def setup_ingress_relation(harness, type):
         {"ingress": json.dumps({"url": f"http://{type}:80/{harness.model.name}-hydra"})},
     )
     return relation_id
+
+
+def setup_oauth_relation(harness: Harness) -> Tuple[int, str]:
+    app_name = "requirer"
+    relation_id = harness.add_relation("oauth", app_name)
+    harness.add_relation_unit(relation_id, "requirer/0")
+    return relation_id, app_name
 
 
 def test_not_leader(harness):
@@ -144,6 +158,9 @@ def test_update_container_config(harness, mocked_sql_migration):
                 "public": "http://127.0.0.1:4444/",
             },
         },
+        "webfinger": {
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+        },
     }
 
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
@@ -200,6 +217,9 @@ def test_config_updated_on_config_changed(harness, mocked_sql_migration) -> None
                 "issuer": "http://127.0.0.1:4444/",
                 "public": "http://127.0.0.1:4444/",
             },
+        },
+        "webfinger": {
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
         },
     }
 
@@ -258,6 +278,9 @@ def test_config_updated_on_ingress_relation_joined(harness) -> None:
                 "public": "http://public:80/testing-hydra",
             },
         },
+        "webfinger": {
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+        },
     }
 
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
@@ -303,6 +326,9 @@ def test_hydra_config_on_pebble_ready_without_ingress_relation_data(harness) -> 
                 "public": "http://127.0.0.1:4444/",
             },
         },
+        "webfinger": {
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+        },
     }
 
     container = harness.model.unit.get_container(CONTAINER_NAME)
@@ -345,3 +371,207 @@ def test_hydra_endpoint_info_relation_data_with_ingress_relation_data(harness) -
     }
 
     assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
+
+
+def test_provider_info_in_databag_when_ingress_then_oauth_relation(
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_ingress_relation(harness, "public")
+    setup_ingress_relation(harness, "admin")
+    setup_oauth_relation(harness)
+
+    mocked_set_provider_info.assert_called_with(
+        authorization_endpoint="http://public:80/testing-hydra/oauth2/auth",
+        introspection_endpoint="http://admin:80/testing-hydra/admin/oauth2/introspect",
+        issuer_url="http://public:80/testing-hydra",
+        jwks_endpoint="http://public:80/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="http://public:80/testing-hydra/oauth2/token",
+        userinfo_endpoint="http://public:80/testing-hydra/userinfo",
+    )
+
+
+def test_provider_info_called_when_oauth_relation_then_ingress(
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_oauth_relation(harness)
+    setup_ingress_relation(harness, "public")
+    setup_ingress_relation(harness, "admin")
+
+    mocked_set_provider_info.assert_called_once_with(
+        authorization_endpoint="http://public:80/testing-hydra/oauth2/auth",
+        introspection_endpoint="http://admin:80/testing-hydra/admin/oauth2/introspect",
+        issuer_url="http://public:80/testing-hydra",
+        jwks_endpoint="http://public:80/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="http://public:80/testing-hydra/oauth2/token",
+        userinfo_endpoint="http://public:80/testing-hydra/userinfo",
+    )
+
+
+def test_set_client_credentials_on_client_created_event_emitted(
+    harness: Harness,
+    mocked_create_client: MagicMock,
+    mocked_set_client_credentials: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    client_credentials = mocked_create_client.return_value
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    relation_id, _ = setup_oauth_relation(harness)
+
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    mocked_set_client_credentials.assert_called_once_with(
+        relation_id, client_credentials["client_id"], client_credentials["client_secret"]
+    )
+
+
+def test_client_created_event_emitted_cannot_connect(
+    harness: Harness, mocked_create_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, False)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert not mocked_create_client.called
+
+
+def test_client_created_event_emitted_without_service(
+    harness: Harness, mocked_create_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert not mocked_create_client.called
+
+
+def test_exec_error_on_client_created_event_emitted(
+    harness: Harness,
+    mocked_create_client: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR)
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    err = ExecError(
+        command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
+    )
+    mocked_create_client.side_effect = err
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+
+
+def test_error_on_client_created_event_emitted(
+    harness: Harness,
+    mocked_create_client: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR)
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    err = Error("Some error")
+    mocked_create_client.side_effect = err
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert (
+        caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
+    )
+
+
+def test_client_changed_event_emitted(
+    harness: Harness, mocked_update_client: MagicMock, mocked_hydra_is_running: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
+
+    assert mocked_update_client.called
+
+
+def test_client_changed_event_emitted_cannot_connect(
+    harness: Harness, mocked_update_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, False)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
+
+    assert not mocked_update_client.called
+
+
+def test_client_changed_event_emitted_without_service(
+    harness: Harness, mocked_update_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
+
+    assert not mocked_update_client.called
+
+
+def test_exec_error_on_client_changed_event_emitted(
+    harness: Harness,
+    mocked_update_client: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR)
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    err = ExecError(
+        command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
+    )
+    mocked_update_client.side_effect = err
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
+
+    assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+
+
+def test_error_on_client_changed_event_emitted(
+    harness: Harness,
+    mocked_update_client: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR)
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    err = Error("Some error")
+    mocked_update_client.side_effect = err
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_changed.emit(
+        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
+    )
+
+    assert (
+        caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
+    )
