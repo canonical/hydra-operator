@@ -184,7 +184,9 @@ class HydraCLI:
         logger.info(f"Successfully deleted all the access tokens for client: {stdout}")
         return json.loads(stdout)
 
-    def create_jwk(self, set_id: str = "hydra.openid.id-token", alg: str = "RS256") -> Dict:
+    def create_jwk(
+        self, set_id: Optional[str] = "hydra.openid.id-token", alg: Optional[str] = "RS256"
+    ) -> Dict:
         """Add a new key to a jwks."""
         cmd = [
             "hydra",
@@ -205,7 +207,7 @@ class HydraCLI:
         return json_stdout
 
     def _run_cmd(
-        self, cmd: List[str], timeout: float = 20
+        self, cmd: List[str], timeout: Optional[float] = 20
     ) -> Tuple[Union[str, bytes], Union[str, bytes]]:
         logger.debug(f"Running cmd: {cmd}")
         process = self.container.exec(cmd, timeout=timeout)

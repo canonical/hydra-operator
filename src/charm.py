@@ -514,10 +514,6 @@ class HydraCharm(CharmBase):
 
 
     def _on_create_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._container.can_connect():
-            event.fail("Cannot connect to the container.")
-            return
-
         if not self._hydra_service_is_running:
             event.fail("Service is not ready.")
             return
@@ -555,10 +551,6 @@ class HydraCharm(CharmBase):
         )
 
     def _on_get_oauth_client_info_action(self, event: ActionEvent) -> None:
-        if not self._container.can_connect():
-            event.fail("Cannot connect to the container.")
-            return
-
         if not self._hydra_service_is_running:
             event.fail("Service is not ready.")
             return
@@ -589,10 +581,6 @@ class HydraCharm(CharmBase):
         )
 
     def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._container.can_connect():
-            event.fail("Cannot connect to the container.")
-            return
-
         if not self._hydra_service_is_running:
             event.fail("Service is not ready.")
             return
@@ -642,10 +630,6 @@ class HydraCharm(CharmBase):
         )
 
     def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._container.can_connect():
-            event.fail("Cannot connect to the container.")
-            return
-
         if not self._hydra_service_is_running:
             event.fail("Service is not ready.")
             return
@@ -668,10 +652,6 @@ class HydraCharm(CharmBase):
         event.set_results({"client-id": client_id})
 
     def _on_list_oauth_clients_action(self, event: ActionEvent) -> None:
-        if not self._container.can_connect():
-            event.fail("Cannot connect to the container.")
-            return
-
         if not self._hydra_service_is_running:
             event.fail("Service is not ready.")
             return
@@ -690,10 +670,6 @@ class HydraCharm(CharmBase):
         event.set_results({str(i): c["client_id"] for i, c in enumerate(clients["items"])})
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
-        if not self._container.can_connect():
-            event.fail("Cannot connect to the container.")
-            return
-
         if not self._hydra_service_is_running:
             event.fail("Service is not ready.")
             return
@@ -716,10 +692,6 @@ class HydraCharm(CharmBase):
         event.set_results({"client-id": client})
 
     def _on_rotate_key_action(self, event: ActionEvent) -> None:
-        if not self._container.can_connect():
-            event.fail("Cannot connect to the container.")
-            return
-
         if not self._hydra_service_is_running:
             event.fail("Service is not ready.")
             return
