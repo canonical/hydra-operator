@@ -122,24 +122,24 @@ def mocked_revoke_tokens(mocker):
 def mocked_create_jwk(mocker):
     mock = mocker.patch("charm.HydraCLI.create_jwk")
     mock.return_value = {
-                "set": "hydra.openid.id-token",
-                "keys": [
-                    {
-                        "alg": "RS256",
-                        "d": "a",
-                        "dp": "b",
-                        "dq": "c",
-                        "e": "AQAB",
-                        "kid": "183d04f5-9e7b-4d2e-91e6-5b91d17db16d",
-                        "kty": "RSA",
-                        "n": "d",
-                        "p": "e",
-                        "q": "f",
-                        "qi": "g",
-                        "use": "sig",
-                    }
-                ],
+        "set": "hydra.openid.id-token",
+        "keys": [
+            {
+                "alg": "RS256",
+                "d": "a",
+                "dp": "b",
+                "dq": "c",
+                "e": "AQAB",
+                "kid": "183d04f5-9e7b-4d2e-91e6-5b91d17db16d",
+                "kty": "RSA",
+                "n": "d",
+                "p": "e",
+                "q": "f",
+                "qi": "g",
+                "use": "sig",
             }
+        ],
+    }
     yield mock
 
 

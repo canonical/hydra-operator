@@ -27,7 +27,7 @@ create-oauth-client:
     token-endpoint-auth-method:
       description: The authentication method the client may use at the token endpoint.
       type: string
-get-oauth-client:
+get-oauth-client-info:
   description: Get an oauth client's information
   params:
     client-id:

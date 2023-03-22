@@ -129,7 +129,9 @@ class HydraCharm(CharmBase):
         self.framework.observe(
             self.on.create_oauth_client_action, self._on_create_oauth_client_action
         )
-        self.framework.observe(self.on.get_oauth_client_action, self._on_get_oauth_client_action)
+        self.framework.observe(
+            self.on.get_oauth_client_info_action, self._on_get_oauth_client_info_action
+        )
         self.framework.observe(
             self.on.update_oauth_client_action, self._on_update_oauth_client_action
         )
@@ -552,7 +554,7 @@ class HydraCharm(CharmBase):
             }
         )
 
-    def _on_get_oauth_client_action(self, event: ActionEvent) -> None:
+    def _on_get_oauth_client_info_action(self, event: ActionEvent) -> None:
         if not self._container.can_connect():
             event.fail("Cannot connect to the container.")
             return

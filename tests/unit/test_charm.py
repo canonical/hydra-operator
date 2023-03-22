@@ -653,7 +653,7 @@ def test_exec_error_on_client_deleted_event_emitted(
     "action",
     [
         "_on_create_oauth_client_action",
-        "_on_get_oauth_client_action",
+        "_on_get_oauth_client_info_action",
         "_on_update_oauth_client_action",
         "_on_delete_oauth_client_action",
         "_on_list_oauth_clients_action",
@@ -694,7 +694,7 @@ def test_create_oauth_client_action(
     )
 
 
-def test_get_oauth_client_action(
+def test_get_oauth_client_info_action(
     harness: Harness, mocked_hydra_is_running: MagicMock, mocked_get_client: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -704,7 +704,7 @@ def test_get_oauth_client_action(
         "client-id": ret.get("client_id"),
     }
 
-    harness.charm._on_get_oauth_client_action(event)
+    harness.charm._on_get_oauth_client_info_action(event)
 
     event.set_results.assert_called_with(
         {k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v for k, v in ret.items()}
@@ -712,7 +712,10 @@ def test_get_oauth_client_action(
 
 
 def test_update_oauth_client_action(
-    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_update_client: MagicMock, mocked_get_client: MagicMock
+    harness: Harness,
+    mocked_hydra_is_running: MagicMock,
+    mocked_update_client: MagicMock,
+    mocked_get_client: MagicMock,
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     ret = mocked_update_client.return_value
