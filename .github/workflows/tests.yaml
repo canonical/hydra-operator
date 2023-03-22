@@ -30,8 +30,9 @@ jobs:
         uses: charmed-kubernetes/actions-operator@main
         with:
           provider: microk8s
-          channel: 1.25/stable
-          bootstrap-options: '--agent-version=2.9.34'
+          channel: 1.25-strict/stable
+          juju-channel: 3.1
+          bootstrap-options: '--agent-version=3.1.0'
 
       - name: Run integration tests
         # set a predictable model name so it can be consumed by charm-logdump-action
@@ -45,12 +46,9 @@ jobs:
         run: juju status --relations
         if: failure()
 
-      - name: Dump logs
-        uses: canonical/charm-logdump-action@main
+      - name: Get juju logs
+        run: juju debug-log --replay --include hydra/0
         if: failure()
-        with:
-          app: hydra
-          model: testing
 
       - name: Get hydra container logs
         run: kubectl logs hydra-0 -c hydra -n testing

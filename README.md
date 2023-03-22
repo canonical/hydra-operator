@@ -36,6 +36,33 @@ To provide ingress to the public API run:
 juju relate traefik-public hydra:public-ingress
 ```
 
+## Relations
+
+Currently, supported relations are:
+
+- postgres, for interacting with [postgres](https://github.com/canonical/postgresql-k8s-operator).
+- admin-ingress, for interacting with [ingress](https://github.com/canonical/traefik-k8s-operator).
+- public-ingress, for interacting with [ingress](https://github.com/canonical/traefik-k8s-operator).
+- kratos, for interacting with [kratos](https://github.com/canonical/kratos-operator).
+
+## Integration with Kratos and UI
+
+The following instructions assume that you have deployed `traefik-admin` and `traefik-public` charms and related them to hydra.
+
+If you have deployed [Login UI charm](https://github.com/canonical/identity-platform-login-ui), you can configure it with hydra by providing its URL.
+Note that the UI charm should run behind a proxy.
+```console
+juju config hydra login_ui_url=http://{traefik_public_ip}/{model_name}-{kratos_ui_app_name}
+```
+
+In order to integrate hydra with kratos, it needs to be able to access hydra's admin API endpoint.
+To enable that, relate the two charms:
+```console
+juju relate kratos hydra
+```
+
+For further guidance on integration on kratos side, visit the [kratos-operator](https://github.com/canonical/kratos-operator#readme) repository.
+
 ## OCI Images
 
 The image used by this charm is hosted on [Docker Hub](https://hub.docker.com/r/oryd/hydra) and maintained by Ory.

@@ -1,0 +1,5 @@
+options:
+  login_ui_url:
+    description: Kratos UI URL
+    type: string
+    default: "http://127.0.0.1:4455/"

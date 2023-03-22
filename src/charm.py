@@ -7,12 +7,15 @@
 """A Juju charm for Ory Hydra."""
 
 import logging
+from os.path import join
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
     DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
+from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
+from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -20,16 +23,28 @@ from charms.traefik_k8s.v1.ingress import (
     IngressPerAppRevokedEvent,
 )
 from jinja2 import Template
-from ops.charm import ActionEvent, CharmBase, RelationDepartedEvent, WorkloadEvent
+from ops.charm import (
+    ActionEvent,
+    CharmBase,
+    ConfigChangedEvent,
+    HookEvent,
+    RelationCreatedEvent,
+    RelationDepartedEvent,
+    RelationEvent,
+    WorkloadEvent,
+)
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
-from ops.pebble import ChangeError, ExecError, Layer
+from ops.pebble import ChangeError, Error, ExecError, Layer
+
+from hydra_cli import HydraCLI
 
 logger = logging.getLogger(__name__)
 
 EXTRA_USER_ROLES = "SUPERUSER"
 HYDRA_ADMIN_PORT = 4445
 HYDRA_PUBLIC_PORT = 4444
+SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 
 
 class HydraCharm(CharmBase):
@@ -43,6 +58,8 @@ class HydraCharm(CharmBase):
         self._hydra_config_path = "/etc/config/hydra.yaml"
         self._db_name = f"{self.model.name}_{self.app.name}"
         self._db_relation_name = "pg-database"
+
+        self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
 
         self.service_patcher = KubernetesServicePatch(
             self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
@@ -66,8 +83,15 @@ class HydraCharm(CharmBase):
             port=HYDRA_PUBLIC_PORT,
             strip_prefix=True,
         )
+        self.oauth = OAuthProvider(self)
+
+        self.endpoints_provider = HydraEndpointsProvider(self)
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(
+            self.endpoints_provider.on.ready, self._update_hydra_endpoints_relation_data
+        )
         self.framework.observe(self.database.on.database_created, self._on_database_created)
         self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
         self.framework.observe(self.on.run_migration_action, self._on_run_migration)
@@ -80,6 +104,10 @@ class HydraCharm(CharmBase):
 
         self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
+
+        self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
+        self.framework.observe(self.oauth.on.client_created, self._on_client_created)
+        self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -108,6 +136,26 @@ class HydraCharm(CharmBase):
         }
         return Layer(layer_config)
 
+    @property
+    def _hydra_service_is_created(self) -> bool:
+        try:
+            self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            return False
+
+        return True
+
+    @property
+    def _hydra_service_is_running(self) -> bool:
+        if not self._container.can_connect():
+            return False
+
+        try:
+            service = self._container.get_service(self._container_name)
+        except (ModelError, RuntimeError):
+            return False
+        return service.is_running()
+
     def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
         with open("templates/hydra.yaml.j2", "r") as file:
@@ -115,9 +163,13 @@ class HydraCharm(CharmBase):
 
         rendered = template.render(
             db_info=self._get_database_relation_info(),
-            consent_url="http://localhost:4455/consent",
-            error_url="http://localhost:4455/error",
-            login_url="http://localhost:4455/login",
+            consent_url=join(self.config.get("login_ui_url"), "consent"),
+            error_url=join(self.config.get("login_ui_url"), "oidc_error"),
+            login_url=join(self.config.get("login_ui_url"), "login"),
+            hydra_public_url=self.public_ingress.url
+            if self.public_ingress.is_ready()
+            else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
+            supported_scopes=SUPPORTED_SCOPES,
         )
         return rendered
 
@@ -142,8 +194,7 @@ class HydraCharm(CharmBase):
         stdout, _ = process.wait_output()
         logger.info(f"Executing automigration: {stdout}")
 
-    def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
-        """Event Handler for pebble ready event."""
+    def _handle_status_update_config(self, event: HookEvent) -> None:
         if not self._container.can_connect():
             event.defer()
             logger.info("Cannot connect to Hydra container. Deferring the event.")
@@ -152,26 +203,63 @@ class HydraCharm(CharmBase):
 
         self.unit.status = MaintenanceStatus("Configuring resources")
 
-        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-        logger.info("Pebble plan updated with new configuration, replanning")
+        current_layer = self._container.get_plan()
+        new_layer = self._hydra_layer
+        if current_layer.services != new_layer.services:
+            self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
+            logger.info("Pebble plan updated with new configuration, replanning")
+            try:
+                self._container.replan()
+            except ChangeError as err:
+                logger.error(str(err))
+                self.unit.status = BlockedStatus("Failed to replan, please consult the logs")
+                return
 
-        try:
-            self._container.replan()
-        except ChangeError as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus("Failed to replan, please consult the logs")
+        if not self._hydra_service_is_created:
+            event.defer()
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            logger.info("Hydra service is absent. Deferring the event.")
             return
 
-        if self.database.is_resource_created():
-            self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-            self._container.start(self._container_name)
-            self.unit.status = ActiveStatus()
-            return
-
-        if self.model.relations[self._db_relation_name]:
-            self.unit.status = WaitingStatus("Waiting for database creation")
-        else:
+        if not self.model.relations[self._db_relation_name]:
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
+            return
+
+        if not self.database.is_resource_created():
+            self.unit.status = WaitingStatus("Waiting for database creation")
+            return
+
+        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
+        self._container.restart(self._container_name)
+        self.unit.status = ActiveStatus()
+
+    def _update_hydra_endpoints_relation_data(self, event: RelationEvent) -> None:
+        admin_endpoint = (
+            self.admin_ingress.url
+            if self.admin_ingress.is_ready()
+            else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}",
+        )
+        public_endpoint = (
+            self.public_ingress.url
+            if self.public_ingress.is_ready()
+            else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}",
+        )
+
+        logger.info(
+            f"Sending endpoints info: public - {public_endpoint[0]} admin - {admin_endpoint[0]}"
+        )
+
+        self.endpoints_provider.send_endpoint_relation_data(
+            self.app, admin_endpoint[0], public_endpoint[0]
+        )
+
+    def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
+        """Event Handler for pebble ready event."""
+        self._handle_status_update_config(event)
+
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        """Event Handler for config changed event."""
+        self._handle_status_update_config(event)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
@@ -193,12 +281,10 @@ class HydraCharm(CharmBase):
             "Configuring container and resources for database connection"
         )
 
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
+        if not self._hydra_service_is_created:
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
-            logger.info("Hydra service is absent. Deferring database created event.")
+            logger.info("Hydra service is absent. Deferring the event.")
             return
 
         logger.info("Updating Hydra config and restarting service")
@@ -217,26 +303,7 @@ class HydraCharm(CharmBase):
 
     def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
         """Event Handler for database changed event."""
-        if not self._container.can_connect():
-            event.defer()
-            logger.info("Cannot connect to Hydra container. Deferring the event.")
-            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
-            return
-
-        self.unit.status = MaintenanceStatus("Updating database details")
-
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
-            event.defer()
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            logger.info("Hydra service is absent. Deferring database created event.")
-            return
-
-        logger.info("Updating Hydra config and restarting service")
-        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-        self._container.restart(self._container_name)
-        self.unit.status = ActiveStatus()
+        self._handle_status_update_config(event)
 
     def _on_run_migration(self, event: ActionEvent) -> None:
         """Runs the migration as an action response."""
@@ -259,13 +326,89 @@ class HydraCharm(CharmBase):
         if self.unit.is_leader():
             logger.info("This app's admin ingress URL: %s", event.url)
 
+        self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
+
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         if self.unit.is_leader():
             logger.info("This app's public ingress URL: %s", event.url)
 
+        self._handle_status_update_config(event)
+        self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
+
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         if self.unit.is_leader():
             logger.info("This app no longer has ingress")
+
+        self._handle_status_update_config(event)
+        self._update_hydra_endpoints_relation_data(event)
+        self._update_endpoint_info()
+
+    def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
+        self._update_endpoint_info()
+
+    def _on_client_created(self, event: ClientCreatedEvent) -> None:
+        if not self.unit.is_leader():
+            return
+
+        if not self._hydra_service_is_running:
+            event.defer()
+            return
+
+        client_config = event.to_client_config()
+        try:
+            client = self._hydra_cli.create_client(
+                client_config, metadata={"relation_id": {event.relation_id}}
+            )
+        except ExecError as err:
+            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            logger.info("Deferring the event")
+            event.defer()
+            return
+
+        self.oauth.set_client_credentials_in_relation_data(
+            event.relation_id, client["client_id"], client["client_secret"]
+        )
+
+    def _on_client_changed(self, event: ClientChangedEvent) -> None:
+        if not self.unit.is_leader():
+            return
+
+        if not self._hydra_service_is_running:
+            event.defer()
+            return
+
+        client_config = event.to_client_config()
+        try:
+            self._hydra_cli.update_client(
+                client_config, metadata={"relation_id": {event.relation_id}}
+            )
+        except ExecError as err:
+            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            logger.info("Deferring the event")
+            event.defer()
+            return
+
+    def _update_endpoint_info(self) -> None:
+        if not self.admin_ingress.url or not self.public_ingress.url:
+            return
+
+        self.oauth.set_provider_info_in_relation_data(
+            issuer_url=self.public_ingress.url,
+            authorization_endpoint=join(self.public_ingress.url, "oauth2/auth"),
+            token_endpoint=join(self.public_ingress.url, "oauth2/token"),
+            introspection_endpoint=join(self.admin_ingress.url, "admin/oauth2/introspect"),
+            userinfo_endpoint=join(self.public_ingress.url, "userinfo"),
+            jwks_endpoint=join(self.public_ingress.url, ".well-known/jwks.json"),
+            scope=" ".join(SUPPORTED_SCOPES),
+        )
 
 
 if __name__ == "__main__":
