@@ -71,6 +71,7 @@ def harness() -> Generator:
 
 def test_provider_info_in_relation_databag(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "requirer")
+
     relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
 
     assert relation_data == {
@@ -84,7 +85,7 @@ def test_provider_info_in_relation_databag(harness: Harness) -> None:
     }
 
 
-def test_client_credentials_in_relation_databag(harness: Harness) -> None:
+def test_client_credentials_in_relation_databag_when_client_available(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "requirer")
     harness.add_relation_unit(relation_id, "requirer/0")
     harness.update_relation_data(
@@ -98,8 +99,8 @@ def test_client_credentials_in_relation_databag(harness: Harness) -> None:
             "token_endpoint_auth_method": "client_secret_basic",
         },
     )
-    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
 
+    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
     client_secret_id = relation_data.pop("client_secret_id")
     secret = harness.model.get_secret(id=client_secret_id)
 
@@ -117,7 +118,7 @@ def test_client_credentials_in_relation_databag(harness: Harness) -> None:
     }
 
 
-def test_client_changed(harness: Harness) -> None:
+def test_client_changed_event_emitted_when_client_config_changed(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "requirer")
     harness.add_relation_unit(relation_id, "requirer/0")
     harness.update_relation_data(
@@ -151,7 +152,7 @@ def test_client_changed(harness: Harness) -> None:
     )
 
 
-def test_on_client_config_deleted_event_emitted(harness: Harness) -> None:
+def test_client_deleted_event_emitted_when_relation_removed(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "requirer")
     harness.add_relation_unit(relation_id, "requirer/0")
     harness.update_relation_data(
@@ -170,7 +171,7 @@ def test_on_client_config_deleted_event_emitted(harness: Harness) -> None:
     assert any(isinstance(e, ClientDeletedEvent) for e in harness.charm.events)
 
 
-def test_on_client_config_deleted_secret_removed(harness: Harness) -> None:
+def test_secret_removed_when_relation_removed(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "requirer")
     harness.add_relation_unit(relation_id, "requirer/0")
     harness.update_relation_data(
@@ -186,8 +187,7 @@ def test_on_client_config_deleted_secret_removed(harness: Harness) -> None:
     )
 
     relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
-    client_secret_id = relation_data.pop("client_secret_id")
-
+    client_secret_id = relation_data["client_secret_id"]
     harness.remove_relation(relation_id)
 
     with pytest.raises(SecretNotFoundError, match="Secret not found by ID"):

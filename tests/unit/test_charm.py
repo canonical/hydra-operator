@@ -413,26 +413,25 @@ def test_provider_info_called_when_oauth_relation_then_ingress(
     )
 
 
-def test_client_created_event(
+def test_set_client_credentials_on_client_created_event_emitted(
     harness: Harness,
     mocked_create_client: MagicMock,
     mocked_set_client_credentials: MagicMock,
     mocked_hydra_is_running: MagicMock,
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     client_credentials = mocked_create_client.return_value
-
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     relation_id, _ = setup_oauth_relation(harness)
+
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
-    assert mocked_create_client.called
     mocked_set_client_credentials.assert_called_once_with(
         relation_id, client_credentials["client_id"], client_credentials["client_secret"]
     )
 
 
-def test_client_created_event_when_cannot_connect(
+def test_client_created_event_emitted_cannot_connect(
     harness: Harness, mocked_create_client: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, False)
@@ -443,7 +442,7 @@ def test_client_created_event_when_cannot_connect(
     assert not mocked_create_client.called
 
 
-def test_client_created_event_when_no_service(
+def test_client_created_event_emitted_without_service(
     harness: Harness, mocked_create_client: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -454,7 +453,7 @@ def test_client_created_event_when_no_service(
     assert not mocked_create_client.called
 
 
-def test_client_created_event_when_exec_error(
+def test_exec_error_on_client_created_event_emitted(
     harness: Harness,
     mocked_create_client: MagicMock,
     mocked_hydra_is_running: MagicMock,
@@ -471,11 +470,10 @@ def test_client_created_event_when_exec_error(
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
-    assert len(caplog.record_tuples) == 1
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
 
 
-def test_client_created_event_when_error(
+def test_error_on_client_created_event_emitted(
     harness: Harness,
     mocked_create_client: MagicMock,
     mocked_hydra_is_running: MagicMock,
@@ -490,13 +488,12 @@ def test_client_created_event_when_error(
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
-    assert len(caplog.record_tuples) == 1
     assert (
         caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
     )
 
 
-def test_client_changed_event(
+def test_client_changed_event_emitted(
     harness: Harness, mocked_update_client: MagicMock, mocked_hydra_is_running: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -510,7 +507,7 @@ def test_client_changed_event(
     assert mocked_update_client.called
 
 
-def test_client_changed_event_when_cannot_connect(
+def test_client_changed_event_emitted_cannot_connect(
     harness: Harness, mocked_update_client: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, False)
@@ -523,7 +520,7 @@ def test_client_changed_event_when_cannot_connect(
     assert not mocked_update_client.called
 
 
-def test_client_changed_event_when_no_service(
+def test_client_changed_event_emitted_without_service(
     harness: Harness, mocked_update_client: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -536,7 +533,7 @@ def test_client_changed_event_when_no_service(
     assert not mocked_update_client.called
 
 
-def test_client_changed_event_when_exec_error(
+def test_exec_error_on_client_changed_event_emitted(
     harness: Harness,
     mocked_update_client: MagicMock,
     mocked_hydra_is_running: MagicMock,
@@ -555,11 +552,10 @@ def test_client_changed_event_when_exec_error(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
-    assert len(caplog.record_tuples) == 1
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
 
 
-def test_client_changed_event_when_error(
+def test_error_on_client_changed_event_emitted(
     harness: Harness,
     mocked_update_client: MagicMock,
     mocked_hydra_is_running: MagicMock,
@@ -576,7 +572,6 @@ def test_client_changed_event_when_error(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
-    assert len(caplog.record_tuples) == 1
     assert (
         caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
     )

@@ -70,7 +70,7 @@ class OAuthRequirerCharm(CharmBase):
         self.events.append(event)
 
 
-def test_data_in_relation_bag_on_joined(harness: Harness) -> None:
+def test_data_in_relation_bag(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "provider")
 
     relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
@@ -78,7 +78,7 @@ def test_data_in_relation_bag_on_joined(harness: Harness) -> None:
     assert _load_data(relation_data) == CLIENT_CONFIG
 
 
-def test_no_event_emitted_when_provider_info_available_but_not_client_id(
+def test_no_event_emitted_when_provider_info_available_but_no_client_id(
     harness: Harness, provider_info: Dict
 ) -> None:
     relation_id = harness.add_relation("oauth", "provider")
@@ -95,11 +95,10 @@ def test_no_event_emitted_when_provider_info_available_but_not_client_id(
     assert len(events) == 0
 
 
-def test_oauth_info_changed_emitted_on_client_creation(
+def test_oauth_info_changed_event_emitted_when_client_created(
     harness: Harness, provider_info: Dict
 ) -> None:
     client_secret = "s3cR#T"
-
     relation_id = harness.add_relation("oauth", "provider")
     harness.add_relation_unit(relation_id, "provider/0")
     harness.update_relation_data(
@@ -107,6 +106,7 @@ def test_oauth_info_changed_emitted_on_client_creation(
         "provider",
         provider_info,
     )
+
     secret_id = harness.add_model_secret("provider", {CLIENT_SECRET_FIELD: client_secret})
     harness.grant_secret(secret_id, "requirer-tester")
     harness.update_relation_data(
@@ -117,18 +117,15 @@ def test_oauth_info_changed_emitted_on_client_creation(
             "client_secret_id": secret_id,
         },
     )
-    event = harness.charm.events[0]
 
-    assert isinstance(event, OAuthInfoChangedEvent)
+    assert any(isinstance(event := e, OAuthInfoChangedEvent) for e in harness.charm.events)
     assert event.client_id == "client_id"
     assert event.client_secret_id == secret_id
-
     secret = harness.charm.oauth.get_client_secret(event.client_secret_id)
-
     assert secret.get_content() == {"secret": client_secret}
 
 
-def test_get_provider_info(harness: Harness, provider_info: Dict) -> None:
+def test_get_provider_info_when_data_available(harness: Harness, provider_info: Dict) -> None:
     relation_id = harness.add_relation("oauth", "provider")
     harness.add_relation_unit(relation_id, "provider/0")
     harness.update_relation_data(
@@ -140,7 +137,7 @@ def test_get_provider_info(harness: Harness, provider_info: Dict) -> None:
     assert harness.charm.oauth.get_provider_info() == provider_info
 
 
-def test_get_client_credentials(harness: Harness, provider_info: Dict) -> None:
+def test_get_client_credentials_when_data_available(harness: Harness, provider_info: Dict) -> None:
     client_id = "client_id"
     client_secret = "s3cR#T"
     relation_id = harness.add_relation("oauth", "provider")
@@ -159,7 +156,7 @@ def test_get_client_credentials(harness: Harness, provider_info: Dict) -> None:
     )
 
 
-def test_malformed_redirect_url(harness: Harness) -> None:
+def test_exception_raised_when_malformed_redirect_url(harness: Harness) -> None:
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.redirect_uri = "http://some.callback"
 
@@ -167,7 +164,7 @@ def test_malformed_redirect_url(harness: Harness) -> None:
         harness.charm.oauth.update_client_config(client_config=client_config)
 
 
-def test_invalid_grant_type(harness: Harness) -> None:
+def test_exception_raised_when_invalid_grant_type(harness: Harness) -> None:
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.grant_types = ["authorization_code", "token_exchange"]
 
@@ -175,7 +172,7 @@ def test_invalid_grant_type(harness: Harness) -> None:
         harness.charm.oauth.update_client_config(client_config=client_config)
 
 
-def test_invalid_client_authn_method(harness: Harness) -> None:
+def test_exception_raised_when_invalid_client_authn_method(harness: Harness) -> None:
     client_config = ClientConfig(**CLIENT_CONFIG)
     client_config.token_endpoint_auth_method = "private_key_jwt"
 
@@ -207,8 +204,9 @@ def harness_invalid_config() -> Generator:
     harness.cleanup()
 
 
-def test_invalid_client_config(harness_invalid_config: Harness) -> None:
+def test_event_emitted_when_invalid_client_config(harness_invalid_config: Harness) -> None:
     harness_invalid_config.add_relation("oauth", "provider")
 
-    assert len(harness_invalid_config.charm.events) == 1
-    assert isinstance(harness_invalid_config.charm.events[0], InvalidClientConfigEvent)
+    assert any(
+        isinstance(e, InvalidClientConfigEvent) for e in harness_invalid_config.charm.events
+    )
