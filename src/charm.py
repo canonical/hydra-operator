@@ -42,7 +42,7 @@ from ops.charm import (
 )
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
-from ops.pebble import ChangeError, Error, ExecError, Layer
+from ops.pebble import ChangeError, ExecError, Layer
 
 from hydra_cli import HydraCLI
 
@@ -409,9 +409,6 @@ class HydraCharm(CharmBase):
             )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            logger.error(f"Something went wrong when trying to run the command: {e}")
             logger.info("Deferring the event")
             event.defer()
             return
@@ -437,21 +434,15 @@ class HydraCharm(CharmBase):
             )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            logger.error(f"Something went wrong when trying to run the command: {e}")
             logger.info("Deferring the event")
             event.defer()
             return
 
     def _on_client_deleted(self, event: ClientDeletedEvent) -> None:
-        if not self._container.can_connect():
-            event.defer()
+        if not self.unit.is_leader():
             return
 
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
+        if not self._hydra_service_is_running:
             event.defer()
             return
 
@@ -465,9 +456,6 @@ class HydraCharm(CharmBase):
             self._hydra_cli.delete_client(client["client_id"])
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            logger.error(f"Something went wrong when trying to run the command: {e}")
             logger.info("Deferring the event")
             event.defer()
             return
