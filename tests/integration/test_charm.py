@@ -106,7 +106,7 @@ async def test_has_admin_ingress(ops_test: OpsTest) -> None:
     assert resp.status_code == 200
 
 
-@pytest.mark.dependency()
+@pytest.mark.abort_on_fail
 async def test_create_client_action(ops_test: OpsTest) -> None:
     action = (
         await ops_test.model.applications[APP_NAME]
@@ -125,7 +125,6 @@ async def test_create_client_action(ops_test: OpsTest) -> None:
     assert res["redirect-uris"] == "https://example.com"
 
 
-@pytest.mark.dependency(depends=["test_create_client_action"])
 async def test_list_client(ops_test: OpsTest) -> None:
     action = (
         await ops_test.model.applications[APP_NAME]
@@ -139,7 +138,6 @@ async def test_list_client(ops_test: OpsTest) -> None:
     assert len(res) > 0
 
 
-@pytest.mark.dependency(depends=["test_create_client_action"])
 async def test_get_client(ops_test: OpsTest) -> None:
     action = (
         await ops_test.model.applications[APP_NAME]
@@ -155,7 +153,7 @@ async def test_get_client(ops_test: OpsTest) -> None:
         await ops_test.model.applications[APP_NAME]
         .units[0]
         .run_action(
-            "get-oauth-client",
+            "get-oauth-client-info",
             **{
                 "client-id": client_id,
             },
@@ -166,7 +164,6 @@ async def test_get_client(ops_test: OpsTest) -> None:
     assert res["redirect-uris"] == " ,".join(CLIENT_REDIRECT_URIS)
 
 
-@pytest.mark.dependency(depends=["test_create_client_action"])
 async def test_update_client(ops_test: OpsTest) -> None:
     action = (
         await ops_test.model.applications[APP_NAME]
@@ -195,7 +192,6 @@ async def test_update_client(ops_test: OpsTest) -> None:
     assert res["redirect-uris"] == " ,".join(redirect_uris)
 
 
-@pytest.mark.dependency(depends=["test_create_client_action"])
 async def test_revoke_access_tokens_client(ops_test: OpsTest) -> None:
     action = (
         await ops_test.model.applications[APP_NAME]
@@ -223,7 +219,6 @@ async def test_revoke_access_tokens_client(ops_test: OpsTest) -> None:
     assert res["client-id"] == client_id
 
 
-@pytest.mark.dependency(depends=["test_create_client_action"])
 async def test_delete_client(ops_test: OpsTest) -> None:
     action = (
         await ops_test.model.applications[APP_NAME]
@@ -253,7 +248,7 @@ async def test_delete_client(ops_test: OpsTest) -> None:
         await ops_test.model.applications[APP_NAME]
         .units[0]
         .run_action(
-            "get-oauth-client",
+            "get-oauth-client-info",
             **{
                 "client-id": client_id,
             },
@@ -265,7 +260,6 @@ async def test_delete_client(ops_test: OpsTest) -> None:
     assert res.data["message"] == f"No such client: {client_id}"
 
 
-@pytest.mark.dependency(depends=["test_create_client_action"])
 async def test_rotate_keys(ops_test: OpsTest) -> None:
     public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
 
