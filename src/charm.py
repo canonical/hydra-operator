@@ -419,7 +419,6 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        # TODO: If this fails emit an event for reconciliation
         self._set_oauth_relation_peer_data(event.relation_id, dict(client_id=client["client_id"]))
         self.oauth.set_client_credentials_in_relation_data(
             event.relation_id, client["client_id"], client["client_secret"]
@@ -459,7 +458,6 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        # TODO: If this fails emit an event for reconciliation
         client = self._get_oauth_relation_peer_data(event.relation_id)
         if not client:
             logger.error("No client found in peer data")
@@ -473,7 +471,6 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        # TODO: If this fails emit an event for reconciliation
         self._pop_oauth_relation_peer_data(event.relation_id)
 
     def _update_endpoint_info(self) -> None:
