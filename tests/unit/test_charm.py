@@ -740,8 +740,31 @@ def test_update_oauth_client_action(
     )
 
 
+def test_update_oauth_client_action_when_oauth_relation_client(
+    harness: Harness,
+    mocked_hydra_is_running: MagicMock,
+    mocked_update_client: MagicMock,
+    mocked_get_client: MagicMock,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    ret = mocked_update_client.return_value
+    event = MagicMock()
+    event.params = {
+        "client-id": ret.get("client_id"),
+    }
+    mocked_get_client.return_value["metadata"]["relation_id"] = 123
+
+    harness.charm._on_update_oauth_client_action(event)
+
+    event.fail.assert_called_with(
+        f"Cannot update client `{ret.get('client_id')}`, "
+        "it is managed from an oauth relation."
+    )
+
+
 def test_delete_oauth_client_action(
-    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_delete_client: MagicMock
+    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_delete_client: MagicMock,
+    mocked_get_client: MagicMock,
 ) -> None:
     client_id = "client_id"
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -754,6 +777,28 @@ def test_delete_oauth_client_action(
 
     event.set_results.assert_called_with({"client-id": client_id})
 
+
+def test_delete_oauth_client_action_when_oauth_relation_client(
+    harness: Harness,
+    mocked_hydra_is_running: MagicMock,
+    mocked_delete_client: MagicMock,
+    mocked_get_client: MagicMock,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    client_id = mocked_delete_client.return_value
+    event = MagicMock()
+    event.params = {
+        "client-id": client_id,
+    }
+    mocked_get_client.return_value["metadata"]["relation_id"] = 123
+
+    harness.charm._on_delete_oauth_client_action(event)
+
+    event.fail.assert_called_with(
+        f"Cannot delete client `{client_id}`, "
+        "it is managed from an oauth relation. "
+        "To delete it, remove the relation."
+    )
 
 def test_list_oauth_client_action(
     harness: Harness, mocked_hydra_is_running: MagicMock, mocked_list_client: MagicMock

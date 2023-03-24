@@ -529,9 +529,6 @@ class HydraCharm(CharmBase):
                 client_secret=event.params.get("client-secret"),
                 token_endpoint_auth_method=event.params.get("token-endpoint-auth-method"),
             )
-        except ExecError as err:
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
         except Error as e:
             event.fail(f"Something went wrong when trying to run the command: {e}")
             return
@@ -586,14 +583,26 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        event.log(f"Fetching client: {client_id}")
         try:
             client = self._hydra_cli.get_client(client_id)
-            if client.get("metadata", {}).get("relation_id"):
-                event.fail("Cannot edit clients created from juju relations.")
+        except ExecError as err:
+            if err.stderr and "Unable to locate the resource" in err.stderr:
+                event.fail(f"No such client: {client_id}")
                 return
+            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
+            return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            return
 
-            event.log(f"Updating client: {client_id}")
+        if self._is_oauth_relation_client(client):
+            event.fail(
+                f"Cannot update client `{client_id}`, it is managed from an oauth relation."
+            )
+            return
+
+        event.log(f"Updating client: {client_id}")
+        try:
             client = self._hydra_cli.update_client(
                 client_id,
                 audience=event.params.get("audience") or client.get("audience"),
@@ -605,12 +614,6 @@ class HydraCharm(CharmBase):
                 token_endpoint_auth_method=event.params.get("token-endpoint-auth-method")
                 or client.get("token_endpoint_auth_method"),
             )
-        except ExecError as err:
-            if err.stderr and "Unable to locate the resource" in err.stderr:
-                event.fail(f"No such client: {client_id}")
-                return
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
         except Error as e:
             event.fail(f"Something went wrong when trying to run the command: {e}")
             return
@@ -635,15 +638,28 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        event.log(f"Deleting client: {client_id}")
         try:
-            self._hydra_cli.delete_client(client_id)
+            client = self._hydra_cli.get_client(client_id)
         except ExecError as err:
             if err.stderr and "Unable to locate the resource" in err.stderr:
                 event.fail(f"No such client: {client_id}")
                 return
             event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
             return
+        except Error as e:
+            logger.error(f"Something went wrong when trying to run the command: {e}")
+            return
+
+        if self._is_oauth_relation_client(client):
+            event.fail(
+                f"Cannot delete client `{client_id}`, it is managed from an oauth relation. "
+                "To delete it, remove the relation."
+            )
+            return
+
+        event.log(f"Deleting client: {client_id}")
+        try:
+            self._hydra_cli.delete_client(client_id)
         except Error as e:
             event.fail(f"Something went wrong when trying to run the command: {e}")
             return
@@ -659,9 +675,6 @@ class HydraCharm(CharmBase):
         event.log("Fetching clients")
         try:
             clients = self._hydra_cli.list_clients()
-        except ExecError as err:
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
         except Error as e:
             event.fail(f"Something went wrong when trying to run the command: {e}")
             return
@@ -708,6 +721,10 @@ class HydraCharm(CharmBase):
 
         event.log("Successfully created new key")
         event.set_results({"new-key-id": jwk["keys"][0]["kid"]})
+
+    def _is_oauth_relation_client(self, client: Dict) -> bool:
+        """Check whether a client is managed from an oauth relation."""
+        return client.get("metadata", {}).get("relation_id")
 
     def _update_endpoint_info(self) -> None:
         if not self.admin_ingress.url or not self.public_ingress.url:

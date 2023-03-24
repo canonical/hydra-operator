@@ -77,6 +77,7 @@ def mocked_create_client(mocker: MockerFixture, hydra_cli_client_json) -> Genera
 @pytest.fixture()
 def mocked_get_client(mocker, hydra_cli_client_json):
     mock = mocker.patch("charm.HydraCLI.get_client")
+    hydra_cli_client_json = dict(hydra_cli_client_json)
     hydra_cli_client_json.pop("client_secret", None)
     mock.return_value = hydra_cli_client_json
     yield mock
@@ -85,6 +86,7 @@ def mocked_get_client(mocker, hydra_cli_client_json):
 @pytest.fixture()
 def mocked_update_client(mocker: MockerFixture, hydra_cli_client_json) -> Generator:
     mock = mocker.patch("charm.HydraCLI.update_client")
+    hydra_cli_client_json = dict(hydra_cli_client_json)
     hydra_cli_client_json.pop("client_secret", None)
     hydra_cli_client_json.pop("registration_access_token", None)
     hydra_cli_client_json.pop("registration_client_uri", None)
@@ -95,6 +97,7 @@ def mocked_update_client(mocker: MockerFixture, hydra_cli_client_json) -> Genera
 @pytest.fixture()
 def mocked_list_client(mocker, hydra_cli_client_json):
     mock = mocker.patch("charm.HydraCLI.list_clients")
+    hydra_cli_client_json = dict(hydra_cli_client_json)
     hydra_cli_client_json.pop("client_secret", None)
     hydra_cli_client_json.pop("registration_access_token", None)
     hydra_cli_client_json.pop("registration_client_uri", None)
