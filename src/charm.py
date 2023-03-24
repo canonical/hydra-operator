@@ -724,7 +724,7 @@ class HydraCharm(CharmBase):
 
     def _is_oauth_relation_client(self, client: Dict) -> bool:
         """Check whether a client is managed from an oauth relation."""
-        return client.get("metadata", {}).get("relation_id")
+        return "relation_id" in client.get("metadata", {})
 
     def _update_endpoint_info(self) -> None:
         if not self.admin_ingress.url or not self.public_ingress.url:

@@ -21,15 +21,15 @@ class HydraCLI:
         self.hydra_admin_url = hydra_admin_url
         self.container = container
 
-    def _dump_list_or_dict(self, o: Union[Dict, List, str]) -> str:
-        if isinstance(o, dict):
-            return json.dumps(o, separators=(",", ":"))
-        if isinstance(o, list):
-            return (",").join(o)
-        elif isinstance(o, str):
-            return o
-        else:
-            raise ValueError(f"Invalid type: {type(o)}")
+    def _dump_list(self, data: Optional[List]) -> str:
+        if not data:
+            return ""
+        return (",").join(data)
+
+    def _dump_dict(self, data: Optional[Dict]) -> str:
+        if not data:
+            return ""
+        return json.dumps(data, separators=(",", ":"))
 
     def _build_client_cmd_flags(
         self,
@@ -40,24 +40,24 @@ class HydraCLI:
         scope: List[str] = SUPPORTED_SCOPES,
         client_secret: Optional[str] = None,
         token_endpoint_auth_method: Optional[str] = None,
-        metadata: Optional[Union[Dict, str]] = None,
+        metadata: Optional[Dict] = None,
     ) -> List[str]:
         """Convert a ClientConfig object to a list of parameters."""
         flag_mapping = {
-            "--audience": audience,
-            "--grant-type": grant_type,
+            "--audience": self._dump_list(audience),
+            "--grant-type": self._dump_list(grant_type),
             "--redirect-uri": redirect_uri,
-            "--response-type": response_type,
+            "--response-type": self._dump_list(response_type),
             "--secret": client_secret,
             "--token-endpoint-auth-method": token_endpoint_auth_method,
-            "--metadata": metadata,
+            "--metadata": self._dump_dict(metadata),
         }
         flags = []
 
         for k, v in flag_mapping.items():
             if v:
                 flags.append(k)
-                flags.append(self._dump_list_or_dict(v))
+                flags.append(v)
 
         if scope:
             for s in scope:
@@ -142,7 +142,7 @@ class HydraCLI:
         logger.info(f"Successfully updated client: {client_id}")
         return json.loads(stdout)
 
-    def delete_client(self, client_id: str) -> Dict:
+    def delete_client(self, client_id: str) -> str:
         """Delete an oauth2 client."""
         cmd = self._client_cmd_prefix("delete")
         cmd.append(client_id)
@@ -151,7 +151,7 @@ class HydraCLI:
         logger.info(f"Successfully deleted client: {stdout}")
         return json.loads(stdout)
 
-    def list_clients(self) -> Optional[Dict]:
+    def list_clients(self) -> Dict:
         """Delete one or more oauth2 client."""
         cmd = [
             "hydra",
@@ -167,7 +167,7 @@ class HydraCLI:
         logger.info("Successfully listed clients")
         return json.loads(stdout)
 
-    def delete_client_access_tokens(self, client_id: str) -> Optional[Dict]:
+    def delete_client_access_tokens(self, client_id: str) -> str:
         """Delete one or more oauth2 client."""
         cmd = [
             "hydra",
@@ -184,9 +184,7 @@ class HydraCLI:
         logger.info(f"Successfully deleted all the access tokens for client: {stdout}")
         return json.loads(stdout)
 
-    def create_jwk(
-        self, set_id: Optional[str] = "hydra.openid.id-token", alg: Optional[str] = "RS256"
-    ) -> Dict:
+    def create_jwk(self, set_id: str = "hydra.openid.id-token", alg: str = "RS256") -> Dict:
         """Add a new key to a jwks."""
         cmd = [
             "hydra",
@@ -207,7 +205,7 @@ class HydraCLI:
         return json_stdout
 
     def _run_cmd(
-        self, cmd: List[str], timeout: Optional[float] = 20
+        self, cmd: List[str], timeout: float = 20
     ) -> Tuple[Union[str, bytes], Union[str, bytes]]:
         logger.debug(f"Running cmd: {cmd}")
         process = self.container.exec(cmd, timeout=timeout)
