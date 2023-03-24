@@ -399,6 +399,12 @@ class HydraCharm(CharmBase):
             return
 
         if not self._hydra_service_is_running:
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            event.defer()
+            return
+
+        if not self._peers:
+            self.unit.status = WaitingStatus("Waiting for peer relation")
             event.defer()
             return
 
@@ -424,6 +430,7 @@ class HydraCharm(CharmBase):
             return
 
         if not self._hydra_service_is_running:
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
             event.defer()
             return
 
@@ -443,6 +450,12 @@ class HydraCharm(CharmBase):
             return
 
         if not self._hydra_service_is_running:
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            event.defer()
+            return
+
+        if not self._peers:
+            self.unit.status = WaitingStatus("Waiting for peer relation")
             event.defer()
             return
 

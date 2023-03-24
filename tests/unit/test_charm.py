@@ -424,7 +424,7 @@ def test_provider_info_called_when_oauth_relation_then_ingress(
     )
 
 
-def test_set_client_credentials_on_client_created_event_emitted(
+def test_client_created_event_emitted(
     harness: Harness,
     mocked_create_client: MagicMock,
     mocked_set_client_credentials: MagicMock,
@@ -445,6 +445,22 @@ def test_set_client_credentials_on_client_created_event_emitted(
         relation_id, client_credentials["client_id"], client_credentials["client_secret"]
     )
 
+
+def test_client_created_event_emitted_without_peers(
+    harness: Harness,
+    mocked_create_client: MagicMock,
+    mocked_set_client_credentials: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    client_credentials = mocked_create_client.return_value
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    relation_id, _ = setup_oauth_relation(harness)
+
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    assert not mocked_set_client_credentials.called
 
 def test_client_created_event_emitted_cannot_connect(
     harness: Harness, mocked_create_client: MagicMock
@@ -476,6 +492,7 @@ def test_exec_error_on_client_created_event_emitted(
 ) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
+    setup_peer_relation(harness)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = ExecError(
         command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
@@ -568,6 +585,24 @@ def test_client_deleted_event_emitted(
 
     mocked_delete_client.assert_called_with(client_id)
     assert harness.get_relation_data(peer_relation_id, harness.charm.app) == {}
+
+
+def test_client_deleted_event_emitted_without_peers(
+    harness: Harness,
+    mocked_create_client: MagicMock,
+    mocked_delete_client: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+) -> None:
+    client_id = "client_id"
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    harness.charm.oauth.on.client_deleted.emit(relation_id)
+
+    assert not mocked_delete_client.called
 
 
 def test_client_deleted_event_emitted_cannot_connect(
