@@ -453,7 +453,6 @@ def test_client_created_event_emitted_without_peers(
     mocked_hydra_is_running: MagicMock,
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
-    client_credentials = mocked_create_client.return_value
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
     relation_id, _ = setup_oauth_relation(harness)
@@ -461,6 +460,7 @@ def test_client_created_event_emitted_without_peers(
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
     assert not mocked_set_client_credentials.called
+
 
 def test_client_created_event_emitted_cannot_connect(
     harness: Harness, mocked_create_client: MagicMock
@@ -593,7 +593,6 @@ def test_client_deleted_event_emitted_without_peers(
     mocked_delete_client: MagicMock,
     mocked_hydra_is_running: MagicMock,
 ) -> None:
-    client_id = "client_id"
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
