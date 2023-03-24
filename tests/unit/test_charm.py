@@ -757,13 +757,14 @@ def test_update_oauth_client_action_when_oauth_relation_client(
     harness.charm._on_update_oauth_client_action(event)
 
     event.fail.assert_called_with(
-        f"Cannot update client `{ret.get('client_id')}`, "
-        "it is managed from an oauth relation."
+        f"Cannot update client `{ret.get('client_id')}`, " "it is managed from an oauth relation."
     )
 
 
 def test_delete_oauth_client_action(
-    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_delete_client: MagicMock,
+    harness: Harness,
+    mocked_hydra_is_running: MagicMock,
+    mocked_delete_client: MagicMock,
     mocked_get_client: MagicMock,
 ) -> None:
     client_id = "client_id"
@@ -799,6 +800,7 @@ def test_delete_oauth_client_action_when_oauth_relation_client(
         "it is managed from an oauth relation. "
         "To delete it, remove the relation."
     )
+
 
 def test_list_oauth_client_action(
     harness: Harness, mocked_hydra_is_running: MagicMock, mocked_list_client: MagicMock
