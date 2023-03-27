@@ -41,7 +41,14 @@ from ops.charm import (
     WorkloadEvent,
 )
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus, Relation
+from ops.model import (
+    ActiveStatus,
+    BlockedStatus,
+    MaintenanceStatus,
+    ModelError,
+    Relation,
+    WaitingStatus,
+)
 from ops.pebble import ChangeError, ExecError, Layer
 
 from hydra_cli import HydraCLI
