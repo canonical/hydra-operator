@@ -525,15 +525,17 @@ class HydraCharm(CharmBase):
 
         event.log("Creating client")
 
-        cmd_kwargs = remove_none_values({
-            "audience": event.params.get("audience"),
-            "grant_type": event.params.get("grant-types"),
-            "redirect_uri": event.params.get("redirect-uris"),
-            "response_type": event.params.get("response-types"),
-            "scope": event.params.get("scope"),
-            "client_secret": event.params.get("client-secret"),
-            "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method"),
-        })
+        cmd_kwargs = remove_none_values(
+            {
+                "audience": event.params.get("audience"),
+                "grant_type": event.params.get("grant-types"),
+                "redirect_uri": event.params.get("redirect-uris"),
+                "response_type": event.params.get("response-types"),
+                "scope": event.params.get("scope"),
+                "client_secret": event.params.get("client-secret"),
+                "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method"),
+            }
+        )
 
         try:
             client = self._hydra_cli.create_client(**cmd_kwargs)
@@ -614,7 +616,8 @@ class HydraCharm(CharmBase):
                 "audience": event.params.get("audience") or client.get("audience"),
                 "grant_type": event.params.get("grant-types") or client.get("grant_types"),
                 "redirect_uri": event.params.get("redirect-uris") or client.get("redirect_uris"),
-                "response_type": event.params.get("response-types") or client.get("response_types"),
+                "response_type": event.params.get("response-types")
+                or client.get("response_types"),
                 "scope": event.params.get("scope") or client["scope"].split(" "),
                 "client_secret": event.params.get("client-secret") or client.get("client_secret"),
                 "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method")
