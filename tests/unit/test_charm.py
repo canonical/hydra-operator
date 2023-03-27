@@ -840,7 +840,7 @@ def test_rotate_key_action(
     harness.set_can_connect(CONTAINER_NAME, True)
     ret = mocked_create_jwk.return_value
     event = MagicMock()
-    event.params = {}
+    event.params = {"alg": "SHA256"}
 
     harness.charm._on_rotate_key_action(event)
 

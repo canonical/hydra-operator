@@ -62,6 +62,11 @@ SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 PEER = "hydra"
 
 
+def remove_none_values(dic: Dict) -> Dict:
+    """Remove all entries in a dict with `None` values."""
+    return {k: v for k, v in dic.items() if v is not None}
+
+
 class HydraCharm(CharmBase):
     """Charmed Ory Hydra."""
 
@@ -442,8 +447,8 @@ class HydraCharm(CharmBase):
             client = self._hydra_cli.create_client(
                 audience=event.audience,
                 grant_type=event.grant_types,
-                redirect_uri=event.redirect_uri,
-                scope=event.scope,
+                redirect_uri=event.redirect_uri.split(" "),
+                scope=event.scope.split(" "),
                 token_endpoint_auth_method=event.token_endpoint_auth_method,
                 metadata={"relation_id": {event.relation_id}},
             )
@@ -472,8 +477,8 @@ class HydraCharm(CharmBase):
                 event.client_id,
                 audience=event.audience,
                 grant_type=event.grant_types,
-                redirect_uri=event.redirect_uri,
-                scope=event.scope,
+                redirect_uri=event.redirect_uri.split(" "),
+                scope=event.scope.split(" "),
                 token_endpoint_auth_method=event.token_endpoint_auth_method,
                 metadata={"relation_id": {event.relation_id}},
             )
@@ -519,16 +524,19 @@ class HydraCharm(CharmBase):
             return
 
         event.log("Creating client")
+
+        cmd_kwargs = remove_none_values({
+            "audience": event.params.get("audience"),
+            "grant_type": event.params.get("grant-types"),
+            "redirect_uri": event.params.get("redirect-uris"),
+            "response_type": event.params.get("response-types"),
+            "scope": event.params.get("scope"),
+            "client_secret": event.params.get("client-secret"),
+            "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method"),
+        })
+
         try:
-            client = self._hydra_cli.create_client(
-                audience=event.params.get("audience"),
-                grant_type=event.params.get("grant-types"),
-                redirect_uri=event.params.get("redirect-uris"),
-                response_type=event.params.get("response-types"),
-                scope=event.params.get("scope"),
-                client_secret=event.params.get("client-secret"),
-                token_endpoint_auth_method=event.params.get("token-endpoint-auth-method"),
-            )
+            client = self._hydra_cli.create_client(**cmd_kwargs)
         except Error as e:
             event.fail(f"Something went wrong when trying to run the command: {e}")
             return
@@ -601,19 +609,21 @@ class HydraCharm(CharmBase):
             )
             return
 
+        cmd_kwargs = remove_none_values(
+            {
+                "audience": event.params.get("audience") or client.get("audience"),
+                "grant_type": event.params.get("grant-types") or client.get("grant_types"),
+                "redirect_uri": event.params.get("redirect-uris") or client.get("redirect_uris"),
+                "response_type": event.params.get("response-types") or client.get("response_types"),
+                "scope": event.params.get("scope") or client["scope"].split(" "),
+                "client_secret": event.params.get("client-secret") or client.get("client_secret"),
+                "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method")
+                or client.get("token_endpoint_auth_method"),
+            }
+        )
         event.log(f"Updating client: {client_id}")
         try:
-            client = self._hydra_cli.update_client(
-                client_id,
-                audience=event.params.get("audience") or client.get("audience"),
-                grant_type=event.params.get("grant-types") or client.get("grant_types"),
-                redirect_uri=event.params.get("redirect-uris") or client.get("redirect_uris"),
-                response_type=event.params.get("response-types") or client.get("response_types"),
-                scope=event.params.get("scope") or client.get("scope").split(" "),
-                client_secret=event.params.get("client-secret") or client.get("client_secret"),
-                token_endpoint_auth_method=event.params.get("token-endpoint-auth-method")
-                or client.get("token_endpoint_auth_method"),
-            )
+            client = self._hydra_cli.update_client(client_id, **cmd_kwargs)
         except Error as e:
             event.fail(f"Something went wrong when trying to run the command: {e}")
             return
@@ -711,7 +721,7 @@ class HydraCharm(CharmBase):
 
         event.log("Rotating keys")
         try:
-            jwk = self._hydra_cli.create_jwk(alg=event.params.get("alg"))
+            jwk = self._hydra_cli.create_jwk(alg=event.params["alg"])
         except ExecError as err:
             event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
             return
