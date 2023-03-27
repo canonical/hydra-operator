@@ -31,11 +31,35 @@ source .tox/unit/bin/activate
 ### Testing
 
 ```shell
-tox -e fmt           # update your code according to linting rules
-tox -e lint          # code style
 tox -e unit          # unit tests
 tox -e integration   # integration tests
-tox                  # runs 'lint' and 'unit' environments
+```
+
+To test this charm manually, execute the container:
+```bash
+kubectl exec -it hydra-0 -c hydra -n <model> -- sh
+```
+
+Create an exemplary client:
+```shell
+# hydra create client --endpoint http://127.0.0.1:4445/ --name example-client
+CLIENT ID	b55b6857-968e-4fb7-be77-f701ec751405
+CLIENT SECRET	b3wFYH2N_epJY6C8jCuinBRP60
+GRANT TYPES	authorization_code
+RESPONSE TYPES	code
+SCOPE		offline_access offline openid
+AUDIENCE
+REDIRECT URIS
+```
+
+List the clients:
+```shell
+# hydra list clients --endpoint http://127.0.0.1:4445/
+CLIENT ID				CLIENT SECRET	GRANT TYPES		RESPONSE TYPES	SCOPE				AUDIENCE	REDIRECT URIS
+b55b6857-968e-4fb7-be77-f701ec751405			authorization_code	code		offline_access offline openid
+
+NEXT PAGE TOKEN
+IS LAST PAGE				true
 ```
 
 ## Build charm

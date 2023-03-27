@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from os.path import join
-from typing import Any, Generator
+from typing import Any, Generator, List
 
 import pytest
 from charms.hydra.v0.oauth import (
@@ -31,7 +31,7 @@ class OAuthProviderCharm(CharmBase):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
         self.oauth = OAuthProvider(self)
-        self.events = []
+        self.events: List = []
 
         self.framework.observe(self.on.oauth_relation_created, self._on_relation_created)
         self.framework.observe(self.oauth.on.client_created, self._on_client_created)

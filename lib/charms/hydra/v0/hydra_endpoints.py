@@ -39,6 +39,7 @@ Class SomeCharm(CharmBase):
 """
 
 import logging
+from typing import Dict, Optional
 
 from ops.charm import CharmBase, RelationCreatedEvent
 from ops.framework import EventBase, EventSource, Object, ObjectEvents
@@ -85,19 +86,17 @@ class HydraEndpointsProvider(Object):
             events.relation_created, self._on_provider_endpoint_relation_created
         )
 
-    def _on_provider_endpoint_relation_created(self, event: RelationCreatedEvent):
+    def _on_provider_endpoint_relation_created(self, event: RelationCreatedEvent) -> None:
         self.on.ready.emit()
 
-    def send_endpoint_relation_data(
-        self, charm: CharmBase, admin_endpoint: str, public_endpoint: str
-    ) -> None:
+    def send_endpoint_relation_data(self, admin_endpoint: str, public_endpoint: str) -> None:
         """Updates relation with endpoints info."""
         if not self._charm.unit.is_leader():
             return
 
         relations = self.model.relations[RELATION_NAME]
         for relation in relations:
-            relation.data[charm].update(
+            relation.data[self._charm.app].update(
                 {
                     "admin_endpoint": admin_endpoint,
                     "public_endpoint": public_endpoint,
@@ -114,7 +113,7 @@ class HydraEndpointsRelationError(Exception):
 class HydraEndpointsRelationMissingError(HydraEndpointsRelationError):
     """Raised when the relation is missing."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.message = "Missing endpoint-info relation with hydra"
         super().__init__(self.message)
 
@@ -122,7 +121,7 @@ class HydraEndpointsRelationMissingError(HydraEndpointsRelationError):
 class HydraEndpointsRelationDataMissingError(HydraEndpointsRelationError):
     """Raised when information is missing from the relation."""
 
-    def __init__(self, message):
+    def __init__(self, message: str) -> None:
         self.message = message
         super().__init__(self.message)
 
@@ -135,10 +134,10 @@ class HydraEndpointsRequirer(Object):
         self.charm = charm
         self.relation_name = relation_name
 
-    def get_hydra_endpoints(self) -> dict:
+    def get_hydra_endpoints(self) -> Optional[Dict]:
         """Get the hydra endpoints."""
         if not self.model.unit.is_leader():
-            return
+            return None
         endpoints = self.model.relations[self.relation_name]
         if len(endpoints) == 0:
             raise HydraEndpointsRelationMissingError()

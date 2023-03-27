@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 import json
-from typing import Any, Dict, Generator
+from typing import Any, Dict, Generator, List
 
 import pytest
 from charms.hydra.v0.oauth import (
@@ -56,7 +56,7 @@ CLIENT_CONFIG = {
 }
 
 
-def dict_to_relation_data(dic):
+def dict_to_relation_data(dic: Dict) -> Dict:
     return {k: json.dumps(v) if isinstance(v, (list, dict)) else v for k, v in dic.items()}
 
 
@@ -66,7 +66,7 @@ class OAuthRequirerCharm(CharmBase):
         client_config = ClientConfig(**CLIENT_CONFIG)
         self.oauth = OAuthRequirer(self, client_config=client_config)
 
-        self.events = []
+        self.events: List = []
         self.framework.observe(self.oauth.on.oauth_info_changed, self._record_event)
         self.framework.observe(self.oauth.on.invalid_client_config, self._record_event)
 
@@ -191,7 +191,7 @@ class InvalidConfigOAuthRequirerCharm(CharmBase):
         client_config.redirect_uri = "http://some.callback"
         self.oauth = OAuthRequirer(self, client_config=client_config)
 
-        self.events = []
+        self.events: List = []
         self.framework.observe(self.oauth.on.oauth_info_changed, self._record_event)
         self.framework.observe(self.oauth.on.invalid_client_config, self._record_event)
 

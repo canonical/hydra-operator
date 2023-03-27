@@ -8,6 +8,7 @@
 
 import logging
 from os.path import join
+from typing import Any
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -50,7 +51,7 @@ SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 class HydraCharm(CharmBase):
     """Charmed Ory Hydra."""
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
         super().__init__(*args)
 
         self._container_name = "hydra"
@@ -156,16 +157,16 @@ class HydraCharm(CharmBase):
             return False
         return service.is_running()
 
-    def _render_conf_file(self) -> None:
+    def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
         with open("templates/hydra.yaml.j2", "r") as file:
             template = Template(file.read())
 
         rendered = template.render(
             db_info=self._get_database_relation_info(),
-            consent_url=join(self.config.get("login_ui_url"), "consent"),
-            error_url=join(self.config.get("login_ui_url"), "oidc_error"),
-            login_url=join(self.config.get("login_ui_url"), "login"),
+            consent_url=join(self.config.get("login_ui_url", ""), "consent"),
+            error_url=join(self.config.get("login_ui_url", ""), "oidc_error"),
+            login_url=join(self.config.get("login_ui_url", ""), "login"),
             hydra_public_url=self.public_ingress.url
             if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
@@ -249,9 +250,7 @@ class HydraCharm(CharmBase):
             f"Sending endpoints info: public - {public_endpoint[0]} admin - {admin_endpoint[0]}"
         )
 
-        self.endpoints_provider.send_endpoint_relation_data(
-            self.app, admin_endpoint[0], public_endpoint[0]
-        )
+        self.endpoints_provider.send_endpoint_relation_data(admin_endpoint[0], public_endpoint[0])
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event Handler for pebble ready event."""

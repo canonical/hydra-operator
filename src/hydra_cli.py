@@ -55,9 +55,7 @@ class HydraCLI:
             "json",
         ]
 
-    def create_client(
-        self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
-    ) -> Dict:
+    def create_client(self, client_config: ClientConfig, metadata: Optional[Dict] = None) -> Dict:
         """Create an oauth2 client."""
         cmd = self._client_cmd_prefix("create") + self._client_config_to_cmd(
             client_config, metadata
@@ -68,9 +66,7 @@ class HydraCLI:
         logger.info(f"Successfully created client: {json_stdout.get('client_id')}")
         return json_stdout
 
-    def update_client(
-        self, client_config: ClientConfig, metadata: Optional[Union[Dict, str]] = None
-    ) -> Dict:
+    def update_client(self, client_config: ClientConfig, metadata: Optional[Dict] = None) -> Dict:
         """Update an oauth2 client."""
         cmd = self._client_cmd_prefix("update") + self._client_config_to_cmd(
             client_config, metadata

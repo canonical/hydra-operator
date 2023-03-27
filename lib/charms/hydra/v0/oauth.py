@@ -422,7 +422,7 @@ class ClientCreatedEvent(EventBase):
         grant_types: List[str],
         audience: List,
         token_endpoint_auth_method: str,
-        relation_id: str,
+        relation_id: int,
     ) -> None:
         super().__init__(handle)
         self.redirect_uri = redirect_uri
