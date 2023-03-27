@@ -9,7 +9,7 @@
 import json
 import logging
 from os.path import join
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -41,7 +41,7 @@ from ops.charm import (
     WorkloadEvent,
 )
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus, Relation
 from ops.pebble import ChangeError, ExecError, Layer
 
 from hydra_cli import HydraCLI
@@ -208,26 +208,28 @@ class HydraCharm(CharmBase):
         return f"oauth_{relation_id}"
 
     @property
-    def _peers(self):
+    def _peers(self) -> Optional[Relation]:
         """Fetch the peer relation."""
         return self.model.get_relation(PEER)
 
     def _set_peer_data(self, key: str, data: Dict) -> None:
         """Put information into the peer data bucket."""
-        self._peers.data[self.app][key] = json.dumps(data)
+        if not (peers := self._peers):
+            return
+        peers.data[self.app][key] = json.dumps(data)
 
     def _get_peer_data(self, key: str) -> Dict:
         """Retrieve information from the peer data bucket."""
-        if not self._peers:
+        if not (peers := self._peers):
             return {}
-        data = self._peers.data[self.app].get(key, "")
+        data = peers.data[self.app].get(key, "")
         return json.loads(data) if data else {}
 
     def _pop_peer_data(self, key: str) -> Dict:
         """Retrieve information from the peer data bucket."""
-        if not self._peers:
+        if not (peers := self._peers):
             return {}
-        data = self._peers.data[self.app].pop(key, "")
+        data = peers.data[self.app].pop(key, "")
         return json.loads(data) if data else {}
 
     def _set_oauth_relation_peer_data(self, relation_id: int, data: Dict) -> None:

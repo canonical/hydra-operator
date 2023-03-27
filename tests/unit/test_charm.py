@@ -54,7 +54,7 @@ def setup_oauth_relation(harness: Harness) -> Tuple[int, str]:
     return relation_id, app_name
 
 
-def setup_peer_relation(harness):
+def setup_peer_relation(harness: Harness) -> Tuple[int, str]:
     app_name = "hydra"
     relation_id = harness.add_relation("hydra", app_name)
     return relation_id, app_name

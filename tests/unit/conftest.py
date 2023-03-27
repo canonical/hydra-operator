@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 from typing import Dict, Generator
-from unittest.mock import MagicMock
 
 import pytest
 from ops.testing import Harness
@@ -12,7 +11,7 @@ from charm import HydraCharm
 
 
 @pytest.fixture()
-def harness(mocked_kubernetes_service_patcher: MagicMock) -> Harness:
+def harness(mocked_kubernetes_service_patcher: Generator) -> Generator[Harness, None, None]:
     harness = Harness(HydraCharm)
     harness.set_model_name("testing")
     harness.set_leader(True)
