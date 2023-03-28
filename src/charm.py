@@ -520,7 +520,7 @@ class HydraCharm(CharmBase):
 
     def _on_create_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
-            event.fail("Service is not ready.")
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
         event.log("Creating client")
@@ -559,7 +559,7 @@ class HydraCharm(CharmBase):
 
     def _on_get_oauth_client_info_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
-            event.fail("Service is not ready.")
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
         client_id = event.params["client-id"]
@@ -589,7 +589,7 @@ class HydraCharm(CharmBase):
 
     def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
-            event.fail("Service is not ready.")
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
         client_id = event.params["client-id"]
@@ -647,7 +647,7 @@ class HydraCharm(CharmBase):
 
     def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
-            event.fail("Service is not ready.")
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
         client_id = event.params["client-id"]
@@ -682,7 +682,7 @@ class HydraCharm(CharmBase):
 
     def _on_list_oauth_clients_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
-            event.fail("Service is not ready.")
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
         event.log("Fetching clients")
@@ -697,7 +697,7 @@ class HydraCharm(CharmBase):
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
-            event.fail("Service is not ready.")
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
         client_id = event.params["client-id"]
@@ -719,7 +719,7 @@ class HydraCharm(CharmBase):
 
     def _on_rotate_key_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
-            event.fail("Service is not ready.")
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
         event.log("Rotating keys")
