@@ -233,7 +233,7 @@ class HydraCharm(CharmBase):
         return json.loads(data) if data else {}
 
     def _pop_peer_data(self, key: str) -> Dict:
-        """Retrieve information from the peer data bucket."""
+        """Retrieve and remove information from the peer data bucket."""
         if not (peers := self._peers):
             return {}
         data = peers.data[self.app].pop(key, "")
