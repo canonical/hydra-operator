@@ -105,7 +105,10 @@ async def test_has_admin_ingress(ops_test: OpsTest) -> None:
 
 
 async def test_login_ui_relation(ops_test: OpsTest) -> None:
-    login_meta = yaml.safe_load(Path("../identity-platform-login-ui-operator/metadata.yaml").read_text())
+    login_meta = yaml.safe_load(
+        Path("../identity-platform-login-ui-operator/metadata.yaml").read_text()
+    )
+    charm = await ops_test.build_charm("../identity-platform-login-ui-operator/")
     login_name = login_meta["name"]
     image_path = login_meta["resources"]["oci-image"]["upstream-source"]
     await ops_test.model.deploy(

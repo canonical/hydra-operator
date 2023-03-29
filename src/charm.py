@@ -15,13 +15,13 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
-from charms.identity_platform_login_ui.v0.hydra_login_ui import (
-    HydraLoginUIRequirer,
-    HydraLoginUIRelationMissingError,
-    HydraLoginUIRelationDataMissingError,
-)
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
+from charms.identity_platform_login_ui.v0.hydra_login_ui import (
+    HydraLoginUIRelationDataMissingError,
+    HydraLoginUIRelationMissingError,
+    HydraLoginUIRequirer,
+)
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -93,7 +93,9 @@ class HydraCharm(CharmBase):
         self.oauth = OAuthProvider(self)
 
         self.endpoints_provider = HydraEndpointsProvider(self)
-        self.login_ui_requirer = HydraLoginUIRequirer(self, relation_name=self._login_ui_relation_name)
+        self.login_ui_requirer = HydraLoginUIRequirer(
+            self, relation_name=self._login_ui_relation_name
+        )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -118,7 +120,9 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
 
         self.framework.observe(self.login_ui_requirer.on.ready, self._on_login_ui_relation_ready)
-        self.framework.observe(self.on[self._login_ui_relation_name].relation_changed, self._on_config_changed)
+        self.framework.observe(
+            self.on[self._login_ui_relation_name].relation_changed, self._on_config_changed
+        )
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -418,7 +422,7 @@ class HydraCharm(CharmBase):
             jwks_endpoint=join(self.public_ingress.url, ".well-known/jwks.json"),
             scope=" ".join(SUPPORTED_SCOPES),
         )
-    
+
     def _on_login_ui_relation_ready(self, event: RelationEvent) -> None:
         public_endpoint = (
             self.public_ingress.url
@@ -426,22 +430,26 @@ class HydraCharm(CharmBase):
             else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}",
         )
 
-        logger.info(
-            f"Sending endpoints to login-ui: public - {public_endpoint[0]}"
-        )
+        logger.info(f"Sending endpoints to login-ui: public - {public_endpoint[0]}")
 
         self.login_ui_requirer.send_hydra_endpoint(self, public_endpoint[0])
-    
+
     def _get_login_ui_url(self) -> str:
         if self.model.relations[self._login_ui_relation_name]:
             try:
-                return self.login_ui_requirer.get_identity_platform_login_ui_endpoint()["login_ui_endpoint"]
+                return self.login_ui_requirer.get_identity_platform_login_ui_endpoint()[
+                    "login_ui_endpoint"
+                ]
             except HydraLoginUIRelationMissingError as err:
                 logger.error(str(err))
-                self.unit.status = BlockedStatus("Failed to Process updated Login UI API endpoint: Relation Missing")
+                self.unit.status = BlockedStatus(
+                    "Failed to Process updated Login UI API endpoint: Relation Missing"
+                )
             except HydraLoginUIRelationDataMissingError as err:
                 logger.error(str(err))
-                self.unit.status = BlockedStatus("Failed to Process updated Login UI API endpoint: Endpoint Data Missing")
+                self.unit.status = BlockedStatus(
+                    "Failed to Process updated Login UI API endpoint: Endpoint Data Missing"
+                )
         else:
             logger.error(f"Relation {self._login_ui_relation_name} not available")
             return self.config.get("login_ui_url", "")
