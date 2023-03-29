@@ -33,9 +33,9 @@ class HydraCLI:
         ]
 
         if client_config.scope:
-            for s in client_config.scope.split(" "):
+            for scope in client_config.scope.split(" "):
                 flags.append("--scope")
-                flags.append(s)
+                flags.append(scope)
         if client_config.redirect_uri:
             flags.append("--redirect-uri")
             flags.append(client_config.redirect_uri)
@@ -78,12 +78,12 @@ class HydraCLI:
         return json.loads(stdout)
 
     def delete_client(self, client_id: str) -> Dict:
-        """Delete one or more oauth2 client."""
+        """Delete an oauth2 client."""
         cmd = self._client_cmd_prefix("delete")
         cmd.append(client_id)
 
         stdout, _ = self._run_cmd(cmd)
-        logger.info(f"Successfully deleted clients: {stdout}")
+        logger.info(f"Successfully deleted client: {stdout}")
         return json.loads(stdout)
 
     def _run_cmd(

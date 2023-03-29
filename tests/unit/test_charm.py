@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.pebble import Error, ExecError
+from ops.pebble import ExecError
 from ops.testing import Harness
 from test_oauth_requirer import CLIENT_CONFIG  # type: ignore
 
@@ -51,6 +51,12 @@ def setup_oauth_relation(harness: Harness) -> Tuple[int, str]:
     app_name = "requirer"
     relation_id = harness.add_relation("oauth", app_name)
     harness.add_relation_unit(relation_id, "requirer/0")
+    return relation_id, app_name
+
+
+def setup_peer_relation(harness: Harness) -> Tuple[int, str]:
+    app_name = "hydra"
+    relation_id = harness.add_relation("hydra", app_name)
     return relation_id, app_name
 
 
@@ -418,7 +424,7 @@ def test_provider_info_called_when_oauth_relation_then_ingress(
     )
 
 
-def test_set_client_credentials_on_client_created_event_emitted(
+def test_client_created_event_emitted(
     harness: Harness,
     mocked_create_client: MagicMock,
     mocked_set_client_credentials: MagicMock,
@@ -427,13 +433,33 @@ def test_set_client_credentials_on_client_created_event_emitted(
     harness.set_can_connect(CONTAINER_NAME, True)
     client_credentials = mocked_create_client.return_value
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    peer_relation_id, _ = setup_peer_relation(harness)
+    relation_id, _ = setup_oauth_relation(harness)
+
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+    peer_data = harness.get_relation_data(peer_relation_id, harness.charm.app)
+
+    assert peer_data
+    mocked_set_client_credentials.assert_called_once_with(
+        relation_id, client_credentials["client_id"], client_credentials["client_secret"]
+    )
+
+
+def test_client_created_event_emitted_without_peers(
+    harness: Harness,
+    mocked_create_client: MagicMock,
+    mocked_set_client_credentials: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
     relation_id, _ = setup_oauth_relation(harness)
 
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
-    mocked_set_client_credentials.assert_called_once_with(
-        relation_id, client_credentials["client_id"], client_credentials["client_secret"]
-    )
+    assert not mocked_set_client_credentials.called
 
 
 def test_client_created_event_emitted_cannot_connect(
@@ -466,6 +492,7 @@ def test_exec_error_on_client_created_event_emitted(
 ) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
+    setup_peer_relation(harness)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = ExecError(
         command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
@@ -476,26 +503,6 @@ def test_exec_error_on_client_created_event_emitted(
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
-
-
-def test_error_on_client_created_event_emitted(
-    harness: Harness,
-    mocked_create_client: MagicMock,
-    mocked_hydra_is_running: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level(logging.ERROR)
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    err = Error("Some error")
-    mocked_create_client.side_effect = err
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-
-    assert (
-        caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
-    )
 
 
 def test_client_changed_event_emitted(
@@ -560,23 +567,83 @@ def test_exec_error_on_client_changed_event_emitted(
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
 
 
-def test_error_on_client_changed_event_emitted(
+def test_client_deleted_event_emitted(
     harness: Harness,
-    mocked_update_client: MagicMock,
+    mocked_create_client: MagicMock,
+    mocked_delete_client: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+) -> None:
+    client_id = "client_id"
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    peer_relation_id, _ = setup_peer_relation(harness)
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    harness.charm.oauth.on.client_deleted.emit(relation_id)
+
+    mocked_delete_client.assert_called_with(client_id)
+    assert harness.get_relation_data(peer_relation_id, harness.charm.app) == {}
+
+
+def test_client_deleted_event_emitted_without_peers(
+    harness: Harness,
+    mocked_create_client: MagicMock,
+    mocked_delete_client: MagicMock,
+    mocked_hydra_is_running: MagicMock,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
+
+    harness.charm.oauth.on.client_deleted.emit(relation_id)
+
+    assert not mocked_delete_client.called
+
+
+def test_client_deleted_event_emitted_cannot_connect(
+    harness: Harness, mocked_delete_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, False)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_deleted.emit(relation_id)
+
+    assert not mocked_delete_client.called
+
+
+def test_client_deleted_event_emitted_without_service(
+    harness: Harness, mocked_delete_client: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id, _ = setup_oauth_relation(harness)
+    harness.charm.oauth.on.client_deleted.emit(relation_id)
+
+    assert not mocked_delete_client.called
+
+
+def test_exec_error_on_client_deleted_event_emitted(
+    harness: Harness,
+    mocked_create_client: MagicMock,
+    mocked_delete_client: MagicMock,
     mocked_hydra_is_running: MagicMock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    err = Error("Some error")
-    mocked_update_client.side_effect = err
-
+    err = ExecError(
+        command=["hydra", "delete", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
+    )
+    mocked_delete_client.side_effect = err
+    setup_peer_relation(harness)
     relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_changed.emit(
-        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
-    )
+    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
-    assert (
-        caplog.record_tuples[0][2] == f"Something went wrong when trying to run the command: {err}"
-    )
+    harness.charm.oauth.on.client_deleted.emit(relation_id)
+
+    assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
