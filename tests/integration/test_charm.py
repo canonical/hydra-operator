@@ -102,3 +102,25 @@ async def test_has_admin_ingress(ops_test: OpsTest) -> None:
     resp = requests.get(f"http://{admin_address}/{ops_test.model.name}-{APP_NAME}/admin/clients")
 
     assert resp.status_code == 200
+
+
+async def test_login_ui_relation(ops_test: OpsTest) -> None:
+    login_meta = yaml.safe_load(Path("../identity-platform-login-ui-operator/metadata.yaml").read_text())
+    login_name = login_meta["name"]
+    image_path = login_meta["resources"]["oci-image"]["upstream-source"]
+    await ops_test.model.deploy(
+        application_name=login_name,
+        entity_url=charm,
+        resources={"oci-image": image_path},
+        series="jammy",
+        trust=True,
+    )
+
+    await ops_test.model.add_relation(f"{APP_NAME}:endpoint-info", f"{login_name}:endpoint-info")
+
+    await ops_test.model.wait_for_idle(
+        apps=[login_name],
+        status="active",
+        raise_on_blocked=True,
+        timeout=600,
+    )

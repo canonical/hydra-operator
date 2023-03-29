@@ -15,6 +15,11 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
+from charms.identity_platform_login_ui.v0.hydra_login_ui import (
+    HydraLoginUIRequirer,
+    HydraLoginUIRelationMissingError,
+    HydraLoginUIRelationDataMissingError,
+)
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
@@ -59,6 +64,7 @@ class HydraCharm(CharmBase):
         self._hydra_config_path = "/etc/config/hydra.yaml"
         self._db_name = f"{self.model.name}_{self.app.name}"
         self._db_relation_name = "pg-database"
+        self._login_ui_relation_name = "ui-endpoint-info"
 
         self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
 
@@ -87,6 +93,7 @@ class HydraCharm(CharmBase):
         self.oauth = OAuthProvider(self)
 
         self.endpoints_provider = HydraEndpointsProvider(self)
+        self.login_ui_requirer = HydraLoginUIRequirer(self, relation_name=self._login_ui_relation_name)
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -109,6 +116,9 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
         self.framework.observe(self.oauth.on.client_created, self._on_client_created)
         self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
+
+        self.framework.observe(self.login_ui_requirer.on.ready, self._on_login_ui_relation_ready)
+        self.framework.observe(self.on[self._login_ui_relation_name].relation_changed, self._on_config_changed)
 
     @property
     def _hydra_layer(self) -> Layer:
@@ -164,9 +174,9 @@ class HydraCharm(CharmBase):
 
         rendered = template.render(
             db_info=self._get_database_relation_info(),
-            consent_url=join(self.config.get("login_ui_url", ""), "consent"),
-            error_url=join(self.config.get("login_ui_url", ""), "oidc_error"),
-            login_url=join(self.config.get("login_ui_url", ""), "login"),
+            consent_url=join(self._get_login_ui_url(), "consent"),
+            error_url=join(self._get_login_ui_url(), "oidc_error"),
+            login_url=join(self._get_login_ui_url(), "login"),
             hydra_public_url=self.public_ingress.url
             if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
@@ -408,6 +418,33 @@ class HydraCharm(CharmBase):
             jwks_endpoint=join(self.public_ingress.url, ".well-known/jwks.json"),
             scope=" ".join(SUPPORTED_SCOPES),
         )
+    
+    def _on_login_ui_relation_ready(self, event: RelationEvent) -> None:
+        public_endpoint = (
+            self.public_ingress.url
+            if self.public_ingress.is_ready()
+            else f"{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}",
+        )
+
+        logger.info(
+            f"Sending endpoints to login-ui: public - {public_endpoint[0]}"
+        )
+
+        self.login_ui_requirer.send_hydra_endpoint(self, public_endpoint[0])
+    
+    def _get_login_ui_url(self) -> str:
+        if self.model.relations[self._login_ui_relation_name]:
+            try:
+                return self.login_ui_requirer.get_identity_platform_login_ui_endpoint()["login_ui_endpoint"]
+            except HydraLoginUIRelationMissingError as err:
+                logger.error(str(err))
+                self.unit.status = BlockedStatus("Failed to Process updated Login UI API endpoint: Relation Missing")
+            except HydraLoginUIRelationDataMissingError as err:
+                logger.error(str(err))
+                self.unit.status = BlockedStatus("Failed to Process updated Login UI API endpoint: Endpoint Data Missing")
+        else:
+            logger.error(f"Relation {self._login_ui_relation_name} not available")
+            return self.config.get("login_ui_url", "")
 
 
 if __name__ == "__main__":

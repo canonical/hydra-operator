@@ -22,6 +22,10 @@ requires:
     interface: ingress
   admin-ingress:
     interface: ingress
+  ui-endpoint-info:
+    interface: hydra_login_ui
+    description: |
+      Consumes rendered UI pages and proxy services
 provides:
   endpoint-info:
     interface: hydra_endpoints
