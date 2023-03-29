@@ -573,7 +573,7 @@ def test_client_deleted_event_emitted(
     mocked_delete_client: MagicMock,
     mocked_hydra_is_running: MagicMock,
 ) -> None:
-    client_id = "client_id"
+    client_id = mocked_delete_client.return_value
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
@@ -667,7 +667,9 @@ def test_actions_when_cannot_connect(harness: Harness, action: str) -> None:
 
     getattr(harness.charm, action)(event)
 
-    event.fail.assert_called_with("Service is not ready.")
+    event.fail.assert_called_with(
+        "Service is not ready. Please re-run the action when the charm is active"
+    )
 
 
 def test_create_oauth_client_action(

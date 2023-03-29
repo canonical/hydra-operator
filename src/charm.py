@@ -49,7 +49,7 @@ from ops.model import (
     Relation,
     WaitingStatus,
 )
-from ops.pebble import ChangeError, ExecError, Layer
+from ops.pebble import ChangeError, Error, ExecError, Layer
 
 from hydra_cli import HydraCLI
 
@@ -516,7 +516,6 @@ class HydraCharm(CharmBase):
             return
 
         self._pop_oauth_relation_peer_data(event.relation_id)
-
 
     def _on_create_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:

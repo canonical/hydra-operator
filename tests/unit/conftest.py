@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 from typing import Dict, Generator
-from unittest.mock import MagicMock
 
 import pytest
 from ops.testing import Harness
