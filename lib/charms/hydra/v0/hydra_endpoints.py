@@ -94,7 +94,7 @@ class HydraEndpointsProvider(Object):
         if not self._charm.unit.is_leader():
             return
 
-        relations = self.model.relations[RELATION_NAME]
+        relations = self.model.relations[self._relation_name]
         for relation in relations:
             relation.data[self._charm.app].update(
                 {
