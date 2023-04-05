@@ -39,23 +39,109 @@ def mocked_sql_migration(mocker: MockerFixture) -> Generator:
 
 
 @pytest.fixture()
-def mocked_create_client(mocker: MockerFixture) -> Generator:
+def hydra_cli_client_json() -> Dict:
+    return {
+        "client_id": "07b318cf-9a9f-47b2-a288-972e671936a1",
+        "client_name": "",
+        "client_secret": "_hXRi23BeBc1kGhCQKRASz7nC6",
+        "client_secret_expires_at": 0,
+        "client_uri": "",
+        "created_at": "2023-03-17T13:03:53Z",
+        "grant_types": ["authorization_code"],
+        "jwks": {},
+        "logo_uri": "",
+        "metadata": {},
+        "owner": "",
+        "policy_uri": "",
+        "redirect_uris": ["https://example/oauth/callback"],
+        "registration_access_token": "ory_at_1hxSDuA1Ivyvi6Sy0iHfUFOVcASiOp4ZzVY4frtKMKo.7FliqVHMff94gacuKLKCnWEiCqMxJYs8jHmSw8iP03k",
+        "registration_client_uri": "http://localhost:4444/oauth2/register/07b318cf-9a9f-47b2-a288-972e671936a1",
+        "request_object_signing_alg": "RS256",
+        "response_types": ["code"],
+        "scope": "offline_access offline openid",
+        "subject_type": "public",
+        "token_endpoint_auth_method": "client_secret_basic",
+        "tos_uri": "",
+        "updated_at": "2023-03-17T13:03:53.389214Z",
+        "userinfo_signed_response_alg": "none",
+    }
+
+
+@pytest.fixture()
+def mocked_create_client(mocker: MockerFixture, hydra_cli_client_json: Dict) -> Generator:
     mock = mocker.patch("charm.HydraCLI.create_client")
-    mock.return_value = {"client_id": "client_id", "client_secret": "client_secret"}
+    mock.return_value = hydra_cli_client_json
     yield mock
 
 
 @pytest.fixture()
-def mocked_update_client(mocker: MockerFixture) -> Generator:
+def mocked_get_client(mocker: MockerFixture, hydra_cli_client_json: Dict) -> Generator:
+    mock = mocker.patch("charm.HydraCLI.get_client")
+    hydra_cli_client_json = dict(hydra_cli_client_json)
+    hydra_cli_client_json.pop("client_secret", None)
+    mock.return_value = hydra_cli_client_json
+    yield mock
+
+
+@pytest.fixture()
+def mocked_update_client(mocker: MockerFixture, hydra_cli_client_json: Dict) -> Generator:
     mock = mocker.patch("charm.HydraCLI.update_client")
-    mock.return_value = {"client_id": "client_id", "client_secret": "client_secret"}
+    hydra_cli_client_json = dict(hydra_cli_client_json)
+    hydra_cli_client_json.pop("client_secret", None)
+    hydra_cli_client_json.pop("registration_access_token", None)
+    hydra_cli_client_json.pop("registration_client_uri", None)
+    mock.return_value = hydra_cli_client_json
     yield mock
 
 
 @pytest.fixture()
-def mocked_delete_client(mocker: MockerFixture) -> Generator:
+def mocked_list_client(mocker: MockerFixture, hydra_cli_client_json: Dict) -> Generator:
+    mock = mocker.patch("charm.HydraCLI.list_clients")
+    hydra_cli_client_json = dict(hydra_cli_client_json)
+    hydra_cli_client_json.pop("client_secret", None)
+    hydra_cli_client_json.pop("registration_access_token", None)
+    hydra_cli_client_json.pop("registration_client_uri", None)
+    ret = {"items": [dict(hydra_cli_client_json, client_id=f"client-{i}") for i in range(20)]}
+    mock.return_value = ret
+    yield mock
+
+
+@pytest.fixture()
+def mocked_delete_client(mocker: MockerFixture, hydra_cli_client_json: Dict) -> Generator:
     mock = mocker.patch("charm.HydraCLI.delete_client")
+    mock.return_value = hydra_cli_client_json["client_id"]
+    yield mock
+
+
+@pytest.fixture()
+def mocked_revoke_tokens(mocker: MockerFixture) -> Generator:
+    mock = mocker.patch("charm.HydraCLI.delete_client_access_tokens")
     mock.return_value = "client_id"
+    yield mock
+
+
+@pytest.fixture()
+def mocked_create_jwk(mocker: MockerFixture) -> Generator:
+    mock = mocker.patch("charm.HydraCLI.create_jwk")
+    mock.return_value = {
+        "set": "hydra.openid.id-token",
+        "keys": [
+            {
+                "alg": "RS256",
+                "d": "a",
+                "dp": "b",
+                "dq": "c",
+                "e": "AQAB",
+                "kid": "183d04f5-9e7b-4d2e-91e6-5b91d17db16d",
+                "kty": "RSA",
+                "n": "d",
+                "p": "e",
+                "q": "f",
+                "qi": "g",
+                "use": "sig",
+            }
+        ],
+    }
     yield mock
 
 
