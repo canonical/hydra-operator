@@ -1,4 +1,4 @@
-# Publish hydra_endpoints library only if it has changed
+# Publish oauth library only if it has changed
 name: Publish library
 
 on:
@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - "./lib/charms/hydra/v0/hydra_endpoints.py"
+      - "lib/charms/hydra/v0/oauth.py"
 
 jobs:
   publish-lib:
@@ -23,4 +23,4 @@ jobs:
         env:
           CHARMCRAFT_AUTH: ${{ secrets.CHARMCRAFT_CREDENTIALS }}
         run: |
-          charmcraft publish-lib charms.hydra.v0.hydra_endpoints
+          charmcraft publish-lib charms.hydra.v0.oauth
