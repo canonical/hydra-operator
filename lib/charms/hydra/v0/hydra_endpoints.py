@@ -39,11 +39,10 @@ Class SomeCharm(CharmBase):
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
 from ops.charm import CharmBase, RelationCreatedEvent
 from ops.framework import EventBase, EventSource, Object, ObjectEvents
-from ops.model import Application
 
 # The unique Charmhub library identifier, never change it
 LIBID = "a9dbc14576874a508dc3b7f717c72f73"
@@ -129,7 +128,7 @@ class HydraEndpointsRelationDataMissingError(HydraEndpointsRelationError):
 class HydraEndpointsRequirer(Object):
     """Requirer side of the endpoint-info relation."""
 
-    def __init__(self, charm: CharmBase, relation_name: str = RELATION_NAME):
+    def __init__(self, charm: CharmBase, relation_name: str = RELATION_NAME) -> None:
         super().__init__(charm, relation_name)
         self.charm = charm
         self.relation_name = relation_name
