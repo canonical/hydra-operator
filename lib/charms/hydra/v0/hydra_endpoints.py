@@ -136,8 +136,6 @@ class HydraEndpointsRequirer(Object):
 
     def get_hydra_endpoints(self) -> Optional[Dict]:
         """Get the hydra endpoints."""
-        if not self.model.unit.is_leader():
-            return None
         endpoints = self.model.relations[self.relation_name]
         if len(endpoints) == 0:
             raise HydraEndpointsRelationMissingError()
