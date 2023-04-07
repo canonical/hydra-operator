@@ -134,19 +134,13 @@ class HydraEndpointsRequirer(Object):
         self.charm = charm
         self.relation_name = relation_name
 
-    def get_hydra_endpoints(self) -> Optional[Dict]:
+    def get_hydra_endpoints(self) -> Dict:
         """Get the hydra endpoints."""
         endpoints = self.model.relations[self.relation_name]
         if len(endpoints) == 0:
             raise HydraEndpointsRelationMissingError()
 
-        remote_app = [
-            app
-            for app in endpoints[0].data.keys()
-            if isinstance(app, Application) and not app._is_our_app
-        ][0]
-
-        data = endpoints[0].data[remote_app]
+        data = endpoints[0].data[endpoints[0].app]
 
         if "admin_endpoint" not in data:
             raise HydraEndpointsRelationDataMissingError(
