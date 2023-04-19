@@ -22,6 +22,9 @@ requires:
     interface: ingress
   admin-ingress:
     interface: ingress
+  ui-endpoint-info:
+    interface: login_ui_endpoints
+    limit: 1
 provides:
   endpoint-info:
     interface: hydra_endpoints
