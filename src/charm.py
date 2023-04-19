@@ -23,6 +23,12 @@ from charms.hydra.v0.oauth import (
     ClientDeletedEvent,
     OAuthProvider,
 )
+from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
+    LoginUIEndpointsRelationDataMissingError,
+    LoginUIEndpointsRelationMissingError,
+    LoginUIEndpointsRequirer,
+    LoginUITooManyRelatedAppsError,
+)
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
@@ -33,7 +39,6 @@ from jinja2 import Template
 from ops.charm import (
     ActionEvent,
     CharmBase,
-    ConfigChangedEvent,
     HookEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
@@ -78,6 +83,7 @@ class HydraCharm(CharmBase):
         self._hydra_config_path = "/etc/config/hydra.yaml"
         self._db_name = f"{self.model.name}_{self.app.name}"
         self._db_relation_name = "pg-database"
+        self._login_ui_relation_name = "ui-endpoint-info"
 
         self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
 
@@ -105,10 +111,13 @@ class HydraCharm(CharmBase):
         )
         self.oauth = OAuthProvider(self)
 
+        self.login_ui_endpoints = LoginUIEndpointsRequirer(
+            self, relation_name=self._login_ui_relation_name
+        )
+
         self.endpoints_provider = HydraEndpointsProvider(self)
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
-        self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
             self.endpoints_provider.on.ready, self._update_hydra_endpoints_relation_data
         )
@@ -131,6 +140,10 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
         self.framework.observe(self.oauth.on.client_deleted, self._on_client_deleted)
 
+        self.framework.observe(
+            self.on[self._login_ui_relation_name].relation_changed,
+            self._handle_status_update_config,
+        )
         self.framework.observe(
             self.on.create_oauth_client_action, self._on_create_oauth_client_action
         )
@@ -185,7 +198,6 @@ class HydraCharm(CharmBase):
             self._container.get_service(self._container_name)
         except (ModelError, RuntimeError):
             return False
-
         return True
 
     @property
@@ -206,9 +218,9 @@ class HydraCharm(CharmBase):
 
         rendered = template.render(
             db_info=self._get_database_relation_info(),
-            consent_url=join(self.config.get("login_ui_url", ""), "consent"),
-            error_url=join(self.config.get("login_ui_url", ""), "oidc_error"),
-            login_url=join(self.config.get("login_ui_url", ""), "login"),
+            consent_url=self._get_login_ui_endpoint_info("consent_url"),
+            error_url=self._get_login_ui_endpoint_info("oidc_error_url"),
+            login_url=self._get_login_ui_endpoint_info("login_url"),
             hydra_public_url=self.public_ingress.url
             if self.public_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
@@ -336,10 +348,6 @@ class HydraCharm(CharmBase):
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event Handler for pebble ready event."""
-        self._handle_status_update_config(event)
-
-    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
-        """Event Handler for config changed event."""
         self._handle_status_update_config(event)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
@@ -751,6 +759,18 @@ class HydraCharm(CharmBase):
             jwks_endpoint=join(self.public_ingress.url, ".well-known/jwks.json"),
             scope=" ".join(SUPPORTED_SCOPES),
         )
+
+    def _get_login_ui_endpoint_info(self, key: str) -> Optional[str]:
+        try:
+            login_ui_endpoints = self.login_ui_endpoints.get_login_ui_endpoints()
+            return login_ui_endpoints[key]
+        except LoginUIEndpointsRelationDataMissingError:
+            logger.info("No login ui endpoint-info relation data found")
+        except LoginUIEndpointsRelationMissingError:
+            logger.info("No login ui endpoint-info relation found")
+        except LoginUITooManyRelatedAppsError:
+            logger.info("Too many ui-endpoint-info relations found")
+        return None
 
 
 if __name__ == "__main__":

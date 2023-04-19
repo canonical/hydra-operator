@@ -60,6 +60,47 @@ def setup_peer_relation(harness: Harness) -> Tuple[int, str]:
     return relation_id, app_name
 
 
+def setup_login_ui_relation(harness: Harness) -> tuple[int, dict]:
+    relation_id = harness.add_relation("ui-endpoint-info", "identity-platform-login-ui-operator")
+    harness.add_relation_unit(relation_id, "identity-platform-login-ui-operator/0")
+    endpoint = f"http://public:80/{harness.model.name}-identity-platform-login-ui-operator"
+    login_databag = {
+        "consent_url": f"{endpoint}/consent",
+        "error_url": f"{endpoint}/error",
+        "index_url": f"{endpoint}/index",
+        "login_url": f"{endpoint}/login",
+        "oidc_error_url": f"{endpoint}/oidc_error",
+        "registration_url": f"{endpoint}/registration",
+        "default_url": endpoint,
+    }
+    harness.update_relation_data(
+        relation_id,
+        "identity-platform-login-ui-operator",
+        login_databag,
+    )
+    return (relation_id, login_databag)
+
+
+def setup_login_ui_without_proxy_relation(harness: Harness) -> tuple[int, dict]:
+    relation_id = harness.add_relation("ui-endpoint-info", "identity-platform-login-ui-operator")
+    harness.add_relation_unit(relation_id, "identity-platform-login-ui-operator/0")
+    login_databag = {
+        "consent_url": "",
+        "error_url": "",
+        "index_url": "",
+        "login_url": "",
+        "oidc_error_url": "",
+        "registration_url": "",
+        "default_url": "",
+    }
+    harness.update_relation_data(
+        relation_id,
+        "identity-platform-login-ui-operator",
+        login_databag,
+    )
+    return (relation_id, login_databag)
+
+
 def test_not_leader(harness: Harness) -> None:
     harness.set_leader(False)
     setup_postgres_relation(harness)
@@ -123,9 +164,7 @@ def test_pebble_container_cannot_connect(
 ) -> None:
     setup_postgres_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, False)
-
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
     assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
 
 
@@ -157,9 +196,9 @@ def test_update_container_config(harness: Harness, mocked_sql_migration: MagicMo
             },
         },
         "urls": {
-            "consent": "http://127.0.0.1:4455/consent",
-            "error": "http://127.0.0.1:4455/oidc_error",
-            "login": "http://127.0.0.1:4455/login",
+            "consent": "http://default-url.com/consent",
+            "error": "http://default-url.com/oidc_error",
+            "login": "http://default-url.com/login",
             "self": {
                 "issuer": "http://127.0.0.1:4444/",
                 "public": "http://127.0.0.1:4444/",
@@ -175,7 +214,6 @@ def test_update_container_config(harness: Harness, mocked_sql_migration: MagicMo
 
 def test_on_config_changed_without_service(harness: Harness) -> None:
     setup_postgres_relation(harness)
-    harness.update_config({"login_ui_url": "http://some-url"})
 
     assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
 
@@ -183,7 +221,6 @@ def test_on_config_changed_without_service(harness: Harness) -> None:
 def test_on_config_changed_without_database(harness: Harness) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    harness.update_config({"login_ui_url": "http://some-url"})
 
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
@@ -194,8 +231,6 @@ def test_config_updated_on_config_changed(
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_postgres_relation(harness)
-
-    harness.update_config({"login_ui_url": "http://some-url"})
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
@@ -219,9 +254,9 @@ def test_config_updated_on_config_changed(
             },
         },
         "urls": {
-            "consent": "http://some-url/consent",
-            "error": "http://some-url/oidc_error",
-            "login": "http://some-url/login",
+            "consent": "http://default-url.com/consent",
+            "error": "http://default-url.com/oidc_error",
+            "login": "http://default-url.com/login",
             "self": {
                 "issuer": "http://127.0.0.1:4444/",
                 "public": "http://127.0.0.1:4444/",
@@ -281,9 +316,9 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
             },
         },
         "urls": {
-            "consent": "http://127.0.0.1:4455/consent",
-            "error": "http://127.0.0.1:4455/oidc_error",
-            "login": "http://127.0.0.1:4455/login",
+            "consent": "http://default-url.com/consent",
+            "error": "http://default-url.com/oidc_error",
+            "login": "http://default-url.com/login",
             "self": {
                 "issuer": "http://public:80/testing-hydra",
                 "public": "http://public:80/testing-hydra",
@@ -329,9 +364,9 @@ def test_hydra_config_on_pebble_ready_without_ingress_relation_data(harness: Har
             },
         },
         "urls": {
-            "consent": "http://127.0.0.1:4455/consent",
-            "error": "http://127.0.0.1:4455/oidc_error",
-            "login": "http://127.0.0.1:4455/login",
+            "consent": "http://default-url.com/consent",
+            "error": "http://default-url.com/oidc_error",
+            "login": "http://default-url.com/login",
             "self": {
                 "issuer": "http://127.0.0.1:4444/",
                 "public": "http://127.0.0.1:4444/",
@@ -647,6 +682,152 @@ def test_exec_error_on_client_deleted_event_emitted(
     harness.charm.oauth.on.client_deleted.emit(relation_id)
 
     assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+
+
+def test_config_updated_without_login_ui_endpoints_interface(
+    harness: Harness, mocked_sql_migration: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_postgres_relation(harness)
+
+    expected_config = {
+        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
+        "log": {"level": "trace"},
+        "secrets": {
+            "cookie": ["my-cookie-secret"],
+            "system": ["my-system-secret"],
+        },
+        "serve": {
+            "admin": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+            "public": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+        },
+        "urls": {
+            "consent": "http://default-url.com/consent",
+            "error": "http://default-url.com/oidc_error",
+            "login": "http://default-url.com/login",
+            "self": {
+                "issuer": "http://127.0.0.1:4444/",
+                "public": "http://127.0.0.1:4444/",
+            },
+        },
+        "webfinger": {
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+        },
+    }
+
+    container_config = harness.charm._container.pull(
+        path="/etc/config/hydra.yaml", encoding="utf-8"
+    )
+    assert yaml.safe_load(container_config.read()) == expected_config
+
+
+def test_config_updated_with_login_ui_endpoints_interface(
+    harness: Harness, mocked_sql_migration: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_postgres_relation(harness)
+    (_, login_databag) = setup_login_ui_relation(harness)
+
+    expected_config = {
+        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
+        "log": {"level": "trace"},
+        "secrets": {
+            "cookie": ["my-cookie-secret"],
+            "system": ["my-system-secret"],
+        },
+        "serve": {
+            "admin": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+            "public": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+        },
+        "urls": {
+            "consent": login_databag["consent_url"],
+            "error": login_databag["oidc_error_url"],
+            "login": login_databag["login_url"],
+            "self": {
+                "issuer": "http://127.0.0.1:4444/",
+                "public": "http://127.0.0.1:4444/",
+            },
+        },
+        "webfinger": {
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+        },
+    }
+
+    container_config = harness.charm._container.pull(
+        path="/etc/config/hydra.yaml", encoding="utf-8"
+    )
+    assert yaml.safe_load(container_config.read()) == expected_config
+
+
+def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
+    harness: Harness, mocked_sql_migration: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_postgres_relation(harness)
+    setup_login_ui_without_proxy_relation(harness)
+
+    expected_config = {
+        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
+        "log": {"level": "trace"},
+        "secrets": {
+            "cookie": ["my-cookie-secret"],
+            "system": ["my-system-secret"],
+        },
+        "serve": {
+            "admin": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+            "public": {
+                "cors": {
+                    "allowed_origins": ["*"],
+                    "enabled": True,
+                },
+            },
+        },
+        "urls": {
+            "consent": "http://default-url.com/consent",
+            "error": "http://default-url.com/oidc_error",
+            "login": "http://default-url.com/login",
+            "self": {
+                "issuer": "http://127.0.0.1:4444/",
+                "public": "http://127.0.0.1:4444/",
+            },
+        },
+        "webfinger": {
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+        },
+    }
+
+    container_config = harness.charm._container.pull(
+        path="/etc/config/hydra.yaml", encoding="utf-8"
+    )
+    assert yaml.safe_load(container_config.read()) == expected_config
 
 
 @pytest.mark.parametrize(
