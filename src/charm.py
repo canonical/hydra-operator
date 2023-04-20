@@ -458,7 +458,7 @@ class HydraCharm(CharmBase):
                 redirect_uri=event.redirect_uri.split(" "),
                 scope=event.scope.split(" "),
                 token_endpoint_auth_method=event.token_endpoint_auth_method,
-                metadata={"relation_id": {event.relation_id}},
+                metadata={"relation_id": event.relation_id},
             )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
@@ -488,7 +488,7 @@ class HydraCharm(CharmBase):
                 redirect_uri=event.redirect_uri.split(" "),
                 scope=event.scope.split(" "),
                 token_endpoint_auth_method=event.token_endpoint_auth_method,
-                metadata={"relation_id": {event.relation_id}},
+                metadata={"relation_id": event.relation_id},
             )
         except ExecError as err:
             logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")

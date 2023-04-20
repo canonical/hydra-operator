@@ -420,7 +420,7 @@ class OAuthRequirer(Object):
 
 
 class ClientCreatedEvent(EventBase):
-    """Event to notify the Provider charm that to create a new client."""
+    """Event to notify the Provider charm to create a new client."""
 
     def __init__(
         self,
@@ -672,7 +672,7 @@ class OAuthProvider(Object):
     def set_client_credentials_in_relation_data(
         self, relation_id: int, client_id: str, client_secret: str
     ) -> None:
-        """Put the client credentials in the the databag."""
+        """Put the client credentials in the databag."""
         if not self.model.unit.is_leader():
             return
 
