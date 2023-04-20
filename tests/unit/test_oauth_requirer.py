@@ -169,7 +169,7 @@ def test_exception_raised_when_malformed_redirect_url(harness: Harness) -> None:
         harness.charm.oauth.update_client_config(client_config=client_config)
 
 
-def test_exception_raised_when_http_redirect_url(
+def test_warning_when_http_redirect_url(
     harness: Harness, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.WARNING)
