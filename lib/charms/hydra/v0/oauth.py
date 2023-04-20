@@ -20,7 +20,7 @@ EOF
 Then, to initialize the library:
 ```python
 # ...
-from charms.hydra.v0.kubernetes_service_patch import ClientConfig, OAuthRequirer
+from charms.hydra.v0.oauth import ClientConfig, OAuthRequirer
 
 OAUTH = "oauth"
 OAUTH_SCOPES = "openid email"
@@ -40,7 +40,7 @@ class SomeCharm(CharmBase):
 
     def _set_client_config(self):
         client_config = ClientConfig(
-            join(self.external_url, "/oauth/callback"),
+            urljoin(self.external_url, "/oauth/callback"),
             OAUTH_SCOPES,
             OAUTH_GRANT_TYPES,
         )
@@ -67,7 +67,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 1
+LIBPATCH = 2
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ ALLOWED_CLIENT_AUTHN_METHODS = ["client_secret_basic", "client_secret_post"]
 CLIENT_SECRET_FIELD = "secret"
 
 url_regex = re.compile(
-    r"^https://"  # https://
+    r"(^http://)|(^https://)"  # http:// or https://
     r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|"
     r"[A-Z0-9-]{2,}\.?)|"  # domain...
     r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"  # ...or ip
@@ -226,6 +226,9 @@ class ClientConfig:
         if not re.match(url_regex, self.redirect_uri):
             raise ClientConfigError(f"Invalid URL {self.redirect_uri}")
 
+        if self.redirect_uri.startswith("http://"):
+            logger.info("Provided Redirect URL uses http scheme. Don't do this in production")
+
         # Validate grant_types
         for grant_type in self.grant_types:
             if grant_type not in ALLOWED_GRANT_TYPES:
@@ -373,7 +376,12 @@ class OAuthRequirer(Object):
         if not relation:
             return None
 
-        data = _load_data(relation.data[relation.app], OAUTH_PROVIDER_JSON_SCHEMA)
+        data = relation.data[relation.app]
+        if not data:
+            logger.info("No relation data available.")
+            return
+
+        data = _load_data(data, OAUTH_PROVIDER_JSON_SCHEMA)
         data.pop("client_id", None)
         data.pop("client_secret_id", None)
         return data
@@ -574,6 +582,7 @@ class OAuthProvider(Object):
 
         data = event.relation.data[event.app]
         if not data:
+            logger.info("No requirer relation data available.")
             return
 
         client_data = _load_data(data, OAUTH_REQUIRER_JSON_SCHEMA)
@@ -585,6 +594,7 @@ class OAuthProvider(Object):
 
         data = event.relation.data[self._charm.app]
         if not data:
+            logger.info("No provider relation data available.")
             return
         provider_data = _load_data(data, OAUTH_PROVIDER_JSON_SCHEMA)
         client_id = provider_data.get("client_id")

@@ -416,7 +416,7 @@ class HydraCharm(CharmBase):
             logger.info("This app's admin ingress URL: %s", event.url)
 
         self._update_hydra_endpoints_relation_data(event)
-        self._update_endpoint_info()
+        self._update_endpoint_info(event)
 
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         if self.unit.is_leader():
@@ -424,7 +424,7 @@ class HydraCharm(CharmBase):
 
         self._handle_status_update_config(event)
         self._update_hydra_endpoints_relation_data(event)
-        self._update_endpoint_info()
+        self._update_endpoint_info(event)
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         if self.unit.is_leader():
@@ -432,10 +432,10 @@ class HydraCharm(CharmBase):
 
         self._handle_status_update_config(event)
         self._update_hydra_endpoints_relation_data(event)
-        self._update_endpoint_info()
+        self._update_endpoint_info(event)
 
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
-        self._update_endpoint_info()
+        self._update_endpoint_info(event)
 
     def _on_client_created(self, event: ClientCreatedEvent) -> None:
         if not self.unit.is_leader():
@@ -746,8 +746,10 @@ class HydraCharm(CharmBase):
         """Check whether a client is managed from an oauth relation."""
         return "relation_id" in client.get("metadata", {})
 
-    def _update_endpoint_info(self) -> None:
+    def _update_endpoint_info(self, event: RelationEvent) -> None:
         if not self.admin_ingress.url or not self.public_ingress.url:
+            event.defer()
+            logger.info("Ingress URL not available. Deferring the event.")
             return
 
         self.oauth.set_provider_info_in_relation_data(
