@@ -171,7 +171,9 @@ class LoginUIEndpointsRequirer(Object):
         """Get the Identity Platform Login UI endpoints."""
 
         try:
-            ui_endpoint_relation = self.model.get_relation(self._relation_name, relation_id=relation_id)
+            ui_endpoint_relation = self.model.get_relation(
+                self._relation_name, relation_id=relation_id
+            )
         except TooManyRelatedAppsError:
             raise LoginUITooManyRelatedAppsError()
 

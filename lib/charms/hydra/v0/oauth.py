@@ -227,7 +227,7 @@ class ClientConfig:
             raise ClientConfigError(f"Invalid URL {self.redirect_uri}")
 
         if self.redirect_uri.startswith("http://"):
-            logger.info("Provided Redirect URL uses http scheme. Don't do this in production")
+            logger.warning("Provided Redirect URL uses http scheme. Don't do this in production")
 
         # Validate grant_types
         for grant_type in self.grant_types:
