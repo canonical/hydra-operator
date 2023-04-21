@@ -365,6 +365,23 @@ class OAuthRequirer(Object):
         data = _dump_data(client_config.to_dict(), OAUTH_REQUIRER_JSON_SCHEMA)
         relation.data[self.model.app].update(data)
 
+    def is_client_created(self, relation_id: Optional[int] = None) -> bool:
+        """Check if the client has been created."""
+        if len(self.model.relations) == 0:
+            return None
+        try:
+            relation = self.model.get_relation(self._relation_name, relation_id=relation_id)
+        except TooManyRelatedAppsError:
+            raise RuntimeError("More than one relations are defined. Please provide a relation_id")
+
+        if not relation or not relation.app:
+            return None
+
+        return (
+            "client_id" in relation.data[relation.app]
+            and "client_secret_id" in relation.data[relation.app]
+        )
+
     def get_provider_info(self, relation_id: Optional[int] = None) -> Optional[Dict]:
         """Get the provider information from the databag."""
         if len(self.model.relations) == 0:
