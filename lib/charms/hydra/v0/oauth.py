@@ -359,7 +359,7 @@ class OAuthRequirer(Object):
         except TooManyRelatedAppsError:
             raise RuntimeError("More than one relations are defined. Please provide a relation_id")
 
-        if not relation:
+        if not relation or not relation.app:
             return
 
         data = _dump_data(client_config.to_dict(), OAUTH_REQUIRER_JSON_SCHEMA)
@@ -373,7 +373,7 @@ class OAuthRequirer(Object):
             relation = self.model.get_relation(self._relation_name, relation_id=relation_id)
         except TooManyRelatedAppsError:
             raise RuntimeError("More than one relations are defined. Please provide a relation_id")
-        if not relation:
+        if not relation or not relation.app:
             return None
 
         data = relation.data[relation.app]
@@ -677,7 +677,7 @@ class OAuthProvider(Object):
             return
 
         relation = self.model.get_relation(self._relation_name, relation_id)
-        if not relation:
+        if not relation or not relation.app:
             return
         # TODO: What if we are refreshing the client_secret? We need to add a
         # new revision for that
