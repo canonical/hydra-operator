@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import json
+import logging
 from typing import Any, Dict, Generator, List
 
 import pytest
@@ -162,10 +163,21 @@ def test_get_client_credentials_when_data_available(harness: Harness, provider_i
 
 def test_exception_raised_when_malformed_redirect_url(harness: Harness) -> None:
     client_config = ClientConfig(**CLIENT_CONFIG)
-    client_config.redirect_uri = "http://some.callback"
+    client_config.redirect_uri = "malformed-url"
 
     with pytest.raises(ClientConfigError, match=f"Invalid URL {client_config.redirect_uri}"):
         harness.charm.oauth.update_client_config(client_config=client_config)
+
+
+def test_warning_when_http_redirect_url(
+    harness: Harness, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    client_config = ClientConfig(**CLIENT_CONFIG)
+    client_config.redirect_uri = "http://some.callback"
+
+    harness.charm.oauth.update_client_config(client_config=client_config)
+    assert "Provided Redirect URL uses http scheme. Don't do this in production" in caplog.text
 
 
 def test_exception_raised_when_invalid_grant_type(harness: Harness) -> None:
@@ -188,7 +200,7 @@ class InvalidConfigOAuthRequirerCharm(CharmBase):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
         client_config = ClientConfig(**CLIENT_CONFIG)
-        client_config.redirect_uri = "http://some.callback"
+        client_config.grant_types = ["invalid_grant_type"]
         self.oauth = OAuthRequirer(self, client_config=client_config)
 
         self.events: List = []

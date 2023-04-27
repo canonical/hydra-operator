@@ -35,7 +35,7 @@ async def test_build_and_deploy(ops_test: OpsTest) -> None:
 
     await ops_test.model.deploy(
         entity_url="postgresql-k8s",
-        channel="latest/edge",
+        channel="14/stable",
         series="jammy",
         trust=True,
     )
