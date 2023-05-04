@@ -139,7 +139,15 @@ def test_get_provider_info_when_data_available(harness: Harness, provider_info: 
         provider_info,
     )
 
-    assert harness.charm.oauth.get_provider_info() == provider_info
+    expected_provider_info = harness.charm.oauth.get_provider_info()
+
+    assert expected_provider_info.authorization_endpoint == provider_info["authorization_endpoint"]
+    assert expected_provider_info.introspection_endpoint == provider_info["introspection_endpoint"]
+    assert expected_provider_info.issuer_url == provider_info["issuer_url"]
+    assert expected_provider_info.jwks_endpoint == provider_info["jwks_endpoint"]
+    assert expected_provider_info.scope == provider_info["scope"]
+    assert expected_provider_info.token_endpoint == provider_info["token_endpoint"]
+    assert expected_provider_info.userinfo_endpoint == provider_info["userinfo_endpoint"]
 
 
 def test_get_client_credentials_when_data_available(harness: Harness, provider_info: Dict) -> None:
@@ -156,9 +164,10 @@ def test_get_client_credentials_when_data_available(harness: Harness, provider_i
         dict(client_id=client_id, client_secret_id=secret_id, **provider_info),
     )
 
-    assert harness.charm.oauth.get_client_credentials() == dict(
-        client_id=client_id, client_secret=client_secret
-    )
+    expected_client_details = harness.charm.oauth.get_client_credentials()
+
+    assert expected_client_details.client_id == client_id
+    assert expected_client_details.client_secret == client_secret
 
 
 def test_exception_raised_when_malformed_redirect_url(harness: Harness) -> None:
