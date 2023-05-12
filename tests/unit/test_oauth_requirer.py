@@ -164,7 +164,7 @@ def test_get_client_credentials_when_data_available(harness: Harness, provider_i
         dict(client_id=client_id, client_secret_id=secret_id, **provider_info),
     )
 
-    expected_client_details = harness.charm.oauth.get_client_credentials()
+    expected_client_details = harness.charm.oauth.get_provider_info()
 
     assert expected_client_details.client_id == client_id
     assert expected_client_details.client_secret == client_secret
