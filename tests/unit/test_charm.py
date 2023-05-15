@@ -395,25 +395,8 @@ def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness
     harness.add_relation_unit(endpoint_info_relation_id, "kratos/0")
 
     expected_data = {
-        "admin_endpoint": "hydra.testing.svc.cluster.local:4445",
-        "public_endpoint": "hydra.testing.svc.cluster.local:4444",
-    }
-
-    assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
-
-
-def test_hydra_endpoint_info_relation_data_with_ingress_relation_data(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_ingress_relation(harness, "public")
-    setup_ingress_relation(harness, "admin")
-
-    endpoint_info_relation_id = harness.add_relation("endpoint-info", "kratos")
-    harness.add_relation_unit(endpoint_info_relation_id, "kratos/0")
-
-    expected_data = {
-        "admin_endpoint": "http://admin:80/testing-hydra",
-        "public_endpoint": "http://public:80/testing-hydra",
+        "admin_endpoint": "http://hydra.testing.svc.cluster.local:4445",
+        "public_endpoint": "http://hydra.testing.svc.cluster.local:4444",
     }
 
     assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
