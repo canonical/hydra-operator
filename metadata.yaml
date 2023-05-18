@@ -28,6 +28,8 @@ requires:
   ui-endpoint-info:
     interface: login_ui_endpoints
     limit: 1
+  logging:
+    interface: loki_push_api
 provides:
   endpoint-info:
     interface: hydra_endpoints
@@ -35,6 +37,10 @@ provides:
       Provides API endpoints to a related application
   oauth:
     interface: oauth
+  metrics-endpoint:
+    interface: prometheus_scrape
+    description: |
+      Provides application metrics to COS Prometheus instance
 
 peers:
   hydra:
