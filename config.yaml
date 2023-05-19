@@ -5,7 +5,7 @@ options:
     default: "http://127.0.0.1:4455/"
   log_level:
     description: |
-      The value controlling the verbosity of logs produced by Kratos.
+      The verbosity of logs produced by Hydra.
       Available values are: panic, fatal, error, warn, info, debug, and trace.
     type: string
     default: "info"

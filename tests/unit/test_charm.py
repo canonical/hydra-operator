@@ -1096,3 +1096,14 @@ def test_on_pebble_ready_with_loki_without_promtail_endpoint(harness: Harness) -
         "Promtail binary couldn't be downloaded - HTTP Error 404: Not Found"
         in harness.charm.unit.status.message
     )
+
+
+def test_on_pebble_ready_with_bad_config(harness: Harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    setup_postgres_relation(harness)
+    harness.update_config({"log_level": "bad_config"})
+    container = harness.model.unit.get_container(CONTAINER_NAME)
+    harness.charm.on.hydra_pebble_ready.emit(container)
+
+    assert isinstance(harness.model.unit.status, BlockedStatus)
+    assert "Bad configuration value for log_level" in harness.charm.unit.status.message

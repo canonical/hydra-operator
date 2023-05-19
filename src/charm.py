@@ -68,7 +68,6 @@ HYDRA_PUBLIC_PORT = 4444
 SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 PEER = "hydra"
 LOG_LEVELS = ["panic", "fatal", "error", "warn", "info", "debug", "trace"]
-DEFAULT_LOG_LEVEL = "info"
 
 
 def remove_none_values(dic: Dict) -> Dict:
@@ -134,7 +133,7 @@ class HydraCharm(CharmBase):
                     "metrics_path": "/metrics/prometheus",
                     "static_configs": [
                         {
-                            "targets": ["*:4434"],
+                            "targets": [f"*:{HYDRA_ADMIN_PORT}"],
                         }
                     ],
                 }
@@ -224,7 +223,7 @@ class HydraCharm(CharmBase):
                 },
                 "ready": {
                     "override": "replace",
-                    "http": {"url": "http://localhost:4445/health/ready"},
+                    "http": {"url": f"http://localhost:{HYDRA_ADMIN_PORT}/health/ready"},
                 },
             },
         }
@@ -251,10 +250,11 @@ class HydraCharm(CharmBase):
 
     @property
     def _log_level(self) -> str:
-        level = self.config["log_level"]
-        if level not in LOG_LEVELS:
-            return DEFAULT_LOG_LEVEL
-        return level
+        return self.config["log_level"]
+
+    @property
+    def _log_level_valid(self) -> bool:
+        return self._log_level in LOG_LEVELS
 
     def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
@@ -362,6 +362,11 @@ class HydraCharm(CharmBase):
             logger.info("Hydra service is absent. Deferring the event.")
             return
 
+        if not self._log_level_valid:
+            logger.info(f"Invalid configuration value for log_level: {self._log_level}")
+            self.unit.status = BlockedStatus("Bad configuration value for log_level")
+            return
+
         if not self.model.relations[self._db_relation_name]:
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
             return
@@ -413,6 +418,11 @@ class HydraCharm(CharmBase):
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             logger.info("Hydra service is absent. Deferring the event.")
+            return
+
+        if not self._log_level_valid:
+            logger.info(f"Invalid configuration value for log_level: {self._log_level}")
+            self.unit.status = BlockedStatus("Bad configuration value for log_level")
             return
 
         logger.info("Updating Hydra config and restarting service")
