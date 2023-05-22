@@ -441,8 +441,6 @@ class OAuthRequirer(Object):
         self, client_config: ClientConfig, relation_id: Optional[int] = None
     ) -> None:
         """Update the client config stored in the object."""
-        if len(self.model.relations) == 0:
-            return
         self._client_config = client_config
         self._update_relation_data(client_config, relation_id=relation_id)
 
