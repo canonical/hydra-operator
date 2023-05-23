@@ -52,6 +52,15 @@ jobs:
 
       - name: Get hydra container logs
         run: kubectl logs hydra-0 -c hydra -n testing
+        if: failure()
 
+      # Hack to overcome lack of tools (cat, tar) in the workload container
       - name: Get hydra config file
-        run: kubectl exec -it hydra-0 -c hydra -n testing -- cat /etc/config/hydra.yaml
+        run: |
+          juju ssh hydra/0 "PYTHONPATH=agents/unit-hydra-0/charm/venv/ python3 -c '
+          from ops import pebble
+          p = pebble.Client(\"/charm/containers/hydra/pebble.socket\")
+          f = p.pull(\"/etc/config/hydra.yaml\")
+          print(f.read())
+          '"
+        if: failure()
