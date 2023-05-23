@@ -52,6 +52,7 @@ jobs:
 
       - name: Get hydra container logs
         run: kubectl logs hydra-0 -c hydra -n testing
+        if: failure()
 
       # Hack to overcome lack of tools (cat, tar) in the workload container
       - name: Get hydra config file
@@ -62,3 +63,4 @@ jobs:
           f = p.pull(\"/etc/config/hydra.yaml\")
           print(f.read())
           '"
+        if: failure()
