@@ -10,6 +10,7 @@ import json
 import logging
 from os.path import join
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse, urlunparse
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -60,6 +61,7 @@ from ops.model import (
 from ops.pebble import ChangeError, Error, ExecError, Layer
 
 from hydra_cli import HydraCLI
+from utils import normalise_url, remove_none_values
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +71,6 @@ HYDRA_PUBLIC_PORT = 4444
 SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 PEER = "hydra"
 LOG_LEVELS = ["panic", "fatal", "error", "warn", "info", "debug", "trace"]
-
-
-def remove_none_values(dic: Dict) -> Dict:
-    """Remove all entries in a dict with `None` values."""
-    return {k: v for k, v in dic.items() if v is not None}
 
 
 class HydraCharm(CharmBase):
@@ -265,6 +262,23 @@ class HydraCharm(CharmBase):
         """Event Handler for config changed event."""
         self._handle_status_update_config(event)
 
+    def _public_url(self):
+        # TODO: The else part does not make much sense, remove it
+        return (
+            normalise_url(self.public_ingress.url)
+            if self.public_ingress.is_ready()
+            else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/"
+        )
+
+    @property
+    def _admin_url(self):
+        # TODO: The else part does not make much sense, remove it
+        return (
+            normalise_url(self.admin_ingress.url)
+            if self.admin_ingress.is_ready()
+            else f"http://127.0.0.1:{HYDRA_ADMIN_PORT}/"
+        )
+
     def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
         with open("templates/hydra.yaml.j2", "r") as file:
@@ -276,9 +290,7 @@ class HydraCharm(CharmBase):
             consent_url=self._get_login_ui_endpoint_info("consent_url"),
             error_url=self._get_login_ui_endpoint_info("oidc_error_url"),
             login_url=self._get_login_ui_endpoint_info("login_url"),
-            hydra_public_url=self.public_ingress.url
-            if self.public_ingress.is_ready()
-            else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
+            hydra_public_url=self._public_url,
             supported_scopes=SUPPORTED_SCOPES,
         )
         return rendered
@@ -801,12 +813,12 @@ class HydraCharm(CharmBase):
             return
 
         self.oauth.set_provider_info_in_relation_data(
-            issuer_url=self.public_ingress.url,
-            authorization_endpoint=join(self.public_ingress.url, "oauth2/auth"),
-            token_endpoint=join(self.public_ingress.url, "oauth2/token"),
-            introspection_endpoint=join(self.admin_ingress.url, "admin/oauth2/introspect"),
-            userinfo_endpoint=join(self.public_ingress.url, "userinfo"),
-            jwks_endpoint=join(self.public_ingress.url, ".well-known/jwks.json"),
+            issuer_url=self._public_url,
+            authorization_endpoint=join(self._public_url, "oauth2/auth"),
+            token_endpoint=join(self._public_url, "oauth2/token"),
+            introspection_endpoint=join(self._admin_url, "admin/oauth2/introspect"),
+            userinfo_endpoint=join(self._public_url, "userinfo"),
+            jwks_endpoint=join(self._public_url, ".well-known/jwks.json"),
             scope=" ".join(SUPPORTED_SCOPES),
         )
 

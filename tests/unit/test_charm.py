@@ -363,8 +363,8 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
             "self": {
-                "issuer": "http://public:80/testing-hydra",
-                "public": "http://public:80/testing-hydra",
+                "issuer": "https://public/testing-hydra",
+                "public": "https://public/testing-hydra",
             },
         },
         "webfinger": {
@@ -458,13 +458,13 @@ def test_provider_info_in_databag_when_ingress_then_oauth_relation(
     setup_oauth_relation(harness)
 
     mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="http://public:80/testing-hydra/oauth2/auth",
-        introspection_endpoint="http://admin:80/testing-hydra/admin/oauth2/introspect",
-        issuer_url="http://public:80/testing-hydra",
-        jwks_endpoint="http://public:80/testing-hydra/.well-known/jwks.json",
+        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
+        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        issuer_url="https://public/testing-hydra",
+        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
         scope="openid profile email phone",
-        token_endpoint="http://public:80/testing-hydra/oauth2/token",
-        userinfo_endpoint="http://public:80/testing-hydra/userinfo",
+        token_endpoint="https://public/testing-hydra/oauth2/token",
+        userinfo_endpoint="https://public/testing-hydra/userinfo",
     )
 
 
@@ -478,13 +478,13 @@ def test_provider_info_called_when_oauth_relation_then_ingress(
     setup_ingress_relation(harness, "admin")
 
     mocked_set_provider_info.assert_called_once_with(
-        authorization_endpoint="http://public:80/testing-hydra/oauth2/auth",
-        introspection_endpoint="http://admin:80/testing-hydra/admin/oauth2/introspect",
-        issuer_url="http://public:80/testing-hydra",
-        jwks_endpoint="http://public:80/testing-hydra/.well-known/jwks.json",
+        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
+        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        issuer_url="https://public/testing-hydra",
+        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
         scope="openid profile email phone",
-        token_endpoint="http://public:80/testing-hydra/oauth2/token",
-        userinfo_endpoint="http://public:80/testing-hydra/userinfo",
+        token_endpoint="https://public/testing-hydra/oauth2/token",
+        userinfo_endpoint="https://public/testing-hydra/userinfo",
     )
 
 
