@@ -1106,4 +1106,4 @@ def test_on_pebble_ready_with_bad_config(harness: Harness) -> None:
     harness.charm.on.hydra_pebble_ready.emit(container)
 
     assert isinstance(harness.model.unit.status, BlockedStatus)
-    assert "Bad configuration value for log_level" in harness.charm.unit.status.message
+    assert "Invalid configuration value for log_level" in harness.charm.unit.status.message

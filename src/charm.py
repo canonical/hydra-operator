@@ -252,9 +252,12 @@ class HydraCharm(CharmBase):
     def _log_level(self) -> str:
         return self.config["log_level"]
 
-    @property
-    def _log_level_valid(self) -> bool:
-        return self._log_level in LOG_LEVELS
+    def _validate_config_log_level(self) -> bool:
+        is_valid = self._log_level in LOG_LEVELS
+        if not is_valid:
+            logger.info(f"Invalid configuration value for log_level: {self._log_level}")
+            self.unit.status = BlockedStatus("Invalid configuration value for log_level")
+        return is_valid
 
     def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
@@ -342,6 +345,9 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
             return
 
+        if not self._validate_config_log_level():
+            return
+
         self.unit.status = MaintenanceStatus("Configuring resources")
 
         current_layer = self._container.get_plan()
@@ -360,11 +366,6 @@ class HydraCharm(CharmBase):
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             logger.info("Hydra service is absent. Deferring the event.")
-            return
-
-        if not self._log_level_valid:
-            logger.info(f"Invalid configuration value for log_level: {self._log_level}")
-            self.unit.status = BlockedStatus("Bad configuration value for log_level")
             return
 
         if not self.model.relations[self._db_relation_name]:
@@ -410,6 +411,10 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
             return
 
+        if not self._validate_config_log_level():
+            event.defer()
+            return
+
         self.unit.status = MaintenanceStatus(
             "Configuring container and resources for database connection"
         )
@@ -418,11 +423,6 @@ class HydraCharm(CharmBase):
             event.defer()
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             logger.info("Hydra service is absent. Deferring the event.")
-            return
-
-        if not self._log_level_valid:
-            logger.info(f"Invalid configuration value for log_level: {self._log_level}")
-            self.unit.status = BlockedStatus("Bad configuration value for log_level")
             return
 
         logger.info("Updating Hydra config and restarting service")
@@ -820,7 +820,7 @@ class HydraCharm(CharmBase):
             logger.info("Too many ui-endpoint-info relations found")
         return None
 
-    def _promtail_error(self, event: PromtailDigestError):
+    def _promtail_error(self, event: PromtailDigestError) -> None:
         logger.error(event.message)
         self.unit.status = BlockedStatus(event.message)
 
