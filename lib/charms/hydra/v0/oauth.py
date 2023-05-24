@@ -68,7 +68,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 3
+LIBPATCH = 4
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +260,8 @@ class OauthProviderConfig:
     userinfo_endpoint: str
     jwks_endpoint: str
     scope: str
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
     groups: Optional[str] = None
     ca_chain: Optional[str] = None
 
@@ -267,14 +269,6 @@ class OauthProviderConfig:
     def from_dict(cls, dic: Dict) -> "OauthProviderConfig":
         """Generate OauthProviderConfig instance from dict."""
         return cls(**{k: v for k, v in dic.items() if k in inspect.signature(cls).parameters})
-
-
-@dataclass
-class OauthClientCredentials:
-    """Helper class containing client's credentials."""
-
-    client_id: str
-    client_secret: str
 
 
 class OAuthInfoChangedEvent(EventBase):
@@ -428,8 +422,12 @@ class OAuthRequirer(Object):
             return
 
         data = _load_data(data, OAUTH_PROVIDER_JSON_SCHEMA)
-        data.pop("client_id", None)
-        data.pop("client_secret_id", None)
+
+        client_secret_id = data.get("client_secret_id")
+        if client_secret_id:
+            _client_secret = self.get_client_secret(client_secret_id)
+            client_secret = _client_secret.get_content()[CLIENT_SECRET_FIELD]
+            data["client_secret"] = client_secret
 
         oauth_provider = OauthProviderConfig.from_dict(data)
         return oauth_provider
@@ -438,26 +436,6 @@ class OAuthRequirer(Object):
         """Get the client_secret."""
         client_secret = self.model.get_secret(id=client_secret_id)
         return client_secret
-
-    def get_client_credentials(self, relation_id: Optional[int] = None) -> OauthClientCredentials:
-        """Get the client credentials."""
-        try:
-            relation = self.model.get_relation(
-                relation_name=self._relation_name, relation_id=relation_id
-            )
-        except TooManyRelatedAppsError:
-            raise RuntimeError("More than one relations are defined. Please provide a relation_id")
-
-        data = _load_data(relation.data[relation.app], OAUTH_PROVIDER_JSON_SCHEMA)
-
-        client_id = data.get("client_id")
-        client_secret_id = data.get("client_secret_id")
-        if not client_id or not client_secret_id:
-            return None
-
-        _client_secret = self.get_client_secret(client_secret_id)
-        client_secret = _client_secret.get_content()[CLIENT_SECRET_FIELD]
-        return OauthClientCredentials(client_id, client_secret)
 
     def update_client_config(
         self, client_config: ClientConfig, relation_id: Optional[int] = None
