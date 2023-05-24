@@ -2,7 +2,7 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Utility functions for the Hydra charm"""
+"""Utility functions for the Hydra charm."""
 
 from typing import Dict
 from urllib.parse import urlparse, urlunparse
@@ -20,7 +20,7 @@ def normalise_url(url: str) -> str:
     in order to be able to set cookies (secure attribute is set). Also we remove
     the port from the URL to make it more user-friendly.
 
-    This convertion works under the following assumptions:
+    This conversion works under the following assumptions:
     1) The ingress will serve https under the 443 port, the user-agent will
        implicitly make the request on that port
     2) The provided URL is not a relative path

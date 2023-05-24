@@ -10,7 +10,6 @@ import json
 import logging
 from os.path import join
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse, urlunparse
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
