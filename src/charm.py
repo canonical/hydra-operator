@@ -41,6 +41,7 @@ from jinja2 import Template
 from ops.charm import (
     ActionEvent,
     CharmBase,
+    ConfigChangedEvent,
     HookEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
@@ -148,6 +149,7 @@ class HydraCharm(CharmBase):
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
             self.endpoints_provider.on.ready, self._update_hydra_endpoints_relation_data
         )
@@ -258,6 +260,10 @@ class HydraCharm(CharmBase):
             logger.info(f"Invalid configuration value for log_level: {self._log_level}")
             self.unit.status = BlockedStatus("Invalid configuration value for log_level")
         return is_valid
+
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        """Event Handler for config changed event."""
+        self._handle_status_update_config(event)
 
     def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
@@ -409,10 +415,6 @@ class HydraCharm(CharmBase):
             event.defer()
             logger.info("Cannot connect to Hydra container. Deferring the event.")
             self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
-            return
-
-        if not self._validate_config_log_level():
-            event.defer()
             return
 
         self.unit.status = MaintenanceStatus(
@@ -822,7 +824,6 @@ class HydraCharm(CharmBase):
 
     def _promtail_error(self, event: PromtailDigestError) -> None:
         logger.error(event.message)
-        self.unit.status = BlockedStatus(event.message)
 
 
 if __name__ == "__main__":
