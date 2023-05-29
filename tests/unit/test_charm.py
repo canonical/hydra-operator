@@ -1068,9 +1068,7 @@ def test_rotate_key_action(
     event.set_results.assert_called_with({"new-key-id": ret["keys"][0]["kid"]})
 
 
-def test_on_pebble_ready_with_loki(
-    harness: Harness, mocked_log_proxy_consumer_setup_promtail: MagicMock
-) -> None:
+def test_on_pebble_ready_with_loki(harness: Harness) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_postgres_relation(harness)
     setup_peer_relation(harness)
@@ -1081,9 +1079,7 @@ def test_on_pebble_ready_with_loki(
     assert harness.model.unit.status == ActiveStatus()
 
 
-def test_on_pebble_ready_with_bad_config(
-    harness: Harness, mocked_log_proxy_consumer_setup_promtail: MagicMock
-) -> None:
+def test_on_pebble_ready_with_bad_config(harness: Harness) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_postgres_relation(harness)
     harness.update_config({"log_level": "invalid_config"})
@@ -1094,9 +1090,7 @@ def test_on_pebble_ready_with_bad_config(
     assert "Invalid configuration value for log_level" in harness.charm.unit.status.message
 
 
-def test_on_config_changed_with_invalid_log_level(
-    harness: Harness, mocked_log_proxy_consumer_setup_promtail: MagicMock
-) -> None:
+def test_on_config_changed_with_invalid_log_level(harness: Harness) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_postgres_relation(harness)
     harness.update_config({"log_level": "invalid_config"})
