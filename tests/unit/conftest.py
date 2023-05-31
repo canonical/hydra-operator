@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from typing import Dict, Generator
+from unittest.mock import MagicMock
 
 import pytest
 from ops.testing import Harness
@@ -171,3 +172,11 @@ def client_config() -> Dict:
         "audience": [],
         "token_endpoint_auth_method": "client_secret_basic",
     }
+
+
+@pytest.fixture(autouse=True)
+def mocked_log_proxy_consumer_setup_promtail(mocker: MockerFixture) -> MagicMock:
+    mocked_setup_promtail = mocker.patch(
+        "charms.loki_k8s.v0.loki_push_api.LogProxyConsumer._setup_promtail", return_value=None
+    )
+    return mocked_setup_promtail

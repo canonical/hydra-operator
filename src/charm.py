@@ -29,7 +29,9 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
     LoginUITooManyRelatedAppsError,
 )
+from charms.loki_k8s.v0.loki_push_api import LogProxyConsumer, PromtailDigestError
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
     IngressPerAppRequirer,
@@ -39,6 +41,7 @@ from jinja2 import Template
 from ops.charm import (
     ActionEvent,
     CharmBase,
+    ConfigChangedEvent,
     HookEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
@@ -65,6 +68,7 @@ HYDRA_ADMIN_PORT = 4445
 HYDRA_PUBLIC_PORT = 4444
 SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 PEER = "hydra"
+LOG_LEVELS = ["panic", "fatal", "error", "warn", "info", "debug", "trace"]
 
 
 def remove_none_values(dic: Dict) -> Dict:
@@ -84,6 +88,11 @@ class HydraCharm(CharmBase):
         self._db_name = f"{self.model.name}_{self.app.name}"
         self._db_relation_name = "pg-database"
         self._login_ui_relation_name = "ui-endpoint-info"
+        self._prometheus_scrape_relation_name = "metrics-endpoint"
+        self._loki_push_api_relation_name = "logging"
+        self._hydra_service_command = "hydra serve all"
+        self._log_path = "/var/log/hydra.log"
+        self._hydra_service_params = "--config {} --dev".format(self._hydra_config_path)
 
         self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
 
@@ -117,7 +126,30 @@ class HydraCharm(CharmBase):
 
         self.endpoints_provider = HydraEndpointsProvider(self)
 
+        self.metrics_endpoint = MetricsEndpointProvider(
+            self,
+            relation_name=self._prometheus_scrape_relation_name,
+            jobs=[
+                {
+                    "metrics_path": "/admin/metrics/prometheus",
+                    "static_configs": [
+                        {
+                            "targets": [f"*:{HYDRA_ADMIN_PORT}"],
+                        }
+                    ],
+                }
+            ],
+        )
+
+        self.loki_consumer = LogProxyConsumer(
+            self,
+            log_files=[self._log_path],
+            relation_name=self._loki_push_api_relation_name,
+            container_name=self._container_name,
+        )
+
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
             self.endpoints_provider.on.ready, self._update_hydra_endpoints_relation_data
         )
@@ -165,6 +197,11 @@ class HydraCharm(CharmBase):
         )
         self.framework.observe(self.on.rotate_key_action, self._on_rotate_key_action)
 
+        self.framework.observe(
+            self.loki_consumer.on.promtail_digest_error,
+            self._promtail_error,
+        )
+
     @property
     def _hydra_layer(self) -> Layer:
         """Returns a pre-configured Pebble layer."""
@@ -175,7 +212,9 @@ class HydraCharm(CharmBase):
                 self._container_name: {
                     "override": "replace",
                     "summary": "entrypoint of the hydra-operator image",
-                    "command": f"hydra serve all --config {self._hydra_config_path} --dev",
+                    "command": '/bin/sh -c "{} {} 2>&1 | tee -a {}"'.format(
+                        self._hydra_service_command, self._hydra_service_params, self._log_path
+                    ),
                     "startup": "disabled",
                 }
             },
@@ -186,7 +225,7 @@ class HydraCharm(CharmBase):
                 },
                 "ready": {
                     "override": "replace",
-                    "http": {"url": "http://localhost:4445/health/ready"},
+                    "http": {"url": f"http://localhost:{HYDRA_ADMIN_PORT}/health/ready"},
                 },
             },
         }
@@ -211,12 +250,28 @@ class HydraCharm(CharmBase):
             return False
         return service.is_running()
 
+    @property
+    def _log_level(self) -> str:
+        return self.config["log_level"]
+
+    def _validate_config_log_level(self) -> bool:
+        is_valid = self._log_level in LOG_LEVELS
+        if not is_valid:
+            logger.info(f"Invalid configuration value for log_level: {self._log_level}")
+            self.unit.status = BlockedStatus("Invalid configuration value for log_level")
+        return is_valid
+
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        """Event Handler for config changed event."""
+        self._handle_status_update_config(event)
+
     def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
         with open("templates/hydra.yaml.j2", "r") as file:
             template = Template(file.read())
 
         rendered = template.render(
+            log_level=self._log_level,
             db_info=self._get_database_relation_info(),
             consent_url=self._get_login_ui_endpoint_info("consent_url"),
             error_url=self._get_login_ui_endpoint_info("oidc_error_url"),
@@ -294,6 +349,9 @@ class HydraCharm(CharmBase):
             event.defer()
             logger.info("Cannot connect to Hydra container. Deferring the event.")
             self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
+
+        if not self._validate_config_log_level():
             return
 
         self.unit.status = MaintenanceStatus("Configuring resources")
@@ -763,6 +821,9 @@ class HydraCharm(CharmBase):
         except LoginUITooManyRelatedAppsError:
             logger.info("Too many ui-endpoint-info relations found")
         return None
+
+    def _promtail_error(self, event: PromtailDigestError) -> None:
+        logger.error(event.message)
 
 
 if __name__ == "__main__":

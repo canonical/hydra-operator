@@ -101,6 +101,40 @@ def setup_login_ui_without_proxy_relation(harness: Harness) -> tuple[int, dict]:
     return (relation_id, login_databag)
 
 
+def setup_loki_relation(harness: Harness) -> int:
+    relation_id = harness.add_relation("logging", "loki-k8s")
+    harness.add_relation_unit(relation_id, "loki-k8s/0")
+    databag = {
+        "promtail_binary_zip_url": json.dumps(
+            {
+                "amd64": {
+                    "filename": "promtail-static-amd64",
+                    "zipsha": "543e333b0184e14015a42c3c9e9e66d2464aaa66eca48b29e185a6a18f67ab6d",
+                    "binsha": "17e2e271e65f793a9fbe81eab887b941e9d680abe82d5a0602888c50f5e0cac9",
+                    "url": "https://github.com/canonical/loki-k8s-operator/releases/download/promtail-v2.5.0/promtail-static-amd64.gz",
+                }
+            }
+        ),
+    }
+    unit_databag = {
+        "endpoint": json.dumps(
+            {
+                "url": "http://loki-k8s-0.loki-k8s-endpoints.model0.svc.cluster.local:3100/loki/api/v1/push"
+            }
+        )
+    }
+    harness.update_relation_data(
+        relation_id,
+        "loki-k8s/0",
+        unit_databag,
+    )
+    harness.update_relation_data(
+        relation_id,
+        "loki-k8s",
+        databag,
+    )
+
+
 def test_not_leader(harness: Harness) -> None:
     harness.set_leader(False)
     setup_postgres_relation(harness)
@@ -176,7 +210,10 @@ def test_update_container_config(harness: Harness, mocked_sql_migration: MagicMo
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {"level": "trace"},
+        "log": {
+            "level": "info",
+            "format": "json",
+        },
         "secrets": {
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
@@ -234,7 +271,10 @@ def test_config_updated_on_config_changed(
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {"level": "trace"},
+        "log": {
+            "level": "info",
+            "format": "json",
+        },
         "secrets": {
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
@@ -296,7 +336,10 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {"level": "trace"},
+        "log": {
+            "level": "info",
+            "format": "json",
+        },
         "secrets": {
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
@@ -344,7 +387,10 @@ def test_hydra_config_on_pebble_ready_without_ingress_relation_data(harness: Har
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {"level": "trace"},
+        "log": {
+            "level": "info",
+            "format": "json",
+        },
         "secrets": {
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
@@ -676,7 +722,10 @@ def test_config_updated_without_login_ui_endpoints_interface(
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {"level": "trace"},
+        "log": {
+            "level": "info",
+            "format": "json",
+        },
         "secrets": {
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
@@ -725,7 +774,10 @@ def test_config_updated_with_login_ui_endpoints_interface(
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {"level": "trace"},
+        "log": {
+            "level": "info",
+            "format": "json",
+        },
         "secrets": {
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
@@ -774,7 +826,10 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {"level": "trace"},
+        "log": {
+            "level": "info",
+            "format": "json",
+        },
         "secrets": {
             "cookie": ["my-cookie-secret"],
             "system": ["my-system-secret"],
@@ -1011,3 +1066,34 @@ def test_rotate_key_action(
     harness.charm._on_rotate_key_action(event)
 
     event.set_results.assert_called_with({"new-key-id": ret["keys"][0]["kid"]})
+
+
+def test_on_pebble_ready_with_loki(harness: Harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    setup_postgres_relation(harness)
+    setup_peer_relation(harness)
+    container = harness.model.unit.get_container(CONTAINER_NAME)
+    harness.charm.on.hydra_pebble_ready.emit(container)
+    setup_loki_relation(harness)
+
+    assert harness.model.unit.status == ActiveStatus()
+
+
+def test_on_pebble_ready_with_bad_config(harness: Harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    setup_postgres_relation(harness)
+    harness.update_config({"log_level": "invalid_config"})
+    container = harness.model.unit.get_container(CONTAINER_NAME)
+    harness.charm.on.hydra_pebble_ready.emit(container)
+
+    assert isinstance(harness.model.unit.status, BlockedStatus)
+    assert "Invalid configuration value for log_level" in harness.charm.unit.status.message
+
+
+def test_on_config_changed_with_invalid_log_level(harness: Harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    setup_postgres_relation(harness)
+    harness.update_config({"log_level": "invalid_config"})
+
+    assert isinstance(harness.model.unit.status, BlockedStatus)
+    assert "Invalid configuration value for log_level" in harness.charm.unit.status.message
