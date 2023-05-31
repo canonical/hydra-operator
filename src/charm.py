@@ -131,7 +131,7 @@ class HydraCharm(CharmBase):
             relation_name=self._prometheus_scrape_relation_name,
             jobs=[
                 {
-                    "metrics_path": "admin/metrics/prometheus",
+                    "metrics_path": "/admin/metrics/prometheus",
                     "static_configs": [
                         {
                             "targets": [f"*:{HYDRA_ADMIN_PORT}"],
