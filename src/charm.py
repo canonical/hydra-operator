@@ -261,6 +261,7 @@ class HydraCharm(CharmBase):
         """Event Handler for config changed event."""
         self._handle_status_update_config(event)
 
+    @property
     def _public_url(self):
         # TODO: The else part does not make much sense, remove it
         return (
