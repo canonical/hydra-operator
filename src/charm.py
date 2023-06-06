@@ -43,6 +43,7 @@ from ops.charm import (
     CharmBase,
     ConfigChangedEvent,
     HookEvent,
+    InstallEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
     RelationEvent,
@@ -88,6 +89,7 @@ class HydraCharm(CharmBase):
         self._loki_push_api_relation_name = "logging"
         self._hydra_service_command = "hydra serve all"
         self._log_path = "/var/log/hydra.log"
+        self._log_dir = "/var/log"
         self._hydra_service_params = "--config {} --dev".format(self._hydra_config_path)
 
         self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
@@ -121,6 +123,8 @@ class HydraCharm(CharmBase):
         )
 
         self.endpoints_provider = HydraEndpointsProvider(self)
+
+        self.framework.observe(self.on.install, self._on_install)
 
         self.metrics_endpoint = MetricsEndpointProvider(
             self,
@@ -397,6 +401,16 @@ class HydraCharm(CharmBase):
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
         self._container.restart(self._container_name)
         self.unit.status = ActiveStatus()
+
+    def _on_install(self, event: InstallEvent) -> None:
+        if not self._container.can_connect():
+            event.defer()
+            logger.info("Cannot connect to Hydra container. Deferring event.")
+            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
+
+        if not self._container.isdir(self._log_dir):
+            self._container.make_dir(path=self._log_dir, make_parents=True, permissions=0o777)
 
     def _update_hydra_endpoints_relation_data(self, event: RelationEvent) -> None:
         logger.info("Sending endpoints info")
