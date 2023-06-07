@@ -1097,3 +1097,17 @@ def test_on_config_changed_with_invalid_log_level(harness: Harness) -> None:
 
     assert isinstance(harness.model.unit.status, BlockedStatus)
     assert "Invalid configuration value for log_level" in harness.charm.unit.status.message
+
+
+def test_on_pebble_ready_make_dir_called(
+    harness: Harness, mocked_isdir: MagicMock, mocked_make_dir: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    setup_postgres_relation(harness)
+    setup_peer_relation(harness)
+    container = harness.model.unit.get_container(CONTAINER_NAME)
+    harness.charm.on.hydra_pebble_ready.emit(container)
+
+    assert harness.model.unit.status == ActiveStatus()
+    mocked_isdir.assert_called_once_with("/var/log")
+    mocked_make_dir.assert_called_once_with(path="/var/log", make_parents=True, permissions=0o777)
