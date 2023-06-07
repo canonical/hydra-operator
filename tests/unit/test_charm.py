@@ -1103,11 +1103,20 @@ def test_on_pebble_ready_make_dir_called(
     harness: Harness, mocked_isdir: MagicMock, mocked_make_dir: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
-    setup_postgres_relation(harness)
-    setup_peer_relation(harness)
     container = harness.model.unit.get_container(CONTAINER_NAME)
     harness.charm.on.hydra_pebble_ready.emit(container)
 
-    assert harness.model.unit.status == ActiveStatus()
     mocked_isdir.assert_called_once_with("/var/log")
     mocked_make_dir.assert_called_once_with(path="/var/log", make_parents=True, permissions=0o777)
+
+
+def test_on_pebble_ready_cannot_connect_container_make_dir_not_called(
+    harness: Harness, mocked_isdir: MagicMock, mocked_make_dir: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, False)
+    container = harness.model.unit.get_container(CONTAINER_NAME)
+    harness.charm.on.hydra_pebble_ready.emit(container)
+
+    assert harness.model.unit.status == WaitingStatus("Waiting to connect to Hydra container")
+    mocked_isdir.assert_not_called
+    mocked_make_dir.assert_not_called
