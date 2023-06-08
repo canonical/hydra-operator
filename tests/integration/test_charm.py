@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from os.path import join
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ TRAEFIK_ADMIN_APP = "traefik-admin"
 TRAEFIK_PUBLIC_APP = "traefik-public"
 CLIENT_SECRET = "secret"
 CLIENT_REDIRECT_URIS = ["https://example.com"]
+PUBLIC_TRAEFIK_EXTERNAL_NAME = "public"
 
 
 async def get_unit_address(ops_test: OpsTest, app_name: str, unit_num: int) -> str:
@@ -67,13 +69,13 @@ async def test_ingress_relation(ops_test: OpsTest) -> None:
         TRAEFIK,
         application_name=TRAEFIK_PUBLIC_APP,
         channel="latest/edge",
-        config={"external_hostname": "some_hostname"},
+        config={"external_hostname": PUBLIC_TRAEFIK_EXTERNAL_NAME},
     )
     await ops_test.model.deploy(
         TRAEFIK,
         application_name=TRAEFIK_ADMIN_APP,
         channel="latest/edge",
-        config={"external_hostname": "some_hostname"},
+        config={"external_hostname": "admin"},
     )
     await ops_test.model.add_relation(f"{APP_NAME}:admin-ingress", TRAEFIK_ADMIN_APP)
     await ops_test.model.add_relation(f"{APP_NAME}:public-ingress", TRAEFIK_PUBLIC_APP)
@@ -90,11 +92,37 @@ async def test_has_public_ingress(ops_test: OpsTest) -> None:
     # Get the traefik address and try to reach hydra
     public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
 
+    # TODO: We use the "http" endpoint to make requests to hydra, because the
+    # strip-prefix for https fix is not yet release to the traefik stable channel.
+    # Switch to https once that is released.
     resp = requests.get(
         f"http://{public_address}/{ops_test.model.name}-{APP_NAME}/.well-known/jwks.json"
     )
 
     assert resp.status_code == 200
+
+
+async def test_openid_configuration_endpoint(ops_test: OpsTest) -> None:
+    # Get the traefik address and try to reach hydra
+    public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
+    base_path = f"https://{PUBLIC_TRAEFIK_EXTERNAL_NAME}/{ops_test.model.name}-{APP_NAME}"
+
+    # TODO: We use the "http" endpoint to make requests to hydra, because the
+    # strip-prefix for https fix is not yet release to the traefik stable channel.
+    # Switch to https once that is released.
+    resp = requests.get(
+        f"http://{public_address}/{ops_test.model.name}-{APP_NAME}/.well-known/openid-configuration"
+    )
+
+    assert resp.status_code == 200
+
+    data = resp.json()
+
+    assert data["issuer"] == base_path
+    assert data["authorization_endpoint"] == join(base_path, "oauth2/auth")
+    assert data["token_endpoint"] == join(base_path, "oauth2/token")
+    assert data["userinfo_endpoint"] == join(base_path, "userinfo")
+    assert data["jwks_uri"] == join(base_path, ".well-known/jwks.json")
 
 
 async def test_has_admin_ingress(ops_test: OpsTest) -> None:
