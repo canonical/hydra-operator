@@ -87,8 +87,8 @@ class HydraCharm(CharmBase):
         self._prometheus_scrape_relation_name = "metrics-endpoint"
         self._loki_push_api_relation_name = "logging"
         self._hydra_service_command = "hydra serve all"
-        self._log_path = "/var/log/hydra.log"
         self._log_dir = "/var/log"
+        self._log_path = f"{self._log_dir}/hydra.log"
         self._hydra_service_params = "--config {} --dev".format(self._hydra_config_path)
 
         self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
