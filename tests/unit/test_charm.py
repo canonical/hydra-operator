@@ -187,6 +187,7 @@ def test_relation_departed(harness: Harness, mocked_run_migration: MagicMock) ->
 
 def test_pebble_container_can_connect(harness: Harness, mocked_run_migration: MagicMock) -> None:
     setup_postgres_relation(harness)
+    setup_peer_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, True)
 
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -405,13 +406,16 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
     assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
 
 
-def test_hydra_config_on_pebble_ready_without_ingress_relation_data(harness: Harness) -> None:
+def test_hydra_config_on_pebble_ready_without_ingress_relation_data(
+    harness: Harness, mocked_run_migration: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
     # set relation without data
     relation_id = harness.add_relation("public-ingress", "public-traefik")
     harness.add_relation_unit(relation_id, "public-traefik/0")
 
+    setup_peer_relation(harness)
     setup_postgres_relation(harness)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
@@ -801,6 +805,7 @@ def test_config_updated_with_login_ui_endpoints_interface(
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_postgres_relation(harness)
+    setup_peer_relation(harness)
     (_, login_databag) = setup_login_ui_relation(harness)
 
     expected_config = {
@@ -853,6 +858,7 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_postgres_relation(harness)
+    setup_peer_relation(harness)
     setup_login_ui_without_proxy_relation(harness)
 
     expected_config = {

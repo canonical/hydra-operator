@@ -400,6 +400,10 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting for database creation")
             return
 
+        if not self._migration_is_needed():
+            self.unit.status = WaitingStatus("Waiting for migration to run")
+            return
+
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
         self._container.restart(self._container_name)
         self.unit.status = ActiveStatus()
