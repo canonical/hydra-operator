@@ -11,6 +11,7 @@ import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.pebble import ExecError
 from ops.testing import Harness
+from pytest_mock import MockerFixture
 from test_oauth_requirer import CLIENT_CONFIG  # type: ignore
 
 CONTAINER_NAME = "hydra"
@@ -136,7 +137,9 @@ def setup_loki_relation(harness: Harness) -> int:
 
 
 def test_not_leader(harness: Harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
     harness.set_leader(False)
+    setup_peer_relation(harness)
     setup_postgres_relation(harness)
 
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -166,7 +169,7 @@ def test_install_without_database(harness: Harness) -> None:
     assert harness.charm.unit.status == WaitingStatus("Waiting for database creation")
 
 
-def test_relation_data(harness: Harness, mocked_sql_migration: MagicMock) -> None:
+def test_relation_data(harness: Harness, mocked_run_migration: MagicMock) -> None:
     db_relation_id = setup_postgres_relation(harness)
 
     relation_data = harness.get_relation_data(db_relation_id, "postgresql-k8s")
@@ -175,14 +178,14 @@ def test_relation_data(harness: Harness, mocked_sql_migration: MagicMock) -> Non
     assert relation_data["endpoints"] == "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
 
 
-def test_relation_departed(harness: Harness, mocked_sql_migration: MagicMock) -> None:
+def test_relation_departed(harness: Harness, mocked_run_migration: MagicMock) -> None:
     db_relation_id = setup_postgres_relation(harness)
 
     harness.remove_relation_unit(db_relation_id, "postgresql-k8s/0")
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
 
-def test_pebble_container_can_connect(harness: Harness, mocked_sql_migration: MagicMock) -> None:
+def test_pebble_container_can_connect(harness: Harness, mocked_run_migration: MagicMock) -> None:
     setup_postgres_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, True)
 
@@ -194,15 +197,41 @@ def test_pebble_container_can_connect(harness: Harness, mocked_sql_migration: Ma
 
 
 def test_pebble_container_cannot_connect(
-    harness: Harness, mocked_sql_migration: MagicMock
+    harness: Harness, mocked_run_migration: MagicMock
 ) -> None:
-    setup_postgres_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, False)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    setup_postgres_relation(harness)
+
     assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
 
 
-def test_update_container_config(harness: Harness, mocked_sql_migration: MagicMock) -> None:
+def test_postgres_created_when_no_peers(harness: Harness, mocked_run_migration: MagicMock) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+
+    setup_postgres_relation(harness)
+
+    assert harness.charm.unit.status == WaitingStatus("Waiting for peer relation")
+
+
+def test_postgres_created_when_migration_has_run(
+    harness: Harness, mocked_run_migration: MagicMock, mocker: MockerFixture
+) -> None:
+    harness.set_leader(False)
+    harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_peer_relation(harness)
+    mocker.patch("charm.HydraCharm._migration_is_needed", return_value=False)
+
+    setup_postgres_relation(harness)
+
+    assert harness.charm.unit.status == ActiveStatus()
+    mocked_run_migration.assert_not_called()
+
+
+def test_update_container_config(harness: Harness, mocked_run_migration: MagicMock) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_postgres_relation(harness)
 
@@ -250,6 +279,7 @@ def test_update_container_config(harness: Harness, mocked_sql_migration: MagicMo
 
 
 def test_on_config_changed_without_service(harness: Harness) -> None:
+    setup_peer_relation(harness)
     setup_postgres_relation(harness)
 
     assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
@@ -263,7 +293,7 @@ def test_on_config_changed_without_database(harness: Harness) -> None:
 
 
 def test_config_updated_on_config_changed(
-    harness: Harness, mocked_sql_migration: MagicMock
+    harness: Harness, mocked_run_migration: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -714,10 +744,11 @@ def test_exec_error_on_client_deleted_event_emitted(
 
 
 def test_config_updated_without_login_ui_endpoints_interface(
-    harness: Harness, mocked_sql_migration: MagicMock
+    harness: Harness, mocked_run_migration: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_peer_relation(harness)
     setup_postgres_relation(harness)
 
     expected_config = {
@@ -765,7 +796,7 @@ def test_config_updated_without_login_ui_endpoints_interface(
 
 
 def test_config_updated_with_login_ui_endpoints_interface(
-    harness: Harness, mocked_sql_migration: MagicMock
+    harness: Harness, mocked_run_migration: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -817,7 +848,7 @@ def test_config_updated_with_login_ui_endpoints_interface(
 
 
 def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
-    harness: Harness, mocked_sql_migration: MagicMock
+    harness: Harness, mocked_run_migration: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)

@@ -34,12 +34,6 @@ def mocked_hydra_is_running(mocker: MockerFixture) -> Generator:
 
 
 @pytest.fixture()
-def mocked_sql_migration(mocker: MockerFixture) -> Generator:
-    mocked_sql_migration = mocker.patch("charm.HydraCharm._run_sql_migration")
-    yield mocked_sql_migration
-
-
-@pytest.fixture()
 def hydra_cli_client_json() -> Dict:
     return {
         "client_id": "07b318cf-9a9f-47b2-a288-972e671936a1",
@@ -144,6 +138,22 @@ def mocked_create_jwk(mocker: MockerFixture) -> Generator:
         ],
     }
     yield mock
+
+
+@pytest.fixture()
+def mocked_run_migration(mocker: MockerFixture) -> MagicMock:
+    return mocker.patch("charm.HydraCLI.run_migration", return_value=None)
+
+
+@pytest.fixture(autouse=True)
+def mocked_get_version(mocker: MockerFixture) -> MagicMock:
+    mock = mocker.patch("charm.HydraCLI.get_version", return_value=None)
+    mock.return_value = {
+        "version": "1.0.1",
+        "git_hash": "fasd23541235123321dfsdgsadg",
+        "build_time": "2023-06-13 16:42:24.609532580+03:00",
+    }
+    return mock
 
 
 @pytest.fixture()
