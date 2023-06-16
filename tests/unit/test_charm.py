@@ -185,9 +185,8 @@ def test_relation_departed(harness: Harness, mocked_run_migration: MagicMock) ->
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
 
-def test_pebble_container_can_connect(harness: Harness, mocked_run_migration: MagicMock) -> None:
+def test_pebble_container_can_connect(harness: Harness, mocked_migration_is_needed: MagicMock) -> None:
     setup_postgres_relation(harness)
-    setup_peer_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, True)
 
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -218,13 +217,12 @@ def test_postgres_created_when_no_peers(harness: Harness, mocked_run_migration: 
 
 
 def test_postgres_created_when_migration_has_run(
-    harness: Harness, mocked_run_migration: MagicMock, mocker: MockerFixture
+    harness: Harness, mocked_run_migration: MagicMock, mocked_migration_is_needed: MagicMock
 ) -> None:
     harness.set_leader(False)
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_peer_relation(harness)
-    mocker.patch("charm.HydraCharm._migration_is_needed", return_value=False)
 
     setup_postgres_relation(harness)
 
@@ -800,12 +798,11 @@ def test_config_updated_without_login_ui_endpoints_interface(
 
 
 def test_config_updated_with_login_ui_endpoints_interface(
-    harness: Harness, mocked_run_migration: MagicMock
+    harness: Harness, mocked_migration_is_needed: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_postgres_relation(harness)
-    setup_peer_relation(harness)
     (_, login_databag) = setup_login_ui_relation(harness)
 
     expected_config = {
@@ -853,12 +850,12 @@ def test_config_updated_with_login_ui_endpoints_interface(
 
 
 def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
-    harness: Harness, mocked_run_migration: MagicMock
+    harness: Harness, mocked_migration_is_needed: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    setup_postgres_relation(harness)
     setup_peer_relation(harness)
+    setup_postgres_relation(harness)
     setup_login_ui_without_proxy_relation(harness)
 
     expected_config = {
@@ -1105,10 +1102,9 @@ def test_rotate_key_action(
     event.set_results.assert_called_with({"new-key-id": ret["keys"][0]["kid"]})
 
 
-def test_on_pebble_ready_with_loki(harness: Harness) -> None:
+def test_on_pebble_ready_with_loki(harness: Harness, mocked_migration_is_needed: MagicMock) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_postgres_relation(harness)
-    setup_peer_relation(harness)
     container = harness.model.unit.get_container(CONTAINER_NAME)
     harness.charm.on.hydra_pebble_ready.emit(container)
     setup_loki_relation(harness)
