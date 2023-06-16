@@ -418,11 +418,11 @@ class HydraCharm(CharmBase):
         # Necessary directory for log forwarding
         if not self._container.can_connect():
             event.defer()
-            logger.info("Cannot connect to Hydra container. Deferring event.")
             self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
             return
         if not self._container.isdir(str(self._log_dir)):
-            self._container.make_dir(path=str(self._log_dir), make_parents=True, permissions=0o755)
+            logger.info(f"Created directory {self._log_dir}")
+            self._container.make_dir(path=str(self._log_dir), make_parents=True)
 
         self._handle_status_update_config(event)
 
