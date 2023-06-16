@@ -150,6 +150,13 @@ def mocked_migration_is_needed(mocker: MockerFixture) -> MagicMock:
     return mocker.patch("charm.HydraCharm._migration_is_needed", return_value=False)
 
 
+@pytest.fixture()
+def mocked_get_secrets(mocker: MockerFixture) -> MagicMock:
+    return mocker.patch(
+        "charm.HydraCharm._get_secrets", return_value={"cookie": "secret", "system": "secret"}
+    )
+
+
 @pytest.fixture(autouse=True)
 def mocked_get_version(mocker: MockerFixture) -> MagicMock:
     mock = mocker.patch("charm.HydraCLI.get_version", return_value=None)
