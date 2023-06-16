@@ -11,7 +11,6 @@ import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.pebble import ExecError
 from ops.testing import Harness
-from pytest_mock import MockerFixture
 from test_oauth_requirer import CLIENT_CONFIG  # type: ignore
 
 CONTAINER_NAME = "hydra"
@@ -185,7 +184,9 @@ def test_relation_departed(harness: Harness, mocked_run_migration: MagicMock) ->
     assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
 
 
-def test_pebble_container_can_connect(harness: Harness, mocked_migration_is_needed: MagicMock) -> None:
+def test_pebble_container_can_connect(
+    harness: Harness, mocked_migration_is_needed: MagicMock
+) -> None:
     setup_postgres_relation(harness)
     harness.set_can_connect(CONTAINER_NAME, True)
 
@@ -1102,7 +1103,9 @@ def test_rotate_key_action(
     event.set_results.assert_called_with({"new-key-id": ret["keys"][0]["kid"]})
 
 
-def test_on_pebble_ready_with_loki(harness: Harness, mocked_migration_is_needed: MagicMock) -> None:
+def test_on_pebble_ready_with_loki(
+    harness: Harness, mocked_migration_is_needed: MagicMock
+) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_postgres_relation(harness)
     container = harness.model.unit.get_container(CONTAINER_NAME)
