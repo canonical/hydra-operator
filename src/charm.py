@@ -421,8 +421,8 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
             return
         if not self._container.isdir(str(self._log_dir)):
-            logger.info(f"Created directory {self._log_dir}")
             self._container.make_dir(path=str(self._log_dir), make_parents=True)
+            logger.info(f"Created directory {self._log_dir}")
 
         self._handle_status_update_config(event)
 
