@@ -320,7 +320,7 @@ async def test_rotate_keys(ops_test: OpsTest) -> None:
 
 
 async def test_hydra_scale_up(ops_test: OpsTest) -> None:
-    """Check that kratos works after it is scaled up."""
+    """Check that hydra works after it is scaled up."""
     app = ops_test.model.applications[APP_NAME]
 
     await app.scale(3)
