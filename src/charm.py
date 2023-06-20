@@ -9,6 +9,7 @@
 import json
 import logging
 from os.path import join
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from charms.data_platform_libs.v0.data_interfaces import (
@@ -87,7 +88,8 @@ class HydraCharm(CharmBase):
         self._prometheus_scrape_relation_name = "metrics-endpoint"
         self._loki_push_api_relation_name = "logging"
         self._hydra_service_command = "hydra serve all"
-        self._log_path = "/var/log/hydra.log"
+        self._log_dir = Path("/var/log")
+        self._log_path = self._log_dir / "hydra.log"
         self._hydra_service_params = "--config {} --dev".format(self._hydra_config_path)
 
         self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
@@ -139,7 +141,7 @@ class HydraCharm(CharmBase):
 
         self.loki_consumer = LogProxyConsumer(
             self,
-            log_files=[self._log_path],
+            log_files=[str(self._log_path)],
             relation_name=self._loki_push_api_relation_name,
             container_name=self._container_name,
         )
@@ -209,7 +211,9 @@ class HydraCharm(CharmBase):
                     "override": "replace",
                     "summary": "entrypoint of the hydra-operator image",
                     "command": '/bin/sh -c "{} {} 2>&1 | tee -a {}"'.format(
-                        self._hydra_service_command, self._hydra_service_params, self._log_path
+                        self._hydra_service_command,
+                        self._hydra_service_params,
+                        str(self._log_path),
                     ),
                     "startup": "disabled",
                 }
@@ -411,6 +415,15 @@ class HydraCharm(CharmBase):
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event Handler for pebble ready event."""
+        # Necessary directory for log forwarding
+        if not self._container.can_connect():
+            event.defer()
+            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
+        if not self._container.isdir(str(self._log_dir)):
+            self._container.make_dir(path=str(self._log_dir), make_parents=True)
+            logger.info(f"Created directory {self._log_dir}")
+
         self._handle_status_update_config(event)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
