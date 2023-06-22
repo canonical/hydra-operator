@@ -10,6 +10,7 @@ import json
 import logging
 from os.path import join
 from pathlib import Path
+from secrets import token_hex
 from typing import Any, Dict, Optional
 
 from charms.data_platform_libs.v0.data_interfaces import (
@@ -44,6 +45,7 @@ from ops.charm import (
     CharmBase,
     ConfigChangedEvent,
     HookEvent,
+    LeaderElectedEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
     RelationEvent,
@@ -56,6 +58,8 @@ from ops.model import (
     MaintenanceStatus,
     ModelError,
     Relation,
+    Secret,
+    SecretNotFoundError,
     WaitingStatus,
 )
 from ops.pebble import ChangeError, Error, ExecError, Layer
@@ -72,6 +76,10 @@ SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 PEER = "hydra"
 LOG_LEVELS = ["panic", "fatal", "error", "warn", "info", "debug", "trace"]
 DB_MIGRATION_VERSION_KEY = "migration_version"
+COOKIE_SECRET_KEY = "cookie"
+COOKIE_SECRET_LABEL = "cookiesecret"
+SYSTEM_SECRET_KEY = "system"
+SYSTEM_SECRET_LABEL = "systemsecret"
 
 
 class HydraCharm(CharmBase):
@@ -150,6 +158,7 @@ class HydraCharm(CharmBase):
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
             self.endpoints_provider.on.ready, self._update_hydra_endpoints_relation_data
@@ -269,7 +278,7 @@ class HydraCharm(CharmBase):
         self._handle_status_update_config(event)
 
     @property
-    def _public_url(self):
+    def _public_url(self) -> str:
         # TODO: The else part does not make much sense, remove it
         return (
             normalise_url(self.public_ingress.url)
@@ -278,7 +287,7 @@ class HydraCharm(CharmBase):
         )
 
     @property
-    def _admin_url(self):
+    def _admin_url(self) -> str:
         # TODO: The else part does not make much sense, remove it
         return (
             normalise_url(self.admin_ingress.url)
@@ -291,7 +300,10 @@ class HydraCharm(CharmBase):
         with open("templates/hydra.yaml.j2", "r") as file:
             template = Template(file.read())
 
+        secrets = self._get_secrets()
         rendered = template.render(
+            cookie_secrets=[secrets["cookie"] if secrets else None],
+            system_secrets=[secrets["system"] if secrets else None],
             log_level=self._log_level,
             db_info=self._get_database_relation_info(),
             consent_url=self._get_login_ui_endpoint_info("consent_url"),
@@ -362,6 +374,30 @@ class HydraCharm(CharmBase):
         key = self._oauth_relation_peer_data_key(relation_id)
         return self._pop_peer_data(key)
 
+    def _get_secrets(self) -> Optional[Dict[str, str]]:
+        juju_secrets = {}
+        try:
+            juju_secret = self.model.get_secret(label=COOKIE_SECRET_LABEL)
+            juju_secrets["cookie"] = juju_secret.get_content()[COOKIE_SECRET_KEY]
+
+            juju_secret = self.model.get_secret(label=SYSTEM_SECRET_LABEL)
+            juju_secrets["system"] = juju_secret.get_content()[SYSTEM_SECRET_KEY]
+        except SecretNotFoundError:
+            return None
+        return juju_secrets
+
+    def _create_secrets(self) -> Optional[Dict[str, Secret]]:
+        if not self.unit.is_leader():
+            return None
+
+        juju_secrets = {}
+        secret = {COOKIE_SECRET_KEY: token_hex(16)}
+        juju_secrets["cookie"] = self.model.app.add_secret(secret, label=COOKIE_SECRET_LABEL)
+
+        secret = {SYSTEM_SECRET_KEY: token_hex(16)}
+        juju_secrets["system"] = self.model.app.add_secret(secret, label=SYSTEM_SECRET_LABEL)
+        return juju_secrets
+
     def _handle_status_update_config(self, event: HookEvent) -> None:
         if not self._container.can_connect():
             event.defer()
@@ -373,18 +409,7 @@ class HydraCharm(CharmBase):
             return
 
         self.unit.status = MaintenanceStatus("Configuring resources")
-
-        current_layer = self._container.get_plan()
-        new_layer = self._hydra_layer
-        if current_layer.services != new_layer.services:
-            self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-            logger.info("Pebble plan updated with new configuration, replanning")
-            try:
-                self._container.replan()
-            except ChangeError as err:
-                logger.error(str(err))
-                self.unit.status = BlockedStatus("Failed to replan, please consult the logs")
-                return
+        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
 
         if not self._hydra_service_is_created:
             event.defer()
@@ -404,9 +429,26 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting for migration to run")
             return
 
+        if not self._get_secrets():
+            self.unit.status = WaitingStatus("Waiting for secrets creation")
+            event.defer()
+            return
+
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-        self._container.restart(self._container_name)
+        try:
+            self._container.restart(self._container_name)
+        except ChangeError as err:
+            logger.error(str(err))
+            self.unit.status = BlockedStatus("Failed to restart, please consult the logs")
+            return
         self.unit.status = ActiveStatus()
+
+    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
+        if not self.unit.is_leader():
+            return
+
+        if not self._get_secrets():
+            self._create_secrets()
 
     def _update_hydra_endpoints_relation_data(self, event: RelationEvent) -> None:
         logger.info("Sending endpoints info")
@@ -459,6 +501,12 @@ class HydraCharm(CharmBase):
         self.unit.status = MaintenanceStatus(
             "Configuring container and resources for database connection"
         )
+
+        if not self._get_secrets():
+            self.unit.status = WaitingStatus("Waiting for secret creation")
+            event.defer()
+            return
+
         logger.info("Updating Hydra config and restarting service")
         self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)

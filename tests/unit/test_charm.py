@@ -3,7 +3,7 @@
 
 import json
 import logging
-from typing import Tuple
+from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -134,8 +134,20 @@ def setup_loki_relation(harness: Harness) -> int:
         databag,
     )
 
+    return relation_id
 
-def test_not_leader(harness: Harness) -> None:
+
+def validate_config(expected_config: Dict[str, Any], config: Dict[str, Any]) -> None:
+    secrets = config.pop("secrets")
+
+    assert "cookie" in secrets
+    assert len(secrets["cookie"]) > 0
+    assert "system" in secrets
+    assert len(secrets["system"]) > 0
+    assert config == expected_config
+
+
+def test_not_leader(harness: Harness, mocked_get_secrets: MagicMock) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.set_leader(False)
     setup_peer_relation(harness)
@@ -188,6 +200,7 @@ def test_pebble_container_can_connect(
     harness: Harness, mocked_migration_is_needed: MagicMock
 ) -> None:
     setup_postgres_relation(harness)
+    harness.charm.on.leader_elected.emit()
     harness.set_can_connect(CONTAINER_NAME, True)
 
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -218,7 +231,10 @@ def test_postgres_created_when_no_peers(harness: Harness, mocked_run_migration: 
 
 
 def test_postgres_created_when_migration_has_run(
-    harness: Harness, mocked_run_migration: MagicMock, mocked_migration_is_needed: MagicMock
+    harness: Harness,
+    mocked_run_migration: MagicMock,
+    mocked_migration_is_needed: MagicMock,
+    mocked_get_secrets: MagicMock,
 ) -> None:
     harness.set_leader(False)
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -242,10 +258,6 @@ def test_update_container_config(harness: Harness, mocked_run_migration: MagicMo
         "log": {
             "level": "info",
             "format": "json",
-        },
-        "secrets": {
-            "cookie": ["my-cookie-secret"],
-            "system": ["my-system-secret"],
         },
         "serve": {
             "admin": {
@@ -275,7 +287,7 @@ def test_update_container_config(harness: Harness, mocked_run_migration: MagicMo
         },
     }
 
-    assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
+    validate_config(expected_config, yaml.safe_load(harness.charm._render_conf_file()))
 
 
 def test_on_config_changed_without_service(harness: Harness) -> None:
@@ -305,10 +317,6 @@ def test_config_updated_on_config_changed(
             "level": "info",
             "format": "json",
         },
-        "secrets": {
-            "cookie": ["my-cookie-secret"],
-            "system": ["my-system-secret"],
-        },
         "serve": {
             "admin": {
                 "cors": {
@@ -337,7 +345,7 @@ def test_config_updated_on_config_changed(
         },
     }
 
-    assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
+    validate_config(expected_config, yaml.safe_load(harness.charm._render_conf_file()))
 
 
 @pytest.mark.parametrize("api_type,port", [("admin", "4445"), ("public", "4444")])
@@ -370,10 +378,6 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
             "level": "info",
             "format": "json",
         },
-        "secrets": {
-            "cookie": ["my-cookie-secret"],
-            "system": ["my-system-secret"],
-        },
         "serve": {
             "admin": {
                 "cors": {
@@ -402,11 +406,11 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
         },
     }
 
-    assert yaml.safe_load(harness.charm._render_conf_file()) == expected_config
+    validate_config(expected_config, yaml.safe_load(harness.charm._render_conf_file()))
 
 
 def test_hydra_config_on_pebble_ready_without_ingress_relation_data(
-    harness: Harness, mocked_run_migration: MagicMock
+    harness: Harness, mocked_migration_is_needed: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
@@ -416,6 +420,7 @@ def test_hydra_config_on_pebble_ready_without_ingress_relation_data(
 
     setup_peer_relation(harness)
     setup_postgres_relation(harness)
+    harness.charm.on.leader_elected.emit()
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
 
     expected_config = {
@@ -423,10 +428,6 @@ def test_hydra_config_on_pebble_ready_without_ingress_relation_data(
         "log": {
             "level": "info",
             "format": "json",
-        },
-        "secrets": {
-            "cookie": ["my-cookie-secret"],
-            "system": ["my-system-secret"],
         },
         "serve": {
             "admin": {
@@ -458,7 +459,7 @@ def test_hydra_config_on_pebble_ready_without_ingress_relation_data(
 
     container = harness.model.unit.get_container(CONTAINER_NAME)
     container_config = container.pull(path="/etc/config/hydra.yaml", encoding="utf-8")
-    assert yaml.load(container_config.read(), yaml.Loader) == expected_config
+    validate_config(expected_config, yaml.safe_load(container_config))
 
 
 def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness: Harness) -> None:
@@ -750,6 +751,7 @@ def test_config_updated_without_login_ui_endpoints_interface(
     harness: Harness, mocked_run_migration: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.leader_elected.emit()
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_peer_relation(harness)
     setup_postgres_relation(harness)
@@ -759,10 +761,6 @@ def test_config_updated_without_login_ui_endpoints_interface(
         "log": {
             "level": "info",
             "format": "json",
-        },
-        "secrets": {
-            "cookie": ["my-cookie-secret"],
-            "system": ["my-system-secret"],
         },
         "serve": {
             "admin": {
@@ -795,13 +793,14 @@ def test_config_updated_without_login_ui_endpoints_interface(
     container_config = harness.charm._container.pull(
         path="/etc/config/hydra.yaml", encoding="utf-8"
     )
-    assert yaml.safe_load(container_config.read()) == expected_config
+    validate_config(expected_config, yaml.safe_load(container_config.read()))
 
 
 def test_config_updated_with_login_ui_endpoints_interface(
     harness: Harness, mocked_migration_is_needed: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.leader_elected.emit()
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_postgres_relation(harness)
     (_, login_databag) = setup_login_ui_relation(harness)
@@ -811,10 +810,6 @@ def test_config_updated_with_login_ui_endpoints_interface(
         "log": {
             "level": "info",
             "format": "json",
-        },
-        "secrets": {
-            "cookie": ["my-cookie-secret"],
-            "system": ["my-system-secret"],
         },
         "serve": {
             "admin": {
@@ -847,13 +842,14 @@ def test_config_updated_with_login_ui_endpoints_interface(
     container_config = harness.charm._container.pull(
         path="/etc/config/hydra.yaml", encoding="utf-8"
     )
-    assert yaml.safe_load(container_config.read()) == expected_config
+    validate_config(expected_config, yaml.safe_load(container_config.read()))
 
 
 def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
     harness: Harness, mocked_migration_is_needed: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
+    harness.charm.on.leader_elected.emit()
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_peer_relation(harness)
     setup_postgres_relation(harness)
@@ -864,10 +860,6 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
         "log": {
             "level": "info",
             "format": "json",
-        },
-        "secrets": {
-            "cookie": ["my-cookie-secret"],
-            "system": ["my-system-secret"],
         },
         "serve": {
             "admin": {
@@ -900,7 +892,7 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
     container_config = harness.charm._container.pull(
         path="/etc/config/hydra.yaml", encoding="utf-8"
     )
-    assert yaml.safe_load(container_config.read()) == expected_config
+    validate_config(expected_config, yaml.safe_load(container_config.read()))
 
 
 @pytest.mark.parametrize(
@@ -1109,7 +1101,9 @@ def test_on_pebble_ready_with_loki(
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_postgres_relation(harness)
     container = harness.model.unit.get_container(CONTAINER_NAME)
+    harness.charm.on.leader_elected.emit()
     harness.charm.on.hydra_pebble_ready.emit(container)
+
     setup_loki_relation(harness)
 
     assert harness.model.unit.status == ActiveStatus()

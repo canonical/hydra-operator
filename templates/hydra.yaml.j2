@@ -4,9 +4,13 @@ log:
   format: json
 secrets:
   cookie:
-  - my-cookie-secret
+  {%- for secret in cookie_secrets %}
+    - {{ secret }}
+  {%- endfor %}
   system:
-  - my-system-secret
+  {%- for secret in system_secrets %}
+    - {{ secret }}
+  {%- endfor %}
 serve:
   admin:
     cors:
