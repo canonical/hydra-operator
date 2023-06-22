@@ -430,7 +430,7 @@ class HydraCharm(CharmBase):
             return
 
         if not self._get_secrets():
-            self.unit.status = WaitingStatus("Waiting for secret creation")
+            self.unit.status = WaitingStatus("Waiting for secrets creation")
             event.defer()
             return
 
