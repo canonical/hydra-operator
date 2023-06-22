@@ -6,6 +6,7 @@
 
 import json
 import logging
+import re
 from typing import Dict, List, Optional, Tuple, Union
 
 from ops.model import Container
@@ -17,9 +18,10 @@ SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 class HydraCLI:
     """Helper object for running hydra CLI commands."""
 
-    def __init__(self, hydra_admin_url: str, container: Container):
+    def __init__(self, hydra_admin_url: str, container: Container, config_file_path: str):
         self.hydra_admin_url = hydra_admin_url
         self.container = container
+        self.config_file_path = config_file_path
 
     def _dump_list(self, data: Optional[List]) -> str:
         if not data:
@@ -203,6 +205,32 @@ class HydraCLI:
         json_stdout = json.loads(stdout)
         logger.info(f"Successfully created jwk: {json_stdout['keys'][0]['kid']}")
         return json_stdout
+
+    def run_migration(self, timeout: float = 60) -> Optional[str]:
+        """Run hydra migrations."""
+        cmd = ["hydra", "migrate", "sql", "-e", "--config", self.config_file_path, "--yes"]
+
+        _, stderr = self._run_cmd(cmd, timeout=timeout)
+        return stderr
+
+    def get_version(self) -> Dict[str, str]:
+        """Get the version of the hydra binary."""
+        cmd = ["hydra", "version"]
+
+        stdout, _ = self._run_cmd(cmd)
+
+        # Output has the format:
+        # Version:    {version}
+        # Git Hash:   {hash}
+        # Build Time: {time}
+        out_re = r"Version:[ ]*(.+)\nGit Hash:[ ]*(.+)\nBuild Time:[ ]*(.+)"
+        versions = re.findall(out_re, stdout)[0]
+
+        return {
+            "version": versions[0],
+            "git_hash": versions[1],
+            "build_time": versions[2],
+        }
 
     def _run_cmd(
         self, cmd: List[str], timeout: float = 20

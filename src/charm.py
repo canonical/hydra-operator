@@ -71,6 +71,7 @@ HYDRA_PUBLIC_PORT = 4444
 SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
 PEER = "hydra"
 LOG_LEVELS = ["panic", "fatal", "error", "warn", "info", "debug", "trace"]
+DB_MIGRATION_VERSION_KEY = "migration_version"
 
 
 class HydraCharm(CharmBase):
@@ -92,7 +93,9 @@ class HydraCharm(CharmBase):
         self._log_path = self._log_dir / "hydra.log"
         self._hydra_service_params = "--config {} --dev".format(self._hydra_config_path)
 
-        self._hydra_cli = HydraCLI(f"http://localhost:{HYDRA_ADMIN_PORT}", self._container)
+        self._hydra_cli = HydraCLI(
+            f"http://localhost:{HYDRA_ADMIN_PORT}", self._container, self._hydra_config_path
+        )
 
         self.service_patcher = KubernetesServicePatch(
             self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
@@ -310,15 +313,14 @@ class HydraCharm(CharmBase):
             "database_name": self._db_name,
         }
 
-    def _run_sql_migration(self, set_timeout: bool) -> None:
+    def _run_sql_migration(self, timeout: float = 60) -> bool:
         """Runs a command to create SQL schemas and apply migration plans."""
-        process = self._container.exec(
-            ["hydra", "migrate", "sql", "-e", "--config", self._hydra_config_path, "--yes"],
-            timeout=20.0 if set_timeout else None,
-        )
-
-        stdout, _ = process.wait_output()
-        logger.info(f"Executing automigration: {stdout}")
+        try:
+            self._hydra_cli.run_migration(timeout=timeout)
+        except ExecError as err:
+            logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
+            return False
+        return True
 
     def _oauth_relation_peer_data_key(self, relation_id: int) -> str:
         return f"oauth_{relation_id}"
@@ -398,6 +400,10 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting for database creation")
             return
 
+        if self._migration_is_needed():
+            self.unit.status = WaitingStatus("Waiting for migration to run")
+            return
+
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
         self._container.restart(self._container_name)
         self.unit.status = ActiveStatus()
@@ -426,15 +432,18 @@ class HydraCharm(CharmBase):
 
         self._handle_status_update_config(event)
 
+    def _migration_is_needed(self):
+        if not self._peers:
+            return
+
+        return (
+            self._get_peer_data(DB_MIGRATION_VERSION_KEY)
+            != self._hydra_cli.get_version()["version"]
+        )
+
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
         logger.info("Retrieved database details")
-
-        if not self.unit.is_leader():
-            # TODO: Observe leader_elected event
-            logger.info("Unit does not have leadership")
-            self.unit.status = WaitingStatus("Unit waiting for leadership to run the migration")
-            return
 
         if not self._container.can_connect():
             event.defer()
@@ -442,27 +451,35 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
             return
 
+        if not self._peers:
+            self.unit.status = WaitingStatus("Waiting for peer relation")
+            event.defer()
+            return
+
         self.unit.status = MaintenanceStatus(
             "Configuring container and resources for database connection"
         )
-
-        if not self._hydra_service_is_created:
-            event.defer()
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            logger.info("Hydra service is absent. Deferring the event.")
-            return
-
         logger.info("Updating Hydra config and restarting service")
+        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
 
-        try:
-            self._run_sql_migration(set_timeout=True)
-        except ExecError as err:
-            logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
+        if not self._migration_is_needed():
+            self._container.start(self._container_name)
+            self.unit.status = ActiveStatus()
+            return
+
+        if not self.unit.is_leader():
+            logger.info("Unit does not have leadership")
+            self.unit.status = WaitingStatus("Unit waiting for leadership to run the migration")
+            event.defer()
+            return
+
+        if not self._run_sql_migration():
             self.unit.status = BlockedStatus("Database migration job failed")
             logger.error("Automigration job failed, please use the run-migration action")
             return
 
+        self._set_peer_data(DB_MIGRATION_VERSION_KEY, self._hydra_cli.get_version()["version"])
         self._container.start(self._container_name)
         self.unit.status = ActiveStatus()
 
@@ -473,17 +490,16 @@ class HydraCharm(CharmBase):
     def _on_run_migration(self, event: ActionEvent) -> None:
         """Runs the migration as an action response."""
         logger.info("Executing database migration initiated by user")
-        try:
-            self._run_sql_migration(set_timeout=False)
-        except ExecError as err:
-            logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
+        if not self._run_sql_migration():
             event.fail("Execution failed, please inspect the logs")
             return
+        event.log("Successfully ran migration")
 
     def _on_database_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Event Handler for database relation departed event."""
         logger.error("Missing required relation with postgresql")
         self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
+        self._pop_peer_data(DB_MIGRATION_VERSION_KEY)
         if self._container.can_connect():
             self._container.stop(self._container_name)
 
