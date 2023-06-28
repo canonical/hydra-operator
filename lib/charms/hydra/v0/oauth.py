@@ -56,7 +56,13 @@ from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Mapping, Optional
 
 import jsonschema
-from ops.charm import CharmBase, RelationChangedEvent, RelationCreatedEvent, RelationDepartedEvent
+from ops.charm import (
+    CharmBase,
+    RelationBrokenEvent,
+    RelationChangedEvent,
+    RelationCreatedEvent,
+    RelationDepartedEvent,
+)
 from ops.framework import EventBase, EventSource, Handle, Object, ObjectEvents
 from ops.model import Relation, Secret, TooManyRelatedAppsError
 
@@ -68,7 +74,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 4
+LIBPATCH = 5
 
 logger = logging.getLogger(__name__)
 
@@ -310,10 +316,23 @@ class InvalidClientConfigEvent(EventBase):
         self.error = snapshot["error"]
 
 
+class OAuthInfoRemovedEvent(EventBase):
+    """Event to notify the charm that the client data was removed."""
+
+    def snapshot(self) -> Dict:
+        """Save event."""
+        return {}
+
+    def restore(self, snapshot: Dict) -> None:
+        """Restore event."""
+        pass
+
+
 class OAuthRequirerEvents(ObjectEvents):
     """Event descriptor for events raised by `OAuthRequirerEvents`."""
 
     oauth_info_changed = EventSource(OAuthInfoChangedEvent)
+    oauth_info_removed = EventSource(OAuthInfoRemovedEvent)
     invalid_client_config = EventSource(InvalidClientConfigEvent)
 
 
@@ -335,12 +354,22 @@ class OAuthRequirer(Object):
         events = self._charm.on[relation_name]
         self.framework.observe(events.relation_created, self._on_relation_created_event)
         self.framework.observe(events.relation_changed, self._on_relation_changed_event)
+        self.framework.observe(events.relation_broken, self._on_relation_broken_event)
 
     def _on_relation_created_event(self, event: RelationCreatedEvent) -> None:
         try:
             self._update_relation_data(self._client_config, event.relation.id)
         except ClientConfigError as e:
             self.on.invalid_client_config.emit(e.args[0])
+
+    def _on_relation_broken_event(self, event: RelationBrokenEvent) -> None:
+        if self.is_client_created():
+            event.defer()
+            logger.info("Relation data still available. Deferring the event")
+            return
+
+        # Notify the requirer that the relation data was removed
+        self.on.oauth_info_removed.emit()
 
     def _on_relation_changed_event(self, event: RelationChangedEvent) -> None:
         if not self.model.unit.is_leader():
@@ -401,8 +430,8 @@ class OAuthRequirer(Object):
             return None
 
         return (
-            "client_id" in relation.data[relation.app]
-            and "client_secret_id" in relation.data[relation.app]
+            relation.data[relation.app]["client_id"]
+            and relation.data[relation.app]["client_secret_id"]
         )
 
     def get_provider_info(self, relation_id: Optional[int] = None) -> OauthProviderConfig:
@@ -648,6 +677,9 @@ class OAuthProvider(Object):
         return f"client_secret_{relation.id}"
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
+        # Workaround for https://github.com/canonical/operator/issues/888
+        self._pop_client_data(event.relation.id)
+
         self._delete_juju_secret(event.relation)
         self.on.client_deleted.emit(event.relation.id)
 
@@ -661,6 +693,17 @@ class OAuthProvider(Object):
     def _delete_juju_secret(self, relation: Relation) -> None:
         secret = self.model.get_secret(label=self._get_secret_label(relation))
         secret.remove_all_revisions()
+
+    def _pop_client_data(self, relation_id: Relation) -> None:
+        if len(self.model.relations) == 0:
+            return None
+
+        relation = self.model.get_relation(self._relation_name, relation_id=relation_id)
+        if not relation or not relation.app:
+            return None
+
+        for provider_data in list(relation.data[self.model.app]):
+            relation.data[self.model.app].pop(provider_data, "")
 
     def set_provider_info_in_relation_data(
         self,
