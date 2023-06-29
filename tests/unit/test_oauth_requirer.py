@@ -4,6 +4,7 @@
 import json
 import logging
 from typing import Any, Dict, Generator, List
+from unittest.mock import MagicMock
 
 import pytest
 from charms.hydra.v0.oauth import (
@@ -17,6 +18,7 @@ from charms.hydra.v0.oauth import (
 from ops.charm import CharmBase
 from ops.framework import EventBase
 from ops.testing import Harness
+from pytest_mock import MockerFixture
 
 METADATA = """
 name: requirer-tester
@@ -46,6 +48,14 @@ def provider_info() -> Dict:
         "token_endpoint": "https://example.oidc.com/oauth2/token",
         "userinfo_endpoint": "https://example.oidc.com/userinfo",
     }
+
+
+@pytest.fixture()
+def mocked_client_is_created(mocker: MockerFixture) -> MagicMock:
+    mocked_client_created = mocker.patch(
+        "charms.hydra.v0.oauth.OAuthRequirer.is_client_created", return_value=True
+    )
+    return mocked_client_created
 
 
 CLIENT_CONFIG = {
@@ -235,3 +245,24 @@ def test_event_emitted_when_invalid_client_config(harness_invalid_config: Harnes
     assert any(
         isinstance(e, InvalidClientConfigEvent) for e in harness_invalid_config.charm.events
     )
+
+
+def test_event_deferred_on_relation_broken_when_relation_data_available(
+    harness: Harness,
+    provider_info: Dict,
+    mocked_client_is_created: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    relation_id = harness.add_relation("oauth", "provider")
+    harness.add_relation_unit(relation_id, "provider/0")
+
+    harness.update_relation_data(
+        relation_id,
+        "provider",
+        dict(client_id="client_id", client_secret_id="s3cR#T", **provider_info),
+    )
+
+    harness.remove_relation(relation_id)
+
+    assert caplog.record_tuples[0][2] == "Relation data still available. Deferring the event"
