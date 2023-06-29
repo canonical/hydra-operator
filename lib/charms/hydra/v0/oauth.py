@@ -205,6 +205,24 @@ def _dump_data(data: Dict, schema: Optional[Dict] = None) -> Dict:
     return ret
 
 
+class OAuthRelation(Object):
+    """A class containing helper methods for oauth relation."""
+
+    def _pop_relation_data(self, relation_id: Relation) -> None:
+        if len(self.model.relations) == 0:
+            return
+
+        relation = self.model.get_relation(self._relation_name, relation_id=relation_id)
+        if not relation or not relation.app:
+            return
+
+        try:
+            for data in list(relation.data[self.model.app]):
+                relation.data[self.model.app].pop(data, "")
+        except Exception as e:
+            logger.info(f"Failed to pop the relation data: {e}")
+
+
 def _validate_data(data: Dict, schema: Dict) -> None:
     """Checks whether `data` matches `schema`.
 
@@ -317,7 +335,7 @@ class InvalidClientConfigEvent(EventBase):
 
 
 class OAuthInfoRemovedEvent(EventBase):
-    """Event to notify the charm that the client data was removed."""
+    """Event to notify the charm that the provider data was removed."""
 
     def snapshot(self) -> Dict:
         """Save event."""
@@ -336,7 +354,7 @@ class OAuthRequirerEvents(ObjectEvents):
     invalid_client_config = EventSource(InvalidClientConfigEvent)
 
 
-class OAuthRequirer(Object):
+class OAuthRequirer(OAuthRelation):
     """Register an oauth client."""
 
     on = OAuthRequirerEvents()
@@ -363,6 +381,8 @@ class OAuthRequirer(Object):
             self.on.invalid_client_config.emit(e.args[0])
 
     def _on_relation_broken_event(self, event: RelationBrokenEvent) -> None:
+        # Workaround for https://github.com/canonical/operator/issues/888
+        self._pop_relation_data(event.relation.id)
         if self.is_client_created():
             event.defer()
             logger.info("Relation data still available. Deferring the event")
@@ -430,8 +450,8 @@ class OAuthRequirer(Object):
             return None
 
         return (
-            relation.data[relation.app]["client_id"]
-            and relation.data[relation.app]["client_secret_id"]
+            "client_id" in relation.data[relation.app]
+            and "client_secret_id" in relation.data[relation.app]
         )
 
     def get_provider_info(self, relation_id: Optional[int] = None) -> OauthProviderConfig:
@@ -611,7 +631,7 @@ class OAuthProviderEvents(ObjectEvents):
     client_deleted = EventSource(ClientDeletedEvent)
 
 
-class OAuthProvider(Object):
+class OAuthProvider(OAuthRelation):
     """A provider object for OIDC Providers."""
 
     on = OAuthProviderEvents()
@@ -678,7 +698,7 @@ class OAuthProvider(Object):
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         # Workaround for https://github.com/canonical/operator/issues/888
-        self._pop_client_data(event.relation.id)
+        self._pop_relation_data(event.relation.id)
 
         self._delete_juju_secret(event.relation)
         self.on.client_deleted.emit(event.relation.id)
@@ -693,17 +713,6 @@ class OAuthProvider(Object):
     def _delete_juju_secret(self, relation: Relation) -> None:
         secret = self.model.get_secret(label=self._get_secret_label(relation))
         secret.remove_all_revisions()
-
-    def _pop_client_data(self, relation_id: Relation) -> None:
-        if len(self.model.relations) == 0:
-            return None
-
-        relation = self.model.get_relation(self._relation_name, relation_id=relation_id)
-        if not relation or not relation.app:
-            return None
-
-        for provider_data in list(relation.data[self.model.app]):
-            relation.data[self.model.app].pop(provider_data, "")
 
     def set_provider_info_in_relation_data(
         self,
