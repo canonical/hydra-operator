@@ -209,6 +209,9 @@ class OAuthRelation(Object):
     """A class containing helper methods for oauth relation."""
 
     def _pop_relation_data(self, relation_id: Relation) -> None:
+        if not self.model.unit.is_leader():
+            return
+
         if len(self.model.relations) == 0:
             return
 
