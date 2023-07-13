@@ -1,0 +1,8 @@
+alert: HydraHighRestartRate
+expr: rate(process_start_time_seconds[3m]) > 0.1
+for: 3m
+labels:
+  severity: warning
+annotations:
+  summary: process_start_time_seconds fluctuates frequently during set time
+  description: "Hydra service restarts frequently. It might be having issues.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

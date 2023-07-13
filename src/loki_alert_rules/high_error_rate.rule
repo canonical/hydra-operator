@@ -1,6 +1,6 @@
 alert: HostHighLogErrorRate
-expr: count_over_time({%%juju_topology%%} |= "error" [1m]) > 1
-for: 0m
+expr: count_over_time({%%juju_topology%%} |= "error" [1m]) > 0
+for: 1m
 labels:
   severity: error
 annotations:

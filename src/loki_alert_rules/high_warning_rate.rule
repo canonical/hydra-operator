@@ -1,6 +1,6 @@
 alert: HostHighLogWarningRate
-expr: count_over_time({%%juju_topology%%} |= "warning" [1m]) > 1
-for: 0m
+expr: count_over_time({%%juju_topology%%} |= "warning" [1m]) > 0
+for: 1m
 labels:
   severity: warning
 annotations:
