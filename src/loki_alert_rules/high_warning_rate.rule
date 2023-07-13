@@ -1,0 +1,8 @@
+alert: HostHighLogWarningRate
+expr: count_over_time({%%juju_topology%%} |= "warning" [1m]) > 1
+for: 0m
+labels:
+  severity: warning
+annotations:
+  summary: High warning rate in logs (instance {{ $labels.instance }})
+  description: "High warning rate in logs\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

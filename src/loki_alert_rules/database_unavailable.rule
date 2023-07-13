@@ -1,0 +1,7 @@
+alert: DatabaseUnavailable
+expr: rate({juju_charm="hydra"} |~ `failed to connect to.*host=postgresql-k8s`[1m]) > 0
+for: 1m
+labels:
+  severity: critical
+annotations:
+  summary: Database backend for Hydra is unavailable

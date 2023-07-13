@@ -1,0 +1,8 @@
+alert: HostHighLogErrorRate
+expr: count_over_time({%%juju_topology%%} |= "error" [1m]) > 1
+for: 0m
+labels:
+  severity: error
+annotations:
+  summary: High error rate in logs (instance {{ $labels.instance }})
+  description: "High error rate in logs\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

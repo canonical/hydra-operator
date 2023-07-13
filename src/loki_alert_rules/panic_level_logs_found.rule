@@ -1,0 +1,7 @@
+alert: PanicLevelLogsFound
+expr: rate({%%juju_topology%%} |= `"level":"panic"`[1m]) > 0
+for: 1m
+labels:
+  severity: critical
+annotations:
+  summary: panic level logs found

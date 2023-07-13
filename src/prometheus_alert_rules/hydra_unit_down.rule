@@ -1,0 +1,8 @@
+alert: HydraUnitDown
+expr: avg_over_time(up[1m]) < 0.5
+for: 0m
+labels:
+  severity: critical
+annotations:
+  summary: The Hydra unit {{ $labels.juju_model }} {{ $labels.juju_unit }} has been unreachable at least 50% of the time over the last minute LABELS = {{ $labels }}
+  description: Hydra unit {{ $labels.juju_model }} / {{ $labels.juju_unit }} has been unreachable at least 50% of the time over the last minute

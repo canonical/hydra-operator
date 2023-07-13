@@ -1,0 +1,7 @@
+alert: FatalLevelLogsFound
+expr: rate({%%juju_topology%%} |= `"level":"fatal"`[1m]) > 0
+for: 1m
+labels:
+  severity: critical
+annotations:
+  summary: fatal level logs found
