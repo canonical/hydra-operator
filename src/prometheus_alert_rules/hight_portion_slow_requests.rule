@@ -1,8 +1,0 @@
-alert: HydraHighPortionSlowRequests
-expr: histogram_quantile(0.9, sum(rate(http_requests_duration_seconds_bucket[5m])) by (le)) > 0.4
-for: 5m
-labels:
-  severity: warning
-annotations:
-  summary: The time it takes Hydra unit {{ $labels.juju_model }} {{ $labels.juju_unit }} to handle requests has increased
-  description: The time it takes Hydra unit {{ $labels.juju_model }} {{ $labels.juju_unit }} to handle requests has increased

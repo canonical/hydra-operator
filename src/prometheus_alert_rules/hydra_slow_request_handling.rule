@@ -1,0 +1,8 @@
+alert: HydraSlowRequestHandling
+expr: histogram_quantile(0.9, sum(rate(http_requests_duration_seconds_bucket[5m])) by (le)) > 0.4
+for: 5m
+labels:
+  severity: warning
+annotations:
+  summary: The Hydra unit {{ $labels.juju_model }} {{ $labels.juju_unit }} takes this amount of time to handle 90% of requests
+  description: The Hydra unit {{ $labels.juju_model }} {{ $labels.juju_unit }} takes this amount of time to handle 90% of requests
