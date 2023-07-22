@@ -18,6 +18,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
+from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.hydra.v0.oauth import (
     ClientChangedEvent,
@@ -96,6 +97,7 @@ class HydraCharm(CharmBase):
         self._login_ui_relation_name = "ui-endpoint-info"
         self._prometheus_scrape_relation_name = "metrics-endpoint"
         self._loki_push_api_relation_name = "logging"
+        self._grafana_dashboard_relation_name = "grafana-dashboard"
         self._hydra_service_command = "hydra serve all"
         self._log_dir = Path("/var/log")
         self._log_path = self._log_dir / "hydra.log"
@@ -155,6 +157,10 @@ class HydraCharm(CharmBase):
             log_files=[str(self._log_path)],
             relation_name=self._loki_push_api_relation_name,
             container_name=self._container_name,
+        )
+
+        self._grafana_dashboards = GrafanaDashboardProvider(
+            self, relation_name=self._grafana_dashboard_relation_name
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
