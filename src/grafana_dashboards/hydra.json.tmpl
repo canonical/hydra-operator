@@ -272,37 +272,10 @@
             "uid": "${lokids}"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({juju_charm=\"hydra\", juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"} |= \"\\\"level\\\":\\\"error\\\"\"[5m]))",
-          "legendFormat": "error",
+          "expr": "sum by(level) (count_over_time({juju_application="hydra"} | json | level =~ `error|fatal|critical` [5m]))",
           "queryType": "range",
           "range": true,
-          "refId": "ErrorLevelLog"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "${lokids}"
-          },
-          "editorMode": "code",
-          "expr": "sum(count_over_time({juju_charm=\"hydra\", juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"} |= \"\\\"level\\\":\\\"critical\\\"\"[5m]))",
-          "hide": false,
-          "legendFormat": "critical",
-          "queryType": "range",
-          "range": true,
-          "refId": "CriticalLevelLog"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "${lokids}"
-          },
-          "editorMode": "code",
-          "expr": "sum(count_over_time({juju_charm=\"hydra\", juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"} |= \"\\\"level\\\":\\\"fatal\\\"\"[5m]))",
-          "hide": false,
-          "legendFormat": "fatal",
-          "queryType": "range",
-          "range": true,
-          "refId": "FatalLevelLog"
+          "refId": "LogLevels"
         }
       ],
       "title": "Hydra High Severity Log Entries",
