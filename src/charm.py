@@ -257,41 +257,14 @@ class HydraCharm(CharmBase):
             },
         }
 
-        layer_with_trace_config = {
-            "summary": "hydra-operator layer",
-            "description": "pebble config layer for hydra-operator",
-            "services": {
-                self._container_name: {
-                    "override": "replace",
-                    "summary": "entrypoint of the hydra-operator image",
-                    "command": '/bin/sh -c "{} {} 2>&1 | tee -a {}"'.format(
-                        self._hydra_service_command,
-                        self._hydra_service_params,
-                        str(self._log_path),
-                    ),
-                    "startup": "disabled",
-                    "environment": {
-                        "TRACING_PROVIDER": "otel",
-                        "TRACING_PROVIDERS_OTLP_SERVER_URL": self._get_tracing_endpoint_info(),
-                        "TRACING_PROVIDERS_OTLP_INSECURE": "true",
-                        "TRACING_PROVIDERS_OTLP_SAMPLING_SAMPLING_RATIO": "1.0",
-                    },
-                }
-            },
-            "checks": {
-                "version": {
-                    "override": "replace",
-                    "exec": {"command": "hydra version"},
-                },
-                "ready": {
-                    "override": "replace",
-                    "http": {"url": f"http://localhost:{HYDRA_ADMIN_PORT}/health/ready"},
-                },
-            },
-        }
-
         if self._tracing_ready:
-            return Layer(layer_with_trace_config)
+            layer_config["services"][self._container_name]["environment"] = {
+                "TRACING_PROVIDER": "otel",
+                "TRACING_PROVIDERS_OTLP_SERVER_URL": self._get_tracing_endpoint_info(),
+                "TRACING_PROVIDERS_OTLP_INSECURE": "true",
+                "TRACING_PROVIDERS_OTLP_SAMPLING_SAMPLING_RATIO": "1.0",
+            }
+
         return Layer(layer_config)
 
     @property
