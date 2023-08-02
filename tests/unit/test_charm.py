@@ -606,6 +606,8 @@ def test_exec_error_on_client_created_event_emitted(
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
     setup_peer_relation(harness)
+    # needed otherwise self.tracing.is_ready logs an error
+    setup_tempo_relation(harness)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = ExecError(
         command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
@@ -666,6 +668,8 @@ def test_exec_error_on_client_changed_event_emitted(
 ) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
+    # needed otherwise self.tracing.is_ready logs an error
+    setup_tempo_relation(harness)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = ExecError(
         command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
@@ -748,6 +752,8 @@ def test_exec_error_on_client_deleted_event_emitted(
 ) -> None:
     caplog.set_level(logging.ERROR)
     harness.set_can_connect(CONTAINER_NAME, True)
+    # needed otherwise self.tracing.is_ready logs an error
+    setup_tempo_relation(harness)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     err = ExecError(
         command=["hydra", "delete", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
