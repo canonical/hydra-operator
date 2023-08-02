@@ -35,6 +35,7 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 from charms.loki_k8s.v0.loki_push_api import LogProxyConsumer, PromtailDigestError
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
+from charms.tempo_k8s.v0.tracing import TracingEndpointProvider
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
     IngressPerAppRequirer,
@@ -98,6 +99,7 @@ class HydraCharm(CharmBase):
         self._prometheus_scrape_relation_name = "metrics-endpoint"
         self._loki_push_api_relation_name = "logging"
         self._grafana_dashboard_relation_name = "grafana-dashboard"
+        self._tracing_relation_name = "tracing"
         self._hydra_service_command = "hydra serve all"
         self._log_dir = Path("/var/log")
         self._log_path = self._log_dir / "hydra.log"
@@ -163,6 +165,11 @@ class HydraCharm(CharmBase):
             self, relation_name=self._grafana_dashboard_relation_name
         )
 
+        self.tracing = TracingEndpointProvider(
+            self,
+            relation_name=self._tracing_relation_name,
+        )
+
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -182,6 +189,8 @@ class HydraCharm(CharmBase):
 
         self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
+
+        self.framework.observe(self.tracing.on.endpoint_changed, self._on_config_changed)
 
         self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
         self.framework.observe(self.oauth.on.client_created, self._on_client_created)
@@ -247,6 +256,15 @@ class HydraCharm(CharmBase):
                 },
             },
         }
+
+        if self._tracing_ready:
+            layer_config["services"][self._container_name]["environment"] = {
+                "TRACING_PROVIDER": "otel",
+                "TRACING_PROVIDERS_OTLP_SERVER_URL": self._get_tracing_endpoint_info(),
+                "TRACING_PROVIDERS_OTLP_INSECURE": "true",
+                "TRACING_PROVIDERS_OTLP_SAMPLING_SAMPLING_RATIO": "1.0",
+            }
+
         return Layer(layer_config)
 
     @property
@@ -300,6 +318,12 @@ class HydraCharm(CharmBase):
             if self.admin_ingress.is_ready()
             else f"http://127.0.0.1:{HYDRA_ADMIN_PORT}/"
         )
+
+    @property
+    def _tracing_ready(self) -> bool:
+        if self.model.relations[self._tracing_relation_name]:
+            return True
+        return False
 
     def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
@@ -916,6 +940,12 @@ class HydraCharm(CharmBase):
         except LoginUITooManyRelatedAppsError:
             logger.info("Too many ui-endpoint-info relations found")
         return None
+
+    def _get_tracing_endpoint_info(self) -> str:
+        if not self.model.relations[self._tracing_relation_name]:
+            return ""
+
+        return self.tracing.otlp_http_endpoint or ""
 
     def _promtail_error(self, event: PromtailDigestError) -> None:
         logger.error(event.message)

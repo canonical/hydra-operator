@@ -45,6 +45,10 @@ provides:
     description: |
       Forwards the built-in grafana dashboard(s) for monitoring hydra.
     interface: grafana_dashboard
+  tracing:
+    interface: tracing
+    description: |
+      Provides traces to COS Tempo instance
 
 peers:
   hydra:

@@ -137,6 +137,21 @@ def setup_loki_relation(harness: Harness) -> int:
     return relation_id
 
 
+def setup_tempo_relation(harness: Harness) -> int:
+    relation_id = harness.add_relation("tracing", "tempo-k8s")
+    harness.add_relation_unit(relation_id, "tempo-k8s/0")
+    trace_databag = {
+        "host": '"tempo-k8s-0.tempo-k8s-endpoints.namespace.svc.cluster.local"',
+        "ingesters": '[{"protocol": "tempo", "port": 3200}, {"protocol": "otlp_grpc", "port": 4317}, {"protocol": "otlp_http", "port": 4318}, {"protocol": "zipkin", "port": 9411}, {"protocol": "jaeger_http_thrift", "port": 14268}, {"protocol": "jaeger_grpc", "port": 14250}]',
+    }
+    harness.update_relation_data(
+        relation_id,
+        "tempo-k8s",
+        trace_databag,
+    )
+    return relation_id
+
+
 def validate_config(expected_config: Dict[str, Any], config: Dict[str, Any]) -> None:
     secrets = config.pop("secrets")
 
@@ -1134,3 +1149,41 @@ def test_on_pebble_ready_make_dir_called(harness: Harness) -> None:
     container = harness.model.unit.get_container(CONTAINER_NAME)
     harness.charm.on.hydra_pebble_ready.emit(container)
     assert container.isdir("/var/log")
+
+
+def test_verify_pebble_layer_tempo_k8s(harness: Harness) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    container = harness.model.unit.get_container(CONTAINER_NAME)
+    harness.charm.on.hydra_pebble_ready.emit(container)
+    setup_tempo_relation(harness)
+
+    expected_layer = {
+        "summary": "hydra-operator layer",
+        "description": "pebble config layer for hydra-operator",
+        "services": {
+            "hydra": {
+                "override": "replace",
+                "summary": "entrypoint of the hydra-operator image",
+                "command": '/bin/sh -c "hydra serve all --config /etc/config/hydra.yaml --dev 2>&1 | tee -a /var/log/hydra.log"',
+                "startup": "disabled",
+                "environment": {
+                    "TRACING_PROVIDER": "otel",
+                    "TRACING_PROVIDERS_OTLP_SERVER_URL": "tempo-k8s-0.tempo-k8s-endpoints.namespace.svc.cluster.local:4318",
+                    "TRACING_PROVIDERS_OTLP_INSECURE": "true",
+                    "TRACING_PROVIDERS_OTLP_SAMPLING_SAMPLING_RATIO": "1.0",
+                },
+            }
+        },
+        "checks": {
+            "version": {
+                "override": "replace",
+                "exec": {"command": "hydra version"},
+            },
+            "ready": {
+                "override": "replace",
+                "http": {"url": "http://localhost:4445/health/ready"},
+            },
+        },
+    }
+
+    assert harness.charm._hydra_layer.to_dict() == expected_layer
