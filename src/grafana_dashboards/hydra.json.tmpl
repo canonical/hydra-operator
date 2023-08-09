@@ -116,7 +116,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "group by(juju_unit) (up{juju_application=~\"$juju_application\",juju_charm=\"hydra\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "expr": "group by(juju_unit) (up{juju_charm=\"hydra\"})",
           "format": "time_series",
           "instant": true,
           "interval": "",
@@ -272,7 +272,7 @@
             "uid": "${lokids}"
           },
           "editorMode": "code",
-          "expr": "sum by(level) (count_over_time({juju_application="hydra"} | json | level =~ `error|fatal|critical` [5m]))",
+          "expr": "sum by (level) (count_over_time({juju_charm=\"hydra\"} | json | level =~ `error|fatal|critical` [5m]))",
           "queryType": "range",
           "range": true,
           "refId": "LogLevels"
