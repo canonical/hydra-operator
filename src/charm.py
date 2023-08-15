@@ -35,7 +35,7 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 from charms.loki_k8s.v0.loki_push_api import LogProxyConsumer, PromtailDigestError
 from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
-from charms.tempo_k8s.v0.tracing import TracingEndpointProvider
+from charms.tempo_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v1.ingress import (
     IngressPerAppReadyEvent,
     IngressPerAppRequirer,
@@ -165,7 +165,7 @@ class HydraCharm(CharmBase):
             self, relation_name=self._grafana_dashboard_relation_name
         )
 
-        self.tracing = TracingEndpointProvider(
+        self.tracing = TracingEndpointRequirer(
             self,
             relation_name=self._tracing_relation_name,
         )
@@ -191,6 +191,7 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
 
         self.framework.observe(self.tracing.on.endpoint_changed, self._on_config_changed)
+        self.framework.observe(self.tracing.on.endpoint_removed, self._on_config_changed)
 
         self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
         self.framework.observe(self.oauth.on.client_created, self._on_client_created)
@@ -321,9 +322,7 @@ class HydraCharm(CharmBase):
 
     @property
     def _tracing_ready(self) -> bool:
-        if self.model.relations[self._tracing_relation_name]:
-            return True
-        return False
+        return self.tracing.is_ready()
 
     def _render_conf_file(self) -> str:
         """Render the Hydra configuration file."""
@@ -942,10 +941,10 @@ class HydraCharm(CharmBase):
         return None
 
     def _get_tracing_endpoint_info(self) -> str:
-        if not self.model.relations[self._tracing_relation_name]:
+        if not self._tracing_ready:
             return ""
 
-        return self.tracing.otlp_http_endpoint or ""
+        return self.tracing.otlp_http_endpoint() or ""
 
     def _promtail_error(self, event: PromtailDigestError) -> None:
         logger.error(event.message)

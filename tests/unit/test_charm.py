@@ -615,7 +615,8 @@ def test_exec_error_on_client_created_event_emitted(
     relation_id, _ = setup_oauth_relation(harness)
     harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
 
-    assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+    error_messages = [record[2] for record in caplog.record_tuples]
+    assert f"Exited with code: {err.exit_code}. Stderr: {err.stderr}" in error_messages
 
 
 def test_client_changed_event_emitted(
@@ -677,7 +678,8 @@ def test_exec_error_on_client_changed_event_emitted(
         relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
     )
 
-    assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+    error_messages = [record[2] for record in caplog.record_tuples]
+    assert f"Exited with code: {err.exit_code}. Stderr: {err.stderr}" in error_messages
 
 
 def test_client_deleted_event_emitted(
@@ -759,7 +761,8 @@ def test_exec_error_on_client_deleted_event_emitted(
 
     harness.charm.oauth.on.client_deleted.emit(relation_id)
 
-    assert caplog.record_tuples[0][2] == f"Exited with code: {err.exit_code}. Stderr: {err.stderr}"
+    error_messages = [record[2] for record in caplog.record_tuples]
+    assert f"Exited with code: {err.exit_code}. Stderr: {err.stderr}" in error_messages
 
 
 def test_config_updated_without_login_ui_endpoints_interface(
