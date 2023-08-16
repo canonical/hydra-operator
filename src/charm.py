@@ -303,22 +303,14 @@ class HydraCharm(CharmBase):
         self._handle_status_update_config(event)
 
     @property
-    def _public_url(self) -> str:
-        # TODO: The else part does not make much sense, remove it
-        return (
-            normalise_url(self.public_ingress.url)
-            if self.public_ingress.is_ready()
-            else f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/"
-        )
+    def _public_url(self) -> Optional[str]:
+        url = self.public_ingress.url
+        return normalise_url(url) if url else None
 
     @property
-    def _admin_url(self) -> str:
-        # TODO: The else part does not make much sense, remove it
-        return (
-            normalise_url(self.admin_ingress.url)
-            if self.admin_ingress.is_ready()
-            else f"http://127.0.0.1:{HYDRA_ADMIN_PORT}/"
-        )
+    def _admin_url(self) -> Optional[str]:
+        url = self.admin_ingress.url
+        return normalise_url(url) if url else None
 
     @property
     def _tracing_ready(self) -> bool:
@@ -338,7 +330,7 @@ class HydraCharm(CharmBase):
             consent_url=self._get_login_ui_endpoint_info("consent_url"),
             error_url=self._get_login_ui_endpoint_info("oidc_error_url"),
             login_url=self._get_login_ui_endpoint_info("login_url"),
-            hydra_public_url=self._public_url,
+            hydra_public_url=self._public_url or f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
             supported_scopes=SUPPORTED_SCOPES,
         )
         return rendered
@@ -483,11 +475,19 @@ class HydraCharm(CharmBase):
         logger.info("Sending endpoints info")
 
         admin_endpoint = (
-            f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}"
+            self._admin_url
+            or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}"
         )
         public_endpoint = (
-            f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}"
+            self._public_url
+            or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}"
         )
+
+        admin_endpoint, public_endpoint = (
+            admin_endpoint.replace("https", "http"),
+            public_endpoint.replace("https", "http"),
+        )
+
         self.endpoints_provider.send_endpoint_relation_data(admin_endpoint, public_endpoint)
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
@@ -584,24 +584,27 @@ class HydraCharm(CharmBase):
         if self.unit.is_leader():
             logger.info("This app's admin ingress URL: %s", event.url)
 
-        self._update_endpoint_info(event)
+        self._update_oauth_endpoint_info(event)
+        self._update_hydra_endpoints_relation_data(event)
 
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         if self.unit.is_leader():
             logger.info("This app's public ingress URL: %s", event.url)
 
         self._handle_status_update_config(event)
-        self._update_endpoint_info(event)
+        self._update_oauth_endpoint_info(event)
+        self._update_hydra_endpoints_relation_data(event)
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         if self.unit.is_leader():
             logger.info("This app no longer has ingress")
 
         self._handle_status_update_config(event)
-        self._update_endpoint_info(event)
+        self._update_oauth_endpoint_info(event)
+        self._update_hydra_endpoints_relation_data(event)
 
     def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
-        self._update_endpoint_info(event)
+        self._update_oauth_endpoint_info(event)
 
     def _on_client_created(self, event: ClientCreatedEvent) -> None:
         if not self.unit.is_leader():
@@ -912,7 +915,7 @@ class HydraCharm(CharmBase):
         """Check whether a client is managed from an oauth relation."""
         return "relation_id" in client.get("metadata", {})
 
-    def _update_endpoint_info(self, event: RelationEvent) -> None:
+    def _update_oauth_endpoint_info(self, event: RelationEvent) -> None:
         if not self.admin_ingress.url or not self.public_ingress.url:
             event.defer()
             logger.info("Ingress URL not available. Deferring the event.")
