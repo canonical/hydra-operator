@@ -486,15 +486,15 @@ def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness
     admin_ingress_relation_id = harness.add_relation("admin-ingress", "admin-traefik")
     harness.add_relation_unit(admin_ingress_relation_id, "admin-traefik/0")
 
-    endpoint_info_relation_id = harness.add_relation("endpoint-info", "kratos")
-    harness.add_relation_unit(endpoint_info_relation_id, "kratos/0")
+    hydra_endpoint_info_relation_id = harness.add_relation("hydra-endpoint-info", "kratos")
+    harness.add_relation_unit(hydra_endpoint_info_relation_id, "kratos/0")
 
     expected_data = {
         "admin_endpoint": "http://hydra.testing.svc.cluster.local:4445",
         "public_endpoint": "http://hydra.testing.svc.cluster.local:4444",
     }
 
-    assert harness.get_relation_data(endpoint_info_relation_id, "hydra") == expected_data
+    assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
 
 
 def test_provider_info_in_databag_when_ingress_then_oauth_relation(
