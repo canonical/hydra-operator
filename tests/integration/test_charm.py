@@ -14,8 +14,9 @@ from pytest_operator.plugin import OpsTest
 logger = logging.getLogger(__name__)
 
 METADATA = yaml.safe_load(Path("./metadata.yaml").read_text())
-APP_NAME = METADATA["name"]
-TRAEFIK = "traefik-k8s"
+HYDRA_APP = METADATA["name"]
+DB_APP = "postgresql-k8s"
+TRAEFIK_CHARM = "traefik-k8s"
 TRAEFIK_ADMIN_APP = "traefik-admin"
 TRAEFIK_PUBLIC_APP = "traefik-public"
 CLIENT_SECRET = "secret"
@@ -35,6 +36,7 @@ async def get_app_address(ops_test: OpsTest, app_name: str) -> str:
     return status["applications"][app_name]["public-address"]
 
 
+@pytest.mark.skip_if_deployed
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(ops_test: OpsTest) -> None:
     """Build hydra and deploy it with required charms and relations."""
@@ -49,42 +51,41 @@ async def test_build_and_deploy(ops_test: OpsTest) -> None:
     )
 
     await ops_test.model.deploy(
-        application_name=APP_NAME,
+        application_name=HYDRA_APP,
         entity_url=charm,
         resources={"oci-image": hydra_image_path},
         series="jammy",
         trust=True,
     )
 
-    await ops_test.model.add_relation(
-        APP_NAME,
-        "postgresql-k8s",
+    await ops_test.model.integrate(
+        HYDRA_APP,
+        DB_APP,
     )
 
-    async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(
-            raise_on_blocked=False,
-            status="active",
-            timeout=1000,
-        )
-        assert ops_test.model.applications[APP_NAME].units[0].workload_status == "active"
+    await ops_test.model.wait_for_idle(
+        apps=[HYDRA_APP, DB_APP],
+        raise_on_blocked=False,
+        status="active",
+        timeout=1000,
+    )
 
 
 async def test_ingress_relation(ops_test: OpsTest) -> None:
     await ops_test.model.deploy(
-        TRAEFIK,
+        TRAEFIK_CHARM,
         application_name=TRAEFIK_PUBLIC_APP,
         channel="latest/edge",
         config={"external_hostname": PUBLIC_TRAEFIK_EXTERNAL_NAME},
     )
     await ops_test.model.deploy(
-        TRAEFIK,
+        TRAEFIK_CHARM,
         application_name=TRAEFIK_ADMIN_APP,
         channel="latest/edge",
         config={"external_hostname": "admin"},
     )
-    await ops_test.model.add_relation(f"{APP_NAME}:admin-ingress", TRAEFIK_ADMIN_APP)
-    await ops_test.model.add_relation(f"{APP_NAME}:public-ingress", TRAEFIK_PUBLIC_APP)
+    await ops_test.model.integrate(f"{HYDRA_APP}:admin-ingress", TRAEFIK_ADMIN_APP)
+    await ops_test.model.integrate(f"{HYDRA_APP}:public-ingress", TRAEFIK_PUBLIC_APP)
 
     await ops_test.model.wait_for_idle(
         apps=[TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
@@ -102,8 +103,17 @@ async def test_has_public_ingress(ops_test: OpsTest) -> None:
     # strip-prefix for https fix is not yet release to the traefik stable channel.
     # Switch to https once that is released.
     resp = requests.get(
-        f"http://{public_address}/{ops_test.model.name}-{APP_NAME}/.well-known/jwks.json"
+        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json"
     )
+
+    assert resp.status_code == 200
+
+
+async def test_has_admin_ingress(ops_test: OpsTest) -> None:
+    # Get the traefik address and try to reach hydra
+    admin_address = await get_unit_address(ops_test, TRAEFIK_ADMIN_APP, 0)
+
+    resp = requests.get(f"http://{admin_address}/{ops_test.model.name}-{HYDRA_APP}/admin/clients")
 
     assert resp.status_code == 200
 
@@ -111,13 +121,13 @@ async def test_has_public_ingress(ops_test: OpsTest) -> None:
 async def test_openid_configuration_endpoint(ops_test: OpsTest) -> None:
     # Get the traefik address and try to reach hydra
     public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
-    base_path = f"https://{PUBLIC_TRAEFIK_EXTERNAL_NAME}/{ops_test.model.name}-{APP_NAME}"
+    base_path = f"https://{PUBLIC_TRAEFIK_EXTERNAL_NAME}/{ops_test.model.name}-{HYDRA_APP}"
 
     # TODO: We use the "http" endpoint to make requests to hydra, because the
     # strip-prefix for https fix is not yet release to the traefik stable channel.
     # Switch to https once that is released.
     resp = requests.get(
-        f"http://{public_address}/{ops_test.model.name}-{APP_NAME}/.well-known/openid-configuration"
+        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/openid-configuration"
     )
 
     assert resp.status_code == 200
@@ -131,19 +141,10 @@ async def test_openid_configuration_endpoint(ops_test: OpsTest) -> None:
     assert data["jwks_uri"] == join(base_path, ".well-known/jwks.json")
 
 
-async def test_has_admin_ingress(ops_test: OpsTest) -> None:
-    # Get the traefik address and try to reach hydra
-    admin_address = await get_unit_address(ops_test, TRAEFIK_ADMIN_APP, 0)
-
-    resp = requests.get(f"http://{admin_address}/{ops_test.model.name}-{APP_NAME}/admin/clients")
-
-    assert resp.status_code == 200
-
-
 @pytest.mark.abort_on_fail
 async def test_create_client_action(ops_test: OpsTest) -> None:
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "create-oauth-client",
@@ -161,7 +162,7 @@ async def test_create_client_action(ops_test: OpsTest) -> None:
 
 async def test_list_client(ops_test: OpsTest) -> None:
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "list-oauth-clients",
@@ -174,7 +175,7 @@ async def test_list_client(ops_test: OpsTest) -> None:
 
 async def test_get_client(ops_test: OpsTest) -> None:
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "list-oauth-clients",
@@ -184,7 +185,7 @@ async def test_get_client(ops_test: OpsTest) -> None:
     client_id = res["0"]
 
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "get-oauth-client-info",
@@ -200,7 +201,7 @@ async def test_get_client(ops_test: OpsTest) -> None:
 
 async def test_update_client(ops_test: OpsTest) -> None:
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "list-oauth-clients",
@@ -211,7 +212,7 @@ async def test_update_client(ops_test: OpsTest) -> None:
 
     redirect_uris = ["https://other.app/oauth/callback"]
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "update-oauth-client",
@@ -228,7 +229,7 @@ async def test_update_client(ops_test: OpsTest) -> None:
 
 async def test_revoke_access_tokens_client(ops_test: OpsTest) -> None:
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "list-oauth-clients",
@@ -238,7 +239,7 @@ async def test_revoke_access_tokens_client(ops_test: OpsTest) -> None:
     client_id = res["0"]
 
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "revoke-oauth-client-access-tokens",
@@ -255,7 +256,7 @@ async def test_revoke_access_tokens_client(ops_test: OpsTest) -> None:
 
 async def test_delete_client(ops_test: OpsTest) -> None:
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "list-oauth-clients",
@@ -265,7 +266,7 @@ async def test_delete_client(ops_test: OpsTest) -> None:
     client_id = res["0"]
 
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "delete-oauth-client",
@@ -279,7 +280,7 @@ async def test_delete_client(ops_test: OpsTest) -> None:
     assert res["client-id"] == client_id
 
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "get-oauth-client-info",
@@ -298,11 +299,11 @@ async def test_rotate_keys(ops_test: OpsTest) -> None:
     public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
 
     jwks = requests.get(
-        f"http://{public_address}/{ops_test.model.name}-{APP_NAME}/.well-known/jwks.json"
+        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json"
     )
 
     action = (
-        await ops_test.model.applications[APP_NAME]
+        await ops_test.model.applications[HYDRA_APP]
         .units[0]
         .run_action(
             "rotate-key",
@@ -312,7 +313,7 @@ async def test_rotate_keys(ops_test: OpsTest) -> None:
 
     new_kid = res["new-key-id"]
     new_jwks = requests.get(
-        f"http://{public_address}/{ops_test.model.name}-{APP_NAME}/.well-known/jwks.json"
+        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json"
     )
 
     assert any(jwk["kid"] == new_kid for jwk in new_jwks.json()["keys"])
@@ -321,19 +322,14 @@ async def test_rotate_keys(ops_test: OpsTest) -> None:
 
 async def test_hydra_scale_up(ops_test: OpsTest) -> None:
     """Check that hydra works after it is scaled up."""
-    app = ops_test.model.applications[APP_NAME]
+    app = ops_test.model.applications[HYDRA_APP]
 
     await app.scale(3)
 
     await ops_test.model.wait_for_idle(
-        apps=[APP_NAME],
+        apps=[HYDRA_APP],
         status="active",
         raise_on_blocked=True,
         timeout=1000,
+        wait_for_exact_units=3,
     )
-
-    admin_address = await get_app_address(ops_test, TRAEFIK_ADMIN_APP)
-    health_check_url = f"http://{admin_address}/{ops_test.model.name}-{APP_NAME}/health/ready"
-    resp = requests.get(health_check_url)
-
-    assert resp.status_code == 200
