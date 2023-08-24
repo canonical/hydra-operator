@@ -36,7 +36,7 @@ requires:
     description: |
       Provides traces to COS Tempo instance
 provides:
-  endpoint-info:
+  hydra-endpoint-info:
     interface: hydra_endpoints
     description: |
       Provides API endpoints to a related application
