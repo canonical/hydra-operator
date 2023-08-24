@@ -3,4 +3,4 @@ lightkube
 lightkube-models
 jinja2
 jsonschema
-pydantic<2.0
+pydantic<2.4
