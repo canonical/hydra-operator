@@ -27,7 +27,6 @@ from charms.hydra.v0.oauth import (
     OAuthProvider,
 )
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
-    LoginUIEndpointsRelationDataMissingError,
     LoginUIEndpointsRelationMissingError,
     LoginUIEndpointsRequirer,
     LoginUITooManyRelatedAppsError,
@@ -937,8 +936,6 @@ class HydraCharm(CharmBase):
         try:
             login_ui_endpoints = self.login_ui_endpoints.get_login_ui_endpoints()
             return login_ui_endpoints[key]
-        except LoginUIEndpointsRelationDataMissingError:
-            logger.info("No login ui endpoint-info relation data found")
         except LoginUIEndpointsRelationMissingError:
             logger.info("No login ui endpoint-info relation found")
         except LoginUITooManyRelatedAppsError:
