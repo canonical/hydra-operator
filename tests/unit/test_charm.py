@@ -363,9 +363,9 @@ def test_config_updated_on_config_changed(
     validate_config(expected_config, yaml.safe_load(harness.charm._render_conf_file()))
 
 
-@pytest.mark.parametrize("api_type,port", [("admin", "4445"), ("public", "4444")])
+@pytest.mark.parametrize("api_type,port", [("admin", 4445), ("public", 4444)])
 def test_ingress_relation_created(
-    harness: Harness, mocked_fqdn: MagicMock, api_type: str, port: str
+    harness: Harness, mocked_fqdn: MagicMock, api_type: str, port: int
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
 
@@ -373,11 +373,12 @@ def test_ingress_relation_created(
     app_data = harness.get_relation_data(relation_id, harness.charm.app)
 
     assert app_data == {
-        "host": mocked_fqdn.return_value,
-        "model": harness.model.name,
-        "name": "hydra",
-        "port": port,
-        "strip-prefix": "true",
+        "model": json.dumps(harness.model.name),
+        "name": json.dumps("hydra"),
+        "port": json.dumps(port),
+        "redirect-https": json.dumps(False),
+        "scheme": json.dumps("http"),
+        "strip-prefix": json.dumps(True),
     }
 
 
