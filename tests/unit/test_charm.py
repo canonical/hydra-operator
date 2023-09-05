@@ -69,7 +69,6 @@ def setup_login_ui_relation(harness: Harness) -> tuple[int, dict]:
         "error_url": f"{endpoint}/ui/error",
         "login_url": f"{endpoint}/ui/login",
         "oidc_error_url": f"{endpoint}/ui/oidc_error",
-        "default_url": endpoint,
     }
     harness.update_relation_data(
         relation_id,
@@ -87,7 +86,6 @@ def setup_login_ui_without_proxy_relation(harness: Harness) -> tuple[int, dict]:
         "error_url": "",
         "login_url": "",
         "oidc_error_url": "",
-        "default_url": "",
     }
     harness.update_relation_data(
         relation_id,
