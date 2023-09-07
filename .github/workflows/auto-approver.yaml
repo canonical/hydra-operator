@@ -5,10 +5,7 @@ on:
   push:
     branches:
       - "renovate/**"
-<<<<<<< HEAD
-=======
       - "automated-update-charm-libs"
->>>>>>> 7c0415b (fix: updated checkout to v4)
 
 jobs:
   autoapprove:
@@ -23,11 +20,7 @@ jobs:
       - name: Enable automerge if required
         run: |
           if [[ $(gh pr view --json body | grep "\*\*Automerge\*\*: Enabled") ]]; then
-<<<<<<< HEAD
             gh pr merge --auto --merge || true
-=======
-            gh pr merge --auto --merge
->>>>>>> 7c0415b (fix: updated checkout to v4)
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
