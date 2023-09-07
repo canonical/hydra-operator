@@ -67,11 +67,8 @@ def setup_login_ui_relation(harness: Harness) -> tuple[int, dict]:
     login_databag = {
         "consent_url": f"{endpoint}/ui/consent",
         "error_url": f"{endpoint}/ui/error",
-        "index_url": f"{endpoint}/ui/index",
         "login_url": f"{endpoint}/ui/login",
         "oidc_error_url": f"{endpoint}/ui/oidc_error",
-        "registration_url": f"{endpoint}/ui/registration",
-        "default_url": endpoint,
     }
     harness.update_relation_data(
         relation_id,
@@ -87,11 +84,8 @@ def setup_login_ui_without_proxy_relation(harness: Harness) -> tuple[int, dict]:
     login_databag = {
         "consent_url": "",
         "error_url": "",
-        "index_url": "",
         "login_url": "",
         "oidc_error_url": "",
-        "registration_url": "",
-        "default_url": "",
     }
     harness.update_relation_data(
         relation_id,
