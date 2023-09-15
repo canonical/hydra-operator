@@ -1162,7 +1162,7 @@ def test_verify_pebble_layer_tempo_k8s(harness: Harness) -> None:
             "hydra": {
                 "override": "replace",
                 "summary": "entrypoint of the hydra-operator image",
-                "command": '/bin/sh -c "hydra serve all --config /etc/config/hydra.yaml --dev 2>&1 | tee -a /var/log/hydra.log"',
+                "command": '/bin/sh -c "hydra serve all --config /etc/config/hydra.yaml 2>&1 | tee -a /var/log/hydra.log"',
                 "startup": "disabled",
                 "environment": {
                     "TRACING_PROVIDER": "otel",
