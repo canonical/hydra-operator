@@ -340,7 +340,7 @@ class HydraCharm(CharmBase):
             consent_url=self._get_login_ui_endpoint_info("consent_url"),
             error_url=self._get_login_ui_endpoint_info("oidc_error_url"),
             login_url=self._get_login_ui_endpoint_info("login_url"),
-            hydra_public_url=self._public_url or f"http://127.0.0.1:{HYDRA_PUBLIC_PORT}/",
+            hydra_public_url=self._public_url,
             supported_scopes=SUPPORTED_SCOPES,
         )
         return rendered
@@ -429,6 +429,7 @@ class HydraCharm(CharmBase):
         juju_secrets["system"] = self.model.app.add_secret(secret, label=SYSTEM_SECRET_LABEL)
         return juju_secrets
 
+    # flake8: noqa: C901
     def _handle_status_update_config(self, event: HookEvent) -> None:
         if not self._container.can_connect():
             event.defer()
@@ -450,6 +451,10 @@ class HydraCharm(CharmBase):
 
         if not self.model.relations[self._db_relation_name]:
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
+            return
+
+        if not self.public_ingress.is_ready():
+            self.unit.status = BlockedStatus("Missing required relation with ingress")
             return
 
         if not self.database.is_resource_created():
@@ -525,6 +530,10 @@ class HydraCharm(CharmBase):
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
         logger.info("Retrieved database details")
+
+        if not self.model.relations[self._db_relation_name]:
+            self.unit.status = BlockedStatus("Missing required relation with postgresql")
+            return
 
         if not self._container.can_connect():
             event.defer()
