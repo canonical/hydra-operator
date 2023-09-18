@@ -62,16 +62,6 @@ async def test_build_and_deploy(ops_test: OpsTest) -> None:
         HYDRA_APP,
         DB_APP,
     )
-
-    await ops_test.model.wait_for_idle(
-        apps=[HYDRA_APP, DB_APP],
-        raise_on_blocked=False,
-        status="active",
-        timeout=1000,
-    )
-
-
-async def test_ingress_relation(ops_test: OpsTest) -> None:
     await ops_test.model.deploy(
         TRAEFIK_CHARM,
         application_name=TRAEFIK_PUBLIC_APP,
@@ -84,13 +74,20 @@ async def test_ingress_relation(ops_test: OpsTest) -> None:
         channel="latest/edge",
         config={"external_hostname": "admin"},
     )
-    await ops_test.model.integrate(f"{HYDRA_APP}:admin-ingress", TRAEFIK_ADMIN_APP)
-    await ops_test.model.integrate(f"{HYDRA_APP}:public-ingress", TRAEFIK_PUBLIC_APP)
-
     await ops_test.model.wait_for_idle(
         apps=[TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
         status="active",
         raise_on_blocked=True,
+        timeout=1000,
+    )
+
+    await ops_test.model.integrate(f"{HYDRA_APP}:admin-ingress", TRAEFIK_ADMIN_APP)
+    await ops_test.model.integrate(f"{HYDRA_APP}:public-ingress", TRAEFIK_PUBLIC_APP)
+
+    await ops_test.model.wait_for_idle(
+        apps=[HYDRA_APP, DB_APP],
+        raise_on_blocked=False,
+        status="active",
         timeout=1000,
     )
 

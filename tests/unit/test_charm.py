@@ -180,6 +180,7 @@ def test_install_without_relation(harness: Harness) -> None:
 
 
 def test_install_without_database(harness: Harness) -> None:
+    setup_ingress_relation(harness, "public")
     db_relation_id = harness.add_relation("pg-database", "postgresql-k8s")
     harness.add_relation_unit(db_relation_id, "postgresql-k8s/0")
 
@@ -208,6 +209,7 @@ def test_relation_departed(harness: Harness, mocked_run_migration: MagicMock) ->
 def test_pebble_container_can_connect(
     harness: Harness, mocked_migration_is_needed: MagicMock
 ) -> None:
+    setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
     harness.charm.on.leader_elected.emit()
     harness.set_can_connect(CONTAINER_NAME, True)
@@ -258,6 +260,7 @@ def test_postgres_created_when_migration_has_run(
 
 def test_update_container_config(harness: Harness, mocked_run_migration: MagicMock) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
+    setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
 
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
@@ -287,8 +290,8 @@ def test_update_container_config(harness: Harness, mocked_run_migration: MagicMo
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
             "self": {
-                "issuer": "http://127.0.0.1:4444/",
-                "public": "http://127.0.0.1:4444/",
+                "issuer": "https://public/testing-hydra",
+                "public": "https://public/testing-hydra",
             },
         },
         "webfinger": {
@@ -318,6 +321,7 @@ def test_config_updated_on_config_changed(
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
 
     expected_config = {
@@ -345,8 +349,8 @@ def test_config_updated_on_config_changed(
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
             "self": {
-                "issuer": "http://127.0.0.1:4444/",
-                "public": "http://127.0.0.1:4444/",
+                "issuer": "https://public/testing-hydra",
+                "public": "https://public/testing-hydra",
             },
         },
         "webfinger": {
@@ -417,59 +421,6 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
     }
 
     validate_config(expected_config, yaml.safe_load(harness.charm._render_conf_file()))
-
-
-def test_hydra_config_on_pebble_ready_without_ingress_relation_data(
-    harness: Harness, mocked_migration_is_needed: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    # set relation without data
-    relation_id = harness.add_relation("public-ingress", "public-traefik")
-    harness.add_relation_unit(relation_id, "public-traefik/0")
-
-    setup_peer_relation(harness)
-    setup_postgres_relation(harness)
-    harness.charm.on.leader_elected.emit()
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    expected_config = {
-        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {
-            "level": "info",
-            "format": "json",
-        },
-        "serve": {
-            "admin": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-            "public": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-        },
-        "urls": {
-            "consent": "http://default-url.com/consent",
-            "error": "http://default-url.com/oidc_error",
-            "login": "http://default-url.com/login",
-            "self": {
-                "issuer": "http://127.0.0.1:4444/",
-                "public": "http://127.0.0.1:4444/",
-            },
-        },
-        "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
-        },
-    }
-
-    container = harness.model.unit.get_container(CONTAINER_NAME)
-    container_config = container.pull(path="/etc/config/hydra.yaml", encoding="utf-8")
-    validate_config(expected_config, yaml.safe_load(container_config))
 
 
 def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness: Harness) -> None:
@@ -766,6 +717,7 @@ def test_config_updated_without_login_ui_endpoints_interface(
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.leader_elected.emit()
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_ingress_relation(harness, "public")
     setup_peer_relation(harness)
     setup_postgres_relation(harness)
 
@@ -794,8 +746,8 @@ def test_config_updated_without_login_ui_endpoints_interface(
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
             "self": {
-                "issuer": "http://127.0.0.1:4444/",
-                "public": "http://127.0.0.1:4444/",
+                "issuer": "https://public/testing-hydra",
+                "public": "https://public/testing-hydra",
             },
         },
         "webfinger": {
@@ -815,6 +767,7 @@ def test_config_updated_with_login_ui_endpoints_interface(
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.leader_elected.emit()
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
     (_, login_databag) = setup_login_ui_relation(harness)
 
@@ -843,8 +796,8 @@ def test_config_updated_with_login_ui_endpoints_interface(
             "error": login_databag["oidc_error_url"],
             "login": login_databag["login_url"],
             "self": {
-                "issuer": "http://127.0.0.1:4444/",
-                "public": "http://127.0.0.1:4444/",
+                "issuer": "https://public/testing-hydra",
+                "public": "https://public/testing-hydra",
             },
         },
         "webfinger": {
@@ -865,6 +818,7 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
     harness.charm.on.leader_elected.emit()
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_peer_relation(harness)
+    setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
     setup_login_ui_without_proxy_relation(harness)
 
@@ -893,8 +847,8 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
             "self": {
-                "issuer": "http://127.0.0.1:4444/",
-                "public": "http://127.0.0.1:4444/",
+                "issuer": "https://public/testing-hydra",
+                "public": "https://public/testing-hydra",
             },
         },
         "webfinger": {
@@ -1112,6 +1066,7 @@ def test_on_pebble_ready_with_loki(
     harness: Harness, mocked_migration_is_needed: MagicMock
 ) -> None:
     harness.set_can_connect(CONTAINER_NAME, True)
+    setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
     container = harness.model.unit.get_container(CONTAINER_NAME)
     harness.charm.on.leader_elected.emit()
@@ -1162,7 +1117,7 @@ def test_verify_pebble_layer_tempo_k8s(harness: Harness) -> None:
             "hydra": {
                 "override": "replace",
                 "summary": "entrypoint of the hydra-operator image",
-                "command": '/bin/sh -c "hydra serve all --config /etc/config/hydra.yaml --dev 2>&1 | tee -a /var/log/hydra.log"',
+                "command": '/bin/sh -c "hydra serve all --config /etc/config/hydra.yaml 2>&1 | tee -a /var/log/hydra.log"',
                 "startup": "disabled",
                 "environment": {
                     "TRACING_PROVIDER": "otel",
