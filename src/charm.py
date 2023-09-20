@@ -345,6 +345,10 @@ class HydraCharm(CharmBase):
         )
         return rendered
 
+    def _set_version(self) -> None:
+        version = self._hydra_cli.get_version()
+        self.unit.set_workload_version(version)
+
     def _get_database_relation_info(self) -> dict:
         relation_id = self.database.relations[0].id
         relation_data = self.database.fetch_relation_data()[relation_id]
@@ -516,16 +520,14 @@ class HydraCharm(CharmBase):
             self._container.make_dir(path=str(self._log_dir), make_parents=True)
             logger.info(f"Created directory {self._log_dir}")
 
+        self._set_version()
         self._handle_status_update_config(event)
 
     def _migration_is_needed(self):
         if not self._peers:
             return
 
-        return (
-            self._get_peer_data(DB_MIGRATION_VERSION_KEY)
-            != self._hydra_cli.get_version()["version"]
-        )
+        return self._get_peer_data(DB_MIGRATION_VERSION_KEY) != self._hydra_cli.get_version()
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
@@ -575,7 +577,7 @@ class HydraCharm(CharmBase):
             logger.error("Automigration job failed, please use the run-migration action")
             return
 
-        self._set_peer_data(DB_MIGRATION_VERSION_KEY, self._hydra_cli.get_version()["version"])
+        self._set_peer_data(DB_MIGRATION_VERSION_KEY, self._hydra_cli.get_version())
         self._container.start(self._container_name)
         self.unit.status = ActiveStatus()
 
