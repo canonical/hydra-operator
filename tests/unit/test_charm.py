@@ -199,7 +199,7 @@ def test_relation_data(harness: Harness, mocked_run_migration: MagicMock) -> Non
     assert relation_data["endpoints"] == "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
 
 
-def test_relation_departed(harness: Harness, mocked_run_migration: MagicMock) -> None:
+def test_relation_departed(harness: Harness) -> None:
     db_relation_id = setup_postgres_relation(harness)
 
     harness.remove_relation_unit(db_relation_id, "postgresql-k8s/0")
@@ -250,6 +250,7 @@ def test_postgres_created_when_migration_has_run(
     harness.set_leader(False)
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_ingress_relation(harness, "public")
     setup_peer_relation(harness)
 
     setup_postgres_relation(harness)
