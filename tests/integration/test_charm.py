@@ -330,3 +330,16 @@ async def test_hydra_scale_up(ops_test: OpsTest) -> None:
         timeout=1000,
         wait_for_exact_units=3,
     )
+
+
+async def test_hydra_scale_down(ops_test: OpsTest) -> None:
+    """Check that hydra works after it is scaled down."""
+    app = ops_test.model.applications[HYDRA_APP]
+
+    await app.scale(1)
+
+    await ops_test.model.wait_for_idle(
+        apps=[HYDRA_APP],
+        status="active",
+        timeout=1000,
+    )

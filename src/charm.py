@@ -373,6 +373,21 @@ class HydraCharm(CharmBase):
         return f"oauth_{relation_id}"
 
     @property
+    def _migration_peer_data_key(self) -> Optional[str]:
+        if not self.database.relations:
+            return None
+        # We append the relation ID to the migration key in peer data, this is
+        # needed in order to be able to store multiple migration versions.
+        #
+        # When a database relation is departed, we can't remove the key because we
+        # can't be sure if the relation is actually departing or if the unit is
+        # dying. If a new database relation is then created we need to be able to tell
+        # that it is a different relation. By appending the relation ID we overcome this
+        # problem.
+        # See https://github.com/canonical/hydra-operator/pull/138#discussion_r1338409081
+        return f"{DB_MIGRATION_VERSION_KEY}_{self.database.relations[0].id}"
+
+    @property
     def _peers(self) -> Optional[Relation]:
         """Fetch the peer relation."""
         return self.model.get_relation(PEER)
@@ -474,6 +489,7 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
+        self._cleanup_peer_data()
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
         try:
             self._container.restart(self._container_name)
@@ -481,6 +497,7 @@ class HydraCharm(CharmBase):
             logger.error(str(err))
             self.unit.status = BlockedStatus("Failed to restart, please consult the logs")
             return
+
         self.unit.status = ActiveStatus()
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
@@ -527,15 +544,11 @@ class HydraCharm(CharmBase):
         if not self._peers:
             return
 
-        return self._get_peer_data(DB_MIGRATION_VERSION_KEY) != self._hydra_cli.get_version()
+        return self._get_peer_data(self._migration_peer_data_key) != self._hydra_cli.get_version()
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         """Event Handler for database created event."""
         logger.info("Retrieved database details")
-
-        if not self.model.relations[self._db_relation_name]:
-            self.unit.status = BlockedStatus("Missing required relation with postgresql")
-            return
 
         if not self._container.can_connect():
             event.defer()
@@ -595,11 +608,21 @@ class HydraCharm(CharmBase):
 
     def _on_database_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Event Handler for database relation departed event."""
-        logger.error("Missing required relation with postgresql")
-        self.model.unit.status = BlockedStatus("Missing required relation with postgresql")
-        self._pop_peer_data(DB_MIGRATION_VERSION_KEY)
-        if self._container.can_connect():
-            self._container.stop(self._container_name)
+        self.unit.status = BlockedStatus("Missing required relation with postgresql")
+
+    def _cleanup_peer_data(self) -> None:
+        if not self._peers:
+            return
+        # We need to remove the migration key from peer data. We can't do that in relation
+        # departed as we can't tell if the event was triggered from a dying unit or if the
+        # relation is actually departing.
+        extra_keys = [
+            k
+            for k in self._peers.data[self.app].keys()
+            if k.startswith(DB_MIGRATION_VERSION_KEY) and k != self._migration_peer_data_key
+        ]
+        for k in extra_keys:
+            self._pop_peer_data(k)
 
     def _on_admin_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         if self.unit.is_leader():
