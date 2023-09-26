@@ -360,10 +360,23 @@ class HydraCharm(CharmBase):
             "database_name": self._db_name,
         }
 
+    @property
+    def _dsn(self) -> Optional[str]:
+        db_info = self._get_database_relation_info()
+        if not db_info:
+            return None
+
+        return "postgres://{username}:{password}@{endpoints}/{database_name}".format(
+            username=db_info.get("username"),
+            password=db_info.get("password"),
+            endpoints=db_info.get("endpoints"),
+            database_name=db_info.get("database_name"),
+        )
+
     def _run_sql_migration(self, timeout: float = 60) -> bool:
         """Runs a command to create SQL schemas and apply migration plans."""
         try:
-            self._hydra_cli.run_migration(timeout=timeout)
+            self._hydra_cli.run_migration(dsn=self._dsn, timeout=timeout)
         except ExecError as err:
             logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
             return False
@@ -460,13 +473,6 @@ class HydraCharm(CharmBase):
             return
 
         self.unit.status = MaintenanceStatus("Configuring resources")
-        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-
-        if not self._hydra_service_is_created:
-            event.defer()
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            logger.info("Hydra service is absent. Deferring the event.")
-            return
 
         if not self.model.relations[self._db_relation_name]:
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
@@ -491,6 +497,7 @@ class HydraCharm(CharmBase):
 
         self._cleanup_peer_data()
         self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
+        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
         try:
             self._container.restart(self._container_name)
         except ChangeError as err:
@@ -561,22 +568,13 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        self.unit.status = MaintenanceStatus(
-            "Configuring container and resources for database connection"
-        )
-
         if not self._get_secrets():
             self.unit.status = WaitingStatus("Waiting for secret creation")
             event.defer()
             return
 
-        logger.info("Updating Hydra config and restarting service")
-        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-
         if not self._migration_is_needed():
-            self._container.start(self._container_name)
-            self.unit.status = ActiveStatus()
+            self._handle_status_update_config(event)
             return
 
         if not self.unit.is_leader():
@@ -590,9 +588,8 @@ class HydraCharm(CharmBase):
             logger.error("Automigration job failed, please use the run-migration action")
             return
 
-        self._set_peer_data(DB_MIGRATION_VERSION_KEY, self._hydra_cli.get_version())
-        self._container.start(self._container_name)
-        self.unit.status = ActiveStatus()
+        self._set_peer_data(self._migration_peer_data_key, self._hydra_cli.get_version())
+        self._handle_status_update_config(event)
 
     def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
         """Event Handler for database changed event."""
