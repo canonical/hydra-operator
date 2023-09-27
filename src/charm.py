@@ -350,9 +350,11 @@ class HydraCharm(CharmBase):
         self.unit.set_workload_version(version)
 
     def _get_database_relation_info(self) -> dict:
+        if not self.database.relations:
+            return None
+
         relation_id = self.database.relations[0].id
         relation_data = self.database.fetch_relation_data()[relation_id]
-
         return {
             "username": relation_data.get("username"),
             "password": relation_data.get("password"),
@@ -597,11 +599,25 @@ class HydraCharm(CharmBase):
 
     def _on_run_migration(self, event: ActionEvent) -> None:
         """Runs the migration as an action response."""
-        logger.info("Executing database migration initiated by user")
-        if not self._run_sql_migration():
-            event.fail("Execution failed, please inspect the logs")
+        if not self._container.can_connect():
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
-        event.log("Successfully ran migration")
+
+        timeout = float(event.params.get("timeout", 120))
+        event.log("Migrating database.")
+        try:
+            self._hydra_cli.run_migration(timeout=timeout, dsn=self._dsn)
+        except Error as e:
+            err_msg = e.stderr if isinstance(e, ExecError) else e
+            event.fail(f"Database migration action failed: {err_msg}")
+            return
+        event.log("Successfully migrated the database.")
+
+        if not self._peers:
+            event.fail("Peer relation not ready. Failed to store migration version")
+            return
+        self._set_peer_data(self._migration_peer_data_key, self._hydra_cli.get_version())
+        event.log("Updated migration version in peer data.")
 
     def _on_database_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Event Handler for database relation departed event."""

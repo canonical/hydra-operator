@@ -1,5 +1,12 @@
 run-migration:
-  description: Run a command to create SQL schemas and apply migration plans.
+  description:
+    Run a migration, this is needed after upgrades. This is a non-reversible operation.
+    Run this after backing up the database.
+  params:
+    timeout:
+      description: Timeout after which the migration will be canceled
+      type: number
+      default: 120
 create-oauth-client:
   description: Register an oauth client
   params:
