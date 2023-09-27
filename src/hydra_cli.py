@@ -213,7 +213,7 @@ class HydraCLI:
         _, stderr = self._run_cmd(cmd, timeout=timeout)
         return stderr
 
-    def get_version(self) -> Dict[str, str]:
+    def get_version(self) -> str:
         """Get the version of the hydra binary."""
         cmd = ["hydra", "version"]
 
@@ -226,11 +226,7 @@ class HydraCLI:
         out_re = r"Version:[ ]*(.+)\nGit Hash:[ ]*(.+)\nBuild Time:[ ]*(.+)"
         versions = re.findall(out_re, stdout)[0]
 
-        return {
-            "version": versions[0],
-            "git_hash": versions[1],
-            "build_time": versions[2],
-        }
+        return versions[0]
 
     def _run_cmd(
         self, cmd: List[str], timeout: float = 20
