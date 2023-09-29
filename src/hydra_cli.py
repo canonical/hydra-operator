@@ -206,11 +206,17 @@ class HydraCLI:
         logger.info(f"Successfully created jwk: {json_stdout['keys'][0]['kid']}")
         return json_stdout
 
-    def run_migration(self, timeout: float = 60) -> Optional[str]:
+    def run_migration(self, dsn=None, timeout: float = 60) -> Optional[str]:
         """Run hydra migrations."""
-        cmd = ["hydra", "migrate", "sql", "-e", "--config", self.config_file_path, "--yes"]
+        cmd = ["hydra", "migrate", "sql", "-e", "--yes"]
+        if dsn:
+            env = {"DSN": dsn}
+        else:
+            cmd.append("--config")
+            cmd.append(self.config_file_path)
+            env = None
 
-        _, stderr = self._run_cmd(cmd, timeout=timeout)
+        _, stderr = self._run_cmd(cmd, timeout=timeout, environment=env)
         return stderr
 
     def get_version(self) -> str:
@@ -229,9 +235,12 @@ class HydraCLI:
         return versions[0]
 
     def _run_cmd(
-        self, cmd: List[str], timeout: float = 20
+        self,
+        cmd: List[str],
+        timeout: float = 20,
+        environment: Optional[Dict] = None,
     ) -> Tuple[Union[str, bytes], Union[str, bytes]]:
         logger.debug(f"Running cmd: {cmd}")
-        process = self.container.exec(cmd, timeout=timeout)
+        process = self.container.exec(cmd, environment=environment, timeout=timeout)
         stdout, stderr = process.wait_output()
         return stdout, stderr

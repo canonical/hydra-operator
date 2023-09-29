@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.pebble import ExecError
+from ops.pebble import ExecError, TimeoutError
 from ops.testing import Harness
 from test_oauth_requirer import CLIENT_CONFIG  # type: ignore
 
@@ -199,7 +199,7 @@ def test_relation_data(harness: Harness, mocked_run_migration: MagicMock) -> Non
     assert relation_data["endpoints"] == "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
 
 
-def test_relation_departed(harness: Harness, mocked_run_migration: MagicMock) -> None:
+def test_relation_departed(harness: Harness) -> None:
     db_relation_id = setup_postgres_relation(harness)
 
     harness.remove_relation_unit(db_relation_id, "postgresql-k8s/0")
@@ -250,6 +250,7 @@ def test_postgres_created_when_migration_has_run(
     harness.set_leader(False)
     harness.set_can_connect(CONTAINER_NAME, True)
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
+    setup_ingress_relation(harness, "public")
     setup_peer_relation(harness)
 
     setup_postgres_relation(harness)
@@ -1140,3 +1141,41 @@ def test_verify_pebble_layer_tempo_k8s(harness: Harness) -> None:
     }
 
     assert harness.charm._hydra_layer.to_dict() == expected_layer
+
+
+def test_run_migration_action(harness: Harness, mocked_run_migration: MagicMock) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    setup_peer_relation(harness)
+    setup_postgres_relation(harness)
+    event = MagicMock()
+
+    harness.charm._on_run_migration(event)
+
+    mocked_run_migration.assert_called_once()
+    event.fail.assert_not_called()
+
+
+def test_error_on_run_migration_action(harness: Harness, mocked_run_migration: MagicMock) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    mocked_run_migration.side_effect = ExecError(
+        command=[], exit_code=1, stdout="", stderr="Error"
+    )
+    event = MagicMock()
+
+    harness.charm._on_run_migration(event)
+
+    mocked_run_migration.assert_called_once()
+    event.fail.assert_called()
+
+
+def test_timeout_on_run_migration_action(
+    harness: Harness, mocked_run_migration: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    mocked_run_migration.side_effect = TimeoutError
+    event = MagicMock()
+
+    harness.charm._on_run_migration(event)
+
+    mocked_run_migration.assert_called_once()
+    event.fail.assert_called()
