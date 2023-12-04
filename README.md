@@ -1,5 +1,7 @@
 # Charmed Ory Hydra
 
+[![CharmHub Badge](https://charmhub.io/hydra/badge.svg)](https://charmhub.io/hydra)
+
 ## Description
 
 Python Operator for Ory Hydra - a scalable, security first OAuth 2.0 and OpenID Connect server. For more details and documentation, visit https://www.ory.sh/docs/hydra/
