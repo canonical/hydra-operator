@@ -51,7 +51,10 @@ provides:
     description: |
       Forwards the built-in grafana dashboard(s) for monitoring hydra.
     interface: grafana_dashboard
-
+  hydra-admin-endpoint:
+    description: |
+      Provides information to the Identity Platform Admin UI to manage Hydra resources
+    interface: admin_ui_service
 peers:
   hydra:
     interface: hydra_peers

@@ -26,6 +26,9 @@ from charms.hydra.v0.oauth import (
     ClientDeletedEvent,
     OAuthProvider,
 )
+from charms.identity_platform_admin_ui_operator.v0.admin_ui_service import (
+    HydraAdminUIServiceProvider,
+)
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRelationDataMissingError,
     LoginUIEndpointsRelationMissingError,
@@ -100,6 +103,7 @@ class HydraCharm(CharmBase):
         self._loki_push_api_relation_name = "logging"
         self._grafana_dashboard_relation_name = "grafana-dashboard"
         self._tracing_relation_name = "tracing"
+        self._admin_ui_relation_name = "hydra-admin-endpoint"
         self._hydra_service_command = "hydra serve all"
         self._log_dir = Path("/var/log")
         self._log_path = self._log_dir / "hydra.log"
@@ -139,6 +143,10 @@ class HydraCharm(CharmBase):
         )
 
         self.endpoints_provider = HydraEndpointsProvider(self)
+
+        self.admin_ui_provider = HydraAdminUIServiceProvider(
+            self, relation_name=self._admin_ui_relation_name
+        )
 
         self.metrics_endpoint = MetricsEndpointProvider(
             self,
@@ -203,6 +211,10 @@ class HydraCharm(CharmBase):
             self.on[self._login_ui_relation_name].relation_changed,
             self._handle_status_update_config,
         )
+        self.framework.observe(
+            self.admin_ui_provider.on.ready, self._update_admin_ui_relation_data
+        )
+
         self.framework.observe(
             self.on.create_oauth_client_action, self._on_create_oauth_client_action
         )
@@ -999,6 +1011,16 @@ class HydraCharm(CharmBase):
         except LoginUITooManyRelatedAppsError:
             logger.info("Too many ui-endpoint-info relations found")
         return None
+
+    def _update_admin_ui_relation_data(self, event: RelationEvent) -> None:
+        logger.info("Sending endpoints to Admin UI")
+        admin_endpoint = (
+            self._admin_url
+            or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}"
+        )
+        admin_endpoint = admin_endpoint.replace("https", "http")
+
+        self.admin_ui_provider.send_relation_data_for_admin_ui(admin_endpoint)
 
     def _get_tracing_endpoint_info(self) -> str:
         if not self._tracing_ready:
