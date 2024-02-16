@@ -17,6 +17,7 @@ def harness(mocked_kubernetes_service_patcher: Generator) -> Generator[Harness, 
     harness.set_model_name("testing")
     harness.set_leader(True)
     harness.begin()
+    harness.add_network("10.0.0.10")
     yield harness
     harness.cleanup()
 
