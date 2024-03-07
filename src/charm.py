@@ -619,6 +619,9 @@ class HydraCharm(CharmBase):
         self._set_peer_data(self._migration_peer_data_key, self._hydra_cli.get_version())
         event.log("Updated migration version in peer data.")
 
+        if self.unit.status == WaitingStatus("Waiting for migration to run"):
+            self._handle_status_update_config(event)
+
     def _on_database_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Event Handler for database relation departed event."""
         self.unit.status = BlockedStatus("Missing required relation with postgresql")
