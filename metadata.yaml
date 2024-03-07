@@ -17,7 +17,7 @@ resources:
   oci-image:
     type: oci-image
     description: OCI image for hydra container
-    upstream-source: ghcr.io/canonical/hydra:2.1.1
+    upstream-source: ghcr.io/canonical/hydra:2.2.0
 requires:
   pg-database:
     interface: postgresql_client
