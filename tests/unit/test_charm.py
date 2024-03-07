@@ -1179,3 +1179,36 @@ def test_timeout_on_run_migration_action(
 
     mocked_run_migration.assert_called_once()
     event.fail.assert_called()
+
+
+def test_unit_status_before_run_migration_action(
+    harness: Harness,
+    mocked_migration_is_needed: MagicMock,
+    mocked_run_migration: MagicMock,
+    mocked_get_secrets: MagicMock,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    mocked_migration_is_needed.return_value = True
+    setup_peer_relation(harness)
+    setup_ingress_relation(harness, "public")
+    setup_postgres_relation(harness)
+    assert harness.charm.unit.status == WaitingStatus("Waiting for migration to run")
+
+
+def test_unit_status_after_run_migration_action(
+    harness: Harness,
+    mocked_migration_is_needed: MagicMock,
+    mocked_run_migration: MagicMock,
+    mocked_get_secrets: MagicMock,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+    mocked_migration_is_needed.return_value = True
+    setup_peer_relation(harness)
+    setup_ingress_relation(harness, "public")
+    setup_postgres_relation(harness)
+
+    mocked_migration_is_needed.return_value = False
+    event = MagicMock()
+    harness.charm._on_run_migration(event)
+
+    assert isinstance(harness.model.unit.status, ActiveStatus)
