@@ -340,6 +340,8 @@ class HydraCharm(CharmBase):
             consent_url=self._get_login_ui_endpoint_info("consent_url"),
             error_url=self._get_login_ui_endpoint_info("oidc_error_url"),
             login_url=self._get_login_ui_endpoint_info("login_url"),
+            device_verification_url=self._get_login_ui_endpoint_info("device_verification_url"),
+            post_device_done_url=self._get_login_ui_endpoint_info("post_device_done_url"),
             hydra_public_url=self._public_url,
             supported_scopes=SUPPORTED_SCOPES,
         )

@@ -26,6 +26,8 @@ urls:
   consent: {{ consent_url | d("http://default-url.com/consent", true) }}
   error: {{ error_url | d("http://default-url.com/oidc_error", true) }}
   login: {{ login_url | d("http://default-url.com/login", true) }}
+  device_verification: {{ device_verification_url | d("http://default-url.com/device_verification", true) }}
+  post_device_done: {{ post_device_done_url | d("http://default-url.com/post_device_done", true) }}
   self:
     issuer: {{ hydra_public_url }}
     public: {{ hydra_public_url }}
