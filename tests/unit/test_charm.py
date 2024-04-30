@@ -1206,7 +1206,9 @@ def test_unit_status_before_run_migration_action(
     setup_peer_relation(harness)
     setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
-    assert harness.charm.unit.status == WaitingStatus("Waiting for migration to run")
+    assert harness.charm.unit.status == WaitingStatus(
+        "Waiting for migration to run, try running the `run-migration` action"
+    )
 
 
 def test_unit_status_after_run_migration_action(
