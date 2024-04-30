@@ -340,6 +340,8 @@ class HydraCharm(CharmBase):
             consent_url=self._get_login_ui_endpoint_info("consent_url"),
             error_url=self._get_login_ui_endpoint_info("oidc_error_url"),
             login_url=self._get_login_ui_endpoint_info("login_url"),
+            device_verification_url=self._get_login_ui_endpoint_info("device_verification_url"),
+            post_device_done_url=self._get_login_ui_endpoint_info("post_device_done_url"),
             hydra_public_url=self._public_url,
             supported_scopes=SUPPORTED_SCOPES,
         )
@@ -489,7 +491,9 @@ class HydraCharm(CharmBase):
             return
 
         if self._migration_is_needed():
-            self.unit.status = WaitingStatus("Waiting for migration to run")
+            self.unit.status = WaitingStatus(
+                "Waiting for migration to run, try running the `run-migration` action"
+            )
             return
 
         if not self._get_secrets():
@@ -619,8 +623,7 @@ class HydraCharm(CharmBase):
         self._set_peer_data(self._migration_peer_data_key, self._hydra_cli.get_version())
         event.log("Updated migration version in peer data.")
 
-        if self.unit.status == WaitingStatus("Waiting for migration to run"):
-            self._handle_status_update_config(event)
+        self._handle_status_update_config(event)
 
     def _on_database_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Event Handler for database relation departed event."""

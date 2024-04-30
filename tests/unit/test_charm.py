@@ -69,6 +69,8 @@ def setup_login_ui_relation(harness: Harness) -> tuple[int, dict]:
         "error_url": f"{endpoint}/ui/error",
         "login_url": f"{endpoint}/ui/login",
         "oidc_error_url": f"{endpoint}/ui/oidc_error",
+        "device_verification_url": f"{endpoint}/ui/device_verification",
+        "post_device_done_url": f"{endpoint}/ui/post_device_done",
     }
     harness.update_relation_data(
         relation_id,
@@ -290,6 +292,8 @@ def test_update_container_config(harness: Harness, mocked_run_migration: MagicMo
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
+            "device_verification": "http://default-url.com/device_verification",
+            "post_device_done": "http://default-url.com/post_device_done",
             "self": {
                 "issuer": "https://public/testing-hydra",
                 "public": "https://public/testing-hydra",
@@ -349,6 +353,8 @@ def test_config_updated_on_config_changed(
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
+            "device_verification": "http://default-url.com/device_verification",
+            "post_device_done": "http://default-url.com/post_device_done",
             "self": {
                 "issuer": "https://public/testing-hydra",
                 "public": "https://public/testing-hydra",
@@ -411,6 +417,8 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
+            "device_verification": "http://default-url.com/device_verification",
+            "post_device_done": "http://default-url.com/post_device_done",
             "self": {
                 "issuer": "https://public/testing-hydra",
                 "public": "https://public/testing-hydra",
@@ -746,6 +754,8 @@ def test_config_updated_without_login_ui_endpoints_interface(
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
+            "device_verification": "http://default-url.com/device_verification",
+            "post_device_done": "http://default-url.com/post_device_done",
             "self": {
                 "issuer": "https://public/testing-hydra",
                 "public": "https://public/testing-hydra",
@@ -796,6 +806,8 @@ def test_config_updated_with_login_ui_endpoints_interface(
             "consent": login_databag["consent_url"],
             "error": login_databag["oidc_error_url"],
             "login": login_databag["login_url"],
+            "device_verification": login_databag["device_verification_url"],
+            "post_device_done": login_databag["post_device_done_url"],
             "self": {
                 "issuer": "https://public/testing-hydra",
                 "public": "https://public/testing-hydra",
@@ -847,6 +859,8 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
             "login": "http://default-url.com/login",
+            "device_verification": "http://default-url.com/device_verification",
+            "post_device_done": "http://default-url.com/post_device_done",
             "self": {
                 "issuer": "https://public/testing-hydra",
                 "public": "https://public/testing-hydra",
@@ -1192,7 +1206,9 @@ def test_unit_status_before_run_migration_action(
     setup_peer_relation(harness)
     setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
-    assert harness.charm.unit.status == WaitingStatus("Waiting for migration to run")
+    assert harness.charm.unit.status == WaitingStatus(
+        "Waiting for migration to run, try running the `run-migration` action"
+    )
 
 
 def test_unit_status_after_run_migration_action(

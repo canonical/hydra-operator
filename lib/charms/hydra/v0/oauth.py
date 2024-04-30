@@ -79,7 +79,12 @@ LIBPATCH = 6
 logger = logging.getLogger(__name__)
 
 DEFAULT_RELATION_NAME = "oauth"
-ALLOWED_GRANT_TYPES = ["authorization_code", "refresh_token", "client_credentials"]
+ALLOWED_GRANT_TYPES = [
+    "authorization_code",
+    "refresh_token",
+    "client_credentials",
+    "urn:ietf:params:oauth:grant-type:device_code",
+]
 ALLOWED_CLIENT_AUTHN_METHODS = ["client_secret_basic", "client_secret_post"]
 CLIENT_SECRET_FIELD = "secret"
 
