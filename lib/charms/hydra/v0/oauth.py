@@ -76,6 +76,9 @@ LIBAPI = 0
 # to 0 if you are raising the major API version
 LIBPATCH = 6
 
+PYDEPS = ["jsonschema"]
+
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_RELATION_NAME = "oauth"
