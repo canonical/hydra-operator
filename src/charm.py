@@ -350,6 +350,15 @@ class HydraCharm(CharmBase):
         relation_id = self.database.relations[0].id
         relation_data = self.database.fetch_relation_data()[relation_id]
 
+        if not all(
+            [
+                relation_data.get("username"),
+                relation_data.get("password"),
+                relation_data.get("endpoints"),
+            ]
+        ):
+            return None
+
         return {
             "username": relation_data.get("username"),
             "password": relation_data.get("password"),
