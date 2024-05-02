@@ -145,6 +145,7 @@ class HydraCharm(CharmBase):
             relation_name=self._prometheus_scrape_relation_name,
             jobs=[
                 {
+                    "job_name": "hydra_metrics",
                     "metrics_path": "/admin/metrics/prometheus",
                     "static_configs": [
                         {
