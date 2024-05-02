@@ -258,10 +258,6 @@ class HydraCharm(CharmBase):
                 }
             },
             "checks": {
-                "version": {
-                    "override": "replace",
-                    "exec": {"command": "hydra version"},
-                },
                 "ready": {
                     "override": "replace",
                     "http": {"url": f"http://localhost:{HYDRA_ADMIN_PORT}/health/ready"},
