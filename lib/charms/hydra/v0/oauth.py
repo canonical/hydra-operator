@@ -324,6 +324,7 @@ class OAuthInfoChangedEvent(EventBase):
 
     def restore(self, snapshot: Dict) -> None:
         """Restore event."""
+        super().restore(snapshot)
         self.client_id = snapshot["client_id"]
         self.client_secret_id = snapshot["client_secret_id"]
 
