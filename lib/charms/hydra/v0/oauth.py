@@ -464,7 +464,7 @@ class OAuthRequirer(OAuthRelation):
             and "client_secret_id" in relation.data[relation.app]
         )
 
-    def get_provider_info(self, relation_id: Optional[int] = None) -> OauthProviderConfig:
+    def get_provider_info(self, relation_id: Optional[int] = None) -> Optional[OauthProviderConfig]:
         """Get the provider information from the databag."""
         if len(self.model.relations) == 0:
             return None
