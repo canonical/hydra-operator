@@ -277,22 +277,17 @@ class HydraCharm(CharmBase):
 
     @property
     def _hydra_service_is_created(self) -> bool:
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
-            return False
-        return True
+        return (
+            self._container.can_connect()
+            and self._container_name in self._container.get_services()
+        )
 
     @property
     def _hydra_service_is_running(self) -> bool:
-        if not self._container.can_connect():
-            return False
-
-        try:
-            service = self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
-            return False
-        return service.is_running()
+        return (
+            self._hydra_service_is_created
+            and self._container.get_service(self._container_name).is_running
+        )
 
     @property
     def _log_level(self) -> str:
