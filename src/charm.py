@@ -286,7 +286,7 @@ class HydraCharm(CharmBase):
     def _hydra_service_is_running(self) -> bool:
         return (
             self._hydra_service_is_created
-            and self._container.get_service(self._container_name).is_running
+            and self._container.get_service(self._container_name).is_running()
         )
 
     @property
