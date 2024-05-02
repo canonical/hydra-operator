@@ -349,10 +349,12 @@ class HydraCharm(CharmBase):
 
         relation_id = self.database.relations[0].id
         relation_data = self.database.fetch_relation_data()[relation_id]
+
         return {
             "username": relation_data.get("username"),
             "password": relation_data.get("password"),
-            "endpoints": relation_data.get("endpoints"),
+            # endpoints is a comma separated list, pick the first endpoint as hydra supports only one
+            "endpoints": relation_data.get("endpoints").split(",")[0],
             "database_name": self._db_name,
         }
 
