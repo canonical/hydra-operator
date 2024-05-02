@@ -52,7 +52,7 @@ import inspect
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Dict, List, Mapping, Optional
 
 import jsonschema
@@ -303,7 +303,8 @@ class OauthProviderConfig:
     @classmethod
     def from_dict(cls, dic: Dict) -> "OauthProviderConfig":
         """Generate OauthProviderConfig instance from dict."""
-        return cls(**{k: v for k, v in dic.items() if k in inspect.signature(cls).parameters})
+        return cls(**{k: v for k, v in dic.items() if k in [f.name for f in fields(cls)]
+})
 
 
 class OAuthInfoChangedEvent(EventBase):
