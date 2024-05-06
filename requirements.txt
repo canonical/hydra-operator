@@ -5,3 +5,4 @@ lightkube-models
 jinja2
 jsonschema
 pydantic<2.0
+serialized-data-interface==0.7.0

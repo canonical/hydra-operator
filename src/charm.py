@@ -65,6 +65,7 @@ from ops.model import (
     WaitingStatus,
 )
 from ops.pebble import ChangeError, Error, ExecError, Layer
+from serialized_data_interface import get_interface
 
 from hydra_cli import HydraCLI
 from utils import normalise_url, remove_none_values
@@ -82,6 +83,8 @@ COOKIE_SECRET_KEY = "cookie"
 COOKIE_SECRET_LABEL = "cookiesecret"
 SYSTEM_SECRET_KEY = "system"
 SYSTEM_SECRET_LABEL = "systemsecret"
+# TODO @shipperizer make a constants.py
+HYDRA_PUBLIC_URI_REGEXP = "(^/oauth2/.*)|(^/.well-known/.*)|(^/userinfo)"
 
 
 class HydraCharm(CharmBase):
@@ -227,6 +230,26 @@ class HydraCharm(CharmBase):
         self.framework.observe(
             self.loki_consumer.on.promtail_digest_error,
             self._promtail_error,
+        )
+
+        self.framework.observe(
+            self.on["istio-public-ingress"].relation_changed, self._handle_istio_ingress
+        )
+
+    # TODO @shipperizer Event is not used, see if that's ok
+    def _handle_istio_ingress(self, _):
+        interface = get_interface(self, "istio-public-ingress")
+
+        if not interface:
+            return
+
+        interface.send_data(
+            {
+                "prefix": "", # TODO @shipperizer needs to be passed as empty to avoid failure in the required validation 
+                "regex": HYDRA_PUBLIC_URI_REGEXP,
+                "service": self.model.app.name,
+                "port": HYDRA_PUBLIC_PORT,
+            }
         )
 
     @property
@@ -482,9 +505,9 @@ class HydraCharm(CharmBase):
             self.unit.status = BlockedStatus("Missing required relation with postgresql")
             return
 
-        if not self.public_ingress.is_ready():
-            self.unit.status = BlockedStatus("Missing required relation with ingress")
-            return
+        # if not self.public_ingress.is_ready():
+        #     self.unit.status = BlockedStatus("Missing required relation with ingress")
+        #     return
 
         if not self.database.is_resource_created():
             self.unit.status = WaitingStatus("Waiting for database creation")

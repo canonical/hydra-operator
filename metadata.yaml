@@ -1,12 +1,9 @@
-# Copyright 2023 Canonical Ltd.
-# See LICENSE file for licensing details.
-
 name: hydra
 description: |
   Charmed Ory Hydra
 summary: |
   OAuth 2.0 and OpenID Connect 1.0 Provider
-docs: https://discourse.charmhub.io/t/hydra-docs-index/12158
+docs: 'https://discourse.charmhub.io/t/hydra-docs-index/12158'
 assumes:
   - juju >= 3.0.2
   - k8s-api
@@ -17,7 +14,7 @@ resources:
   oci-image:
     type: oci-image
     description: OCI image for hydra container
-    upstream-source: ghcr.io/canonical/hydra:2.3.0-canonical
+    upstream-source: 'ghcr.io/canonical/hydra:2.3.0-canonical'
 requires:
   pg-database:
     interface: postgresql_client
@@ -36,6 +33,65 @@ requires:
     limit: 1
     description: |
       Provides traces to COS Tempo instance
+  istio-public-ingress:
+    interface: ingress
+    schema:
+      v3:
+        requires:
+          type: object
+          properties:
+            service:
+              type: string
+            port:
+              type: integer
+            prefix:
+              type: string
+            rewrite:
+              type: string
+            regex:
+              type: string        
+          required:
+            - service
+            - port
+            - prefix
+            - regex
+      v2:
+        requires:
+          type: object
+          properties:
+            service:
+              type: string
+            port:
+              type: integer
+            namespace:
+              type: string
+            prefix:
+              type: string
+            rewrite:
+              type: string
+          required:
+            - service
+            - port
+            - namespace
+            - prefix
+      v1:
+        requires:
+          type: object
+          properties:
+            service:
+              type: string
+            port:
+              type: integer
+            prefix:
+              type: string
+            rewrite:
+              type: string
+          required:
+            - service
+            - port
+            - prefix
+    versions: [v3]
+    __schema_source: https://raw.githubusercontent.com/shipperizer/istio-operators/patch/identity/hack/ingress.yaml
 provides:
   hydra-endpoint-info:
     interface: hydra_endpoints
@@ -51,7 +107,6 @@ provides:
     description: |
       Forwards the built-in grafana dashboard(s) for monitoring hydra.
     interface: grafana_dashboard
-
 peers:
   hydra:
     interface: hydra_peers
