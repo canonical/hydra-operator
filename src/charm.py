@@ -13,6 +13,7 @@ from pathlib import Path
 from secrets import token_hex
 from typing import Any, Dict, Optional
 
+from charms.istio_pilot.v0.istio_gateway_info import GatewayRelationError, GatewayRequirer
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
     DatabaseEndpointsChangedEvent,
@@ -137,6 +138,8 @@ class HydraCharm(CharmBase):
         )
         self.oauth = OAuthProvider(self)
 
+        self.gateway = GatewayRequirer(self)
+
         self.login_ui_endpoints = LoginUIEndpointsRequirer(
             self, relation_name=self._login_ui_relation_name
         )
@@ -235,6 +238,31 @@ class HydraCharm(CharmBase):
         self.framework.observe(
             self.on["istio-public-ingress"].relation_changed, self._handle_istio_ingress
         )
+
+        self.framework.observe(self.on["gateway-info"].relation_changed, self._handle_istio_gateway)
+
+    def _handle_istio_gateway(self, event):
+        ip = self._get_gateway_dns()
+
+        if self.unit.is_leader():
+            logger.info("This app's public ingress URL: %s", ip)
+        
+        self._handle_status_update_config(event)
+        self._update_oauth_endpoint_info(event)
+        self._update_hydra_endpoints_relation_data(event)
+    
+    def _get_gateway_dns(self) -> str:
+        """Retrieve gateway namespace and name from relation data."""
+        if not self.gateway:
+            return ""
+
+        try:
+            gateway_data = self.gateway.get_relation_data()
+        except GatewayRelationError as e:
+            return ""
+
+        return gateway_data["gateway_dns"] or gateway_data["gateway_ip"]
+
 
     # TODO @shipperizer Event is not used, see if that's ok
     def _handle_istio_ingress(self, _):
@@ -337,11 +365,18 @@ class HydraCharm(CharmBase):
 
     @property
     def _public_url(self) -> Optional[str]:
+        dns = self._get_gateway_dns()
+        if dns:
+            return normalise_url("https://"+dns)
+
         url = self.public_ingress.url
         return normalise_url(url) if url else None
 
     @property
     def _admin_url(self) -> Optional[str]:
+        ip = self._get_gateway_dns()
+        if ip:
+            return None
         url = self.admin_ingress.url
         return normalise_url(url) if url else None
 
@@ -1002,10 +1037,24 @@ class HydraCharm(CharmBase):
         return "relation_id" in client.get("metadata", {})
 
     def _update_oauth_endpoint_info(self, event: RelationEvent) -> None:
-        if not self.admin_ingress.url or not self.public_ingress.url:
+        if not self.admin_ingress.url or not self.public_ingress.url or not get_interface(self, "istio-public-ingress"):
             event.defer()
             logger.info("Ingress URL not available. Deferring the event.")
             return
+
+        # treat istio in a special way
+        if get_interface(self, "istio-public-ingress"):
+            self.oauth.set_provider_info_in_relation_data(
+                issuer_url=self._public_url,
+                authorization_endpoint=join(self._public_url, "oauth2/auth"),
+                token_endpoint=join(self._public_url, "oauth2/token"),
+                introspection_endpoint=join(self._admin_url, "admin/oauth2/introspect"),
+                userinfo_endpoint=join(self._public_url, "userinfo"),
+                jwks_endpoint=join(self._public_url, ".well-known/jwks.json"),
+                scope=" ".join(SUPPORTED_SCOPES),
+            )
+            return
+
 
         self.oauth.set_provider_info_in_relation_data(
             issuer_url=self._public_url,
