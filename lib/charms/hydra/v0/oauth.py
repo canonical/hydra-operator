@@ -48,21 +48,14 @@ class SomeCharm(CharmBase):
 ```
 """
 
-import inspect
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Dict, List, Mapping, Optional
 
 import jsonschema
-from ops.charm import (
-    CharmBase,
-    RelationBrokenEvent,
-    RelationChangedEvent,
-    RelationCreatedEvent,
-    RelationDepartedEvent,
-)
+from ops.charm import CharmBase, RelationBrokenEvent, RelationChangedEvent, RelationCreatedEvent
 from ops.framework import EventBase, EventSource, Handle, Object, ObjectEvents
 from ops.model import Relation, Secret, TooManyRelatedAppsError
 
@@ -74,7 +67,10 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 6
+LIBPATCH = 7
+
+PYDEPS = ["jsonschema"]
+
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +296,7 @@ class OauthProviderConfig:
     @classmethod
     def from_dict(cls, dic: Dict) -> "OauthProviderConfig":
         """Generate OauthProviderConfig instance from dict."""
-        return cls(**{k: v for k, v in dic.items() if k in inspect.signature(cls).parameters})
+        return cls(**{k: v for k, v in dic.items() if k in [f.name for f in fields(cls)]})
 
 
 class OAuthInfoChangedEvent(EventBase):
@@ -320,6 +316,7 @@ class OAuthInfoChangedEvent(EventBase):
 
     def restore(self, snapshot: Dict) -> None:
         """Restore event."""
+        super().restore(snapshot)
         self.client_id = snapshot["client_id"]
         self.client_secret_id = snapshot["client_secret_id"]
 
@@ -459,7 +456,9 @@ class OAuthRequirer(OAuthRelation):
             and "client_secret_id" in relation.data[relation.app]
         )
 
-    def get_provider_info(self, relation_id: Optional[int] = None) -> OauthProviderConfig:
+    def get_provider_info(
+        self, relation_id: Optional[int] = None
+    ) -> Optional[OauthProviderConfig]:
         """Get the provider information from the databag."""
         if len(self.model.relations) == 0:
             return None
@@ -652,8 +651,8 @@ class OAuthProvider(OAuthRelation):
             self._get_client_config_from_relation_data,
         )
         self.framework.observe(
-            events.relation_departed,
-            self._on_relation_departed,
+            events.relation_broken,
+            self._on_relation_broken,
         )
 
     def _get_client_config_from_relation_data(self, event: RelationChangedEvent) -> None:
@@ -701,7 +700,7 @@ class OAuthProvider(OAuthRelation):
     def _get_secret_label(self, relation: Relation) -> str:
         return f"client_secret_{relation.id}"
 
-    def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
+    def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
         # Workaround for https://github.com/canonical/operator/issues/888
         self._pop_relation_data(event.relation.id)
 

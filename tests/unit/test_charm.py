@@ -1143,10 +1143,6 @@ def test_verify_pebble_layer_tempo_k8s(harness: Harness) -> None:
             }
         },
         "checks": {
-            "version": {
-                "override": "replace",
-                "exec": {"command": "hydra version"},
-            },
             "ready": {
                 "override": "replace",
                 "http": {"url": "http://localhost:4445/health/ready"},

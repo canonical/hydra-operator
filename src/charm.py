@@ -145,6 +145,7 @@ class HydraCharm(CharmBase):
             relation_name=self._prometheus_scrape_relation_name,
             jobs=[
                 {
+                    "job_name": "hydra_metrics",
                     "metrics_path": "/admin/metrics/prometheus",
                     "static_configs": [
                         {
@@ -257,10 +258,6 @@ class HydraCharm(CharmBase):
                 }
             },
             "checks": {
-                "version": {
-                    "override": "replace",
-                    "exec": {"command": "hydra version"},
-                },
                 "ready": {
                     "override": "replace",
                     "http": {"url": f"http://localhost:{HYDRA_ADMIN_PORT}/health/ready"},
@@ -280,22 +277,17 @@ class HydraCharm(CharmBase):
 
     @property
     def _hydra_service_is_created(self) -> bool:
-        try:
-            self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
-            return False
-        return True
+        return (
+            self._container.can_connect()
+            and self._container_name in self._container.get_services()
+        )
 
     @property
     def _hydra_service_is_running(self) -> bool:
-        if not self._container.can_connect():
-            return False
-
-        try:
-            service = self._container.get_service(self._container_name)
-        except (ModelError, RuntimeError):
-            return False
-        return service.is_running()
+        return (
+            self._hydra_service_is_created
+            and self._container.get_service(self._container_name).is_running()
+        )
 
     @property
     def _log_level(self) -> str:
@@ -357,10 +349,21 @@ class HydraCharm(CharmBase):
 
         relation_id = self.database.relations[0].id
         relation_data = self.database.fetch_relation_data()[relation_id]
+
+        if not all(
+            [
+                relation_data.get("username"),
+                relation_data.get("password"),
+                relation_data.get("endpoints"),
+            ]
+        ):
+            return None
+
         return {
             "username": relation_data.get("username"),
             "password": relation_data.get("password"),
-            "endpoints": relation_data.get("endpoints"),
+            # endpoints is a comma separated list, pick the first endpoint as hydra supports only one
+            "endpoints": relation_data.get("endpoints").split(",")[0],
             "database_name": self._db_name,
         }
 
