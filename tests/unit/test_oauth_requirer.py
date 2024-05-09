@@ -61,7 +61,12 @@ def mocked_client_is_created(mocker: MockerFixture) -> MagicMock:
 CLIENT_CONFIG = {
     "redirect_uri": "https://example.oidc.client/callback",
     "scope": "openid email offline_access",
-    "grant_types": ["authorization_code", "refresh_token"],
+    "grant_types": [
+        "authorization_code",
+        "refresh_token",
+        "client_credentials",
+        "urn:ietf:params:oauth:grant-type:device_code",
+    ],
     "audience": [],
     "token_endpoint_auth_method": "client_secret_basic",
 }

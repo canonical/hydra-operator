@@ -67,7 +67,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 7
+LIBPATCH = 8
 
 PYDEPS = ["jsonschema"]
 
@@ -154,13 +154,13 @@ OAUTH_REQUIRER_JSON_SCHEMA = {
             "type": "array",
             "default": None,
             "items": {
-                "enum": ["authorization_code", "client_credentials", "refresh_token"],
+                "enum": ALLOWED_GRANT_TYPES,
                 "type": "string",
             },
         },
         "token_endpoint_auth_method": {
             "type": "string",
-            "enum": ["client_secret_basic", "client_secret_post"],
+            "enum": ALLOWED_CLIENT_AUTHN_METHODS,
             "default": "client_secret_basic",
         },
     },
