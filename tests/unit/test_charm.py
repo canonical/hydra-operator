@@ -101,23 +101,19 @@ def setup_loki_relation(harness: Harness) -> int:
     relation_id = harness.add_relation("logging", "loki-k8s")
     harness.add_relation_unit(relation_id, "loki-k8s/0")
     databag = {
-        "promtail_binary_zip_url": json.dumps(
-            {
-                "amd64": {
-                    "filename": "promtail-static-amd64",
-                    "zipsha": "543e333b0184e14015a42c3c9e9e66d2464aaa66eca48b29e185a6a18f67ab6d",
-                    "binsha": "17e2e271e65f793a9fbe81eab887b941e9d680abe82d5a0602888c50f5e0cac9",
-                    "url": "https://github.com/canonical/loki-k8s-operator/releases/download/promtail-v2.5.0/promtail-static-amd64.gz",
-                }
+        "promtail_binary_zip_url": json.dumps({
+            "amd64": {
+                "filename": "promtail-static-amd64",
+                "zipsha": "543e333b0184e14015a42c3c9e9e66d2464aaa66eca48b29e185a6a18f67ab6d",
+                "binsha": "17e2e271e65f793a9fbe81eab887b941e9d680abe82d5a0602888c50f5e0cac9",
+                "url": "https://github.com/canonical/loki-k8s-operator/releases/download/promtail-v2.5.0/promtail-static-amd64.gz",
             }
-        ),
+        }),
     }
     unit_databag = {
-        "endpoint": json.dumps(
-            {
-                "url": "http://loki-k8s-0.loki-k8s-endpoints.model0.svc.cluster.local:3100/loki/api/v1/push"
-            }
-        )
+        "endpoint": json.dumps({
+            "url": "http://loki-k8s-0.loki-k8s-endpoints.model0.svc.cluster.local:3100/loki/api/v1/push"
+        })
     }
     harness.update_relation_data(
         relation_id,
@@ -910,18 +906,16 @@ def test_create_oauth_client_action(
     harness.charm._on_create_oauth_client_action(event)
 
     ret = mocked_create_client.return_value
-    event.set_results.assert_called_with(
-        {
-            "client-id": ret.get("client_id"),
-            "client-secret": ret.get("client_secret"),
-            "audience": ret.get("audience"),
-            "grant-types": ", ".join(ret.get("grant_types")),
-            "redirect-uris": ", ".join(ret.get("redirect_uris")),
-            "response-types": ", ".join(ret.get("response_types")),
-            "scope": ret.get("scope"),
-            "token-endpoint-auth-method": ret.get("token_endpoint_auth_method"),
-        }
-    )
+    event.set_results.assert_called_with({
+        "client-id": ret.get("client_id"),
+        "client-secret": ret.get("client_secret"),
+        "audience": ret.get("audience"),
+        "grant-types": ", ".join(ret.get("grant_types")),
+        "redirect-uris": ", ".join(ret.get("redirect_uris")),
+        "response-types": ", ".join(ret.get("response_types")),
+        "scope": ret.get("scope"),
+        "token-endpoint-auth-method": ret.get("token_endpoint_auth_method"),
+    })
 
 
 def test_get_oauth_client_info_action(
@@ -936,9 +930,9 @@ def test_get_oauth_client_info_action(
 
     harness.charm._on_get_oauth_client_info_action(event)
 
-    event.set_results.assert_called_with(
-        {k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v for k, v in ret.items()}
-    )
+    event.set_results.assert_called_with({
+        k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v for k, v in ret.items()
+    })
 
 
 def test_update_oauth_client_action(
@@ -956,18 +950,16 @@ def test_update_oauth_client_action(
 
     harness.charm._on_update_oauth_client_action(event)
 
-    event.set_results.assert_called_with(
-        {
-            "client-id": ret.get("client_id"),
-            "client-secret": ret.get("client_secret"),
-            "audience": ret.get("audience"),
-            "grant-types": ", ".join(ret.get("grant_types")),
-            "redirect-uris": ", ".join(ret.get("redirect_uris")),
-            "response-types": ", ".join(ret.get("response_types")),
-            "scope": ret.get("scope"),
-            "token-endpoint-auth-method": ret.get("token_endpoint_auth_method"),
-        }
-    )
+    event.set_results.assert_called_with({
+        "client-id": ret.get("client_id"),
+        "client-secret": ret.get("client_secret"),
+        "audience": ret.get("audience"),
+        "grant-types": ", ".join(ret.get("grant_types")),
+        "redirect-uris": ", ".join(ret.get("redirect_uris")),
+        "response-types": ", ".join(ret.get("response_types")),
+        "scope": ret.get("scope"),
+        "token-endpoint-auth-method": ret.get("token_endpoint_auth_method"),
+    })
 
 
 def test_update_oauth_client_action_when_oauth_relation_client(
