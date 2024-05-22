@@ -82,6 +82,7 @@ def test_provider_info_in_relation_databag(harness: Harness) -> None:
         "scope": "openid profile email phone",
         "token_endpoint": "https://example.oidc.com/oauth2/token",
         "userinfo_endpoint": "https://example.oidc.com/userinfo",
+        "jwt_access_token": "False",
     }
 
 
@@ -115,6 +116,7 @@ def test_client_credentials_in_relation_databag_when_client_available(harness: H
         "token_endpoint": "https://example.oidc.com/oauth2/token",
         "userinfo_endpoint": "https://example.oidc.com/userinfo",
         "client_id": CLIENT_ID,
+        "jwt_access_token": "False",
     }
 
 

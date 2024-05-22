@@ -47,6 +47,7 @@ def provider_info() -> Dict:
         "scope": "openid profile email phone",
         "token_endpoint": "https://example.oidc.com/oauth2/token",
         "userinfo_endpoint": "https://example.oidc.com/userinfo",
+        "jwt_access_token": "False",
     }
 
 
@@ -163,6 +164,7 @@ def test_get_provider_info_when_data_available(harness: Harness, provider_info: 
     assert expected_provider_info.scope == provider_info["scope"]
     assert expected_provider_info.token_endpoint == provider_info["token_endpoint"]
     assert expected_provider_info.userinfo_endpoint == provider_info["userinfo_endpoint"]
+    assert expected_provider_info.jwt_access_token == (provider_info["jwt_access_token"] == "True")
 
 
 def test_get_client_credentials_when_data_available(harness: Harness, provider_info: Dict) -> None:
