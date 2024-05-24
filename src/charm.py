@@ -58,7 +58,6 @@ from ops.model import (
     ActiveStatus,
     BlockedStatus,
     MaintenanceStatus,
-    ModelError,
     Relation,
     Secret,
     SecretNotFoundError,
@@ -350,13 +349,11 @@ class HydraCharm(CharmBase):
         relation_id = self.database.relations[0].id
         relation_data = self.database.fetch_relation_data()[relation_id]
 
-        if not all(
-            [
-                relation_data.get("username"),
-                relation_data.get("password"),
-                relation_data.get("endpoints"),
-            ]
-        ):
+        if not all([
+            relation_data.get("username"),
+            relation_data.get("password"),
+            relation_data.get("endpoints"),
+        ]):
             return None
 
         return {
@@ -701,7 +698,7 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        self._set_oauth_relation_peer_data(event.relation_id, dict(client_id=client["client_id"]))
+        self._set_oauth_relation_peer_data(event.relation_id, {"client_id": client["client_id"]})
         self.oauth.set_client_credentials_in_relation_data(
             event.relation_id, client["client_id"], client["client_secret"]
         )
@@ -767,17 +764,15 @@ class HydraCharm(CharmBase):
 
         event.log("Creating client")
 
-        cmd_kwargs = remove_none_values(
-            {
-                "audience": event.params.get("audience"),
-                "grant_type": event.params.get("grant-types"),
-                "redirect_uri": event.params.get("redirect-uris"),
-                "response_type": event.params.get("response-types"),
-                "scope": event.params.get("scope"),
-                "client_secret": event.params.get("client-secret"),
-                "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method"),
-            }
-        )
+        cmd_kwargs = remove_none_values({
+            "audience": event.params.get("audience"),
+            "grant_type": event.params.get("grant-types"),
+            "redirect_uri": event.params.get("redirect-uris"),
+            "response_type": event.params.get("response-types"),
+            "scope": event.params.get("scope"),
+            "client_secret": event.params.get("client-secret"),
+            "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method"),
+        })
 
         try:
             client = self._hydra_cli.create_client(**cmd_kwargs)
@@ -786,18 +781,16 @@ class HydraCharm(CharmBase):
             return
 
         event.log("Successfully created client")
-        event.set_results(
-            {
-                "client-id": client.get("client_id"),
-                "client-secret": client.get("client_secret"),
-                "audience": client.get("audience"),
-                "grant-types": ", ".join(client.get("grant_types", [])),
-                "redirect-uris": ", ".join(client.get("redirect_uris", [])),
-                "response-types": ", ".join(client.get("response_types", [])),
-                "scope": client.get("scope"),
-                "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
-            }
-        )
+        event.set_results({
+            "client-id": client.get("client_id"),
+            "client-secret": client.get("client_secret"),
+            "audience": client.get("audience"),
+            "grant-types": ", ".join(client.get("grant_types", [])),
+            "redirect-uris": ", ".join(client.get("redirect_uris", [])),
+            "response-types": ", ".join(client.get("response_types", [])),
+            "scope": client.get("scope"),
+            "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
+        })
 
     def _on_get_oauth_client_info_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
@@ -822,12 +815,10 @@ class HydraCharm(CharmBase):
         event.log(f"Successfully fetched client: {client_id}")
         # We dump everything in the result, but we have to first convert it to the
         # format the juju action expects
-        event.set_results(
-            {
-                k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v
-                for k, v in client.items()
-            }
-        )
+        event.set_results({
+            k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v
+            for k, v in client.items()
+        })
 
     def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
@@ -853,19 +844,16 @@ class HydraCharm(CharmBase):
             )
             return
 
-        cmd_kwargs = remove_none_values(
-            {
-                "audience": event.params.get("audience") or client.get("audience"),
-                "grant_type": event.params.get("grant-types") or client.get("grant_types"),
-                "redirect_uri": event.params.get("redirect-uris") or client.get("redirect_uris"),
-                "response_type": event.params.get("response-types")
-                or client.get("response_types"),
-                "scope": event.params.get("scope") or client["scope"].split(" "),
-                "client_secret": event.params.get("client-secret") or client.get("client_secret"),
-                "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method")
-                or client.get("token_endpoint_auth_method"),
-            }
-        )
+        cmd_kwargs = remove_none_values({
+            "audience": event.params.get("audience") or client.get("audience"),
+            "grant_type": event.params.get("grant-types") or client.get("grant_types"),
+            "redirect_uri": event.params.get("redirect-uris") or client.get("redirect_uris"),
+            "response_type": event.params.get("response-types") or client.get("response_types"),
+            "scope": event.params.get("scope") or client["scope"].split(" "),
+            "client_secret": event.params.get("client-secret") or client.get("client_secret"),
+            "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method")
+            or client.get("token_endpoint_auth_method"),
+        })
         event.log(f"Updating client: {client_id}")
         try:
             client = self._hydra_cli.update_client(client_id, **cmd_kwargs)
@@ -874,18 +862,16 @@ class HydraCharm(CharmBase):
             return
 
         event.log(f"Successfully updated client: {client_id}")
-        event.set_results(
-            {
-                "client-id": client.get("client_id"),
-                "client-secret": client.get("client_secret"),
-                "audience": client.get("audience"),
-                "grant-types": ", ".join(client.get("grant_types", [])),
-                "redirect-uris": ", ".join(client.get("redirect_uris", [])),
-                "response-types": ", ".join(client.get("response_types", [])),
-                "scope": client.get("scope"),
-                "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
-            }
-        )
+        event.set_results({
+            "client-id": client.get("client_id"),
+            "client-secret": client.get("client_secret"),
+            "audience": client.get("audience"),
+            "grant-types": ", ".join(client.get("grant_types", [])),
+            "redirect-uris": ", ".join(client.get("redirect_uris", [])),
+            "response-types": ", ".join(client.get("response_types", [])),
+            "scope": client.get("scope"),
+            "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
+        })
 
     def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:

@@ -3,7 +3,6 @@
 
 """A helper class for interacting with the hydra CLI."""
 
-
 import json
 import logging
 import re

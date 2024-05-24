@@ -95,12 +95,10 @@ class HydraEndpointsProvider(Object):
 
         relations = self.model.relations[self._relation_name]
         for relation in relations:
-            relation.data[self._charm.app].update(
-                {
-                    "admin_endpoint": admin_endpoint,
-                    "public_endpoint": public_endpoint,
-                }
-            )
+            relation.data[self._charm.app].update({
+                "admin_endpoint": admin_endpoint,
+                "public_endpoint": public_endpoint,
+            })
 
 
 class HydraEndpointsRelationError(Exception):
