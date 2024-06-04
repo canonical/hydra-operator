@@ -302,6 +302,7 @@ class HydraCharm(CharmBase):
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Event Handler for config changed event."""
         self._handle_status_update_config(event)
+        self._update_oauth_endpoint_info(event)
 
     @property
     def _public_url(self) -> Optional[str]:
@@ -335,6 +336,9 @@ class HydraCharm(CharmBase):
             post_device_done_url=self._get_login_ui_endpoint_info("post_device_done_url"),
             hydra_public_url=self._public_url,
             supported_scopes=SUPPORTED_SCOPES,
+            access_token_strategy="jwt"
+            if self.config.get("jwt_access_tokens", True)
+            else "opaque",
         )
         return rendered
 
@@ -981,6 +985,7 @@ class HydraCharm(CharmBase):
             userinfo_endpoint=join(self._public_url, "userinfo"),
             jwks_endpoint=join(self._public_url, ".well-known/jwks.json"),
             scope=" ".join(SUPPORTED_SCOPES),
+            jwt_access_token=self.config.get("jwt_access_tokens", True),
         )
 
     def _get_login_ui_endpoint_info(self, key: str) -> Optional[str]:

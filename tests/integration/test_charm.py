@@ -6,6 +6,7 @@ import logging
 from os.path import join
 from pathlib import Path
 
+import jwt
 import pytest
 import requests
 import yaml
@@ -22,6 +23,32 @@ TRAEFIK_PUBLIC_APP = "traefik-public"
 CLIENT_SECRET = "secret"
 CLIENT_REDIRECT_URIS = ["https://example.com"]
 PUBLIC_TRAEFIK_EXTERNAL_NAME = "public"
+
+
+async def client_credentials_grant_request(
+    ops_test: OpsTest, client_id: str, client_secret: str, scope: str = "openid profile"
+) -> requests.Response:
+    public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
+    url = join(f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}", "oauth2/token")
+    body = {
+        "grant_type": "client_credentials",
+        "scope": scope,
+    }
+
+    return requests.post(
+        url,
+        data=body,
+        auth=(client_id, client_secret),
+        verify=False,
+    )
+
+
+async def get_hydra_jwks(ops_test: OpsTest):
+    public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
+
+    return requests.get(
+        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json"
+    )
 
 
 async def get_unit_address(ops_test: OpsTest, app_name: str, unit_num: int) -> str:
@@ -93,15 +120,7 @@ async def test_build_and_deploy(ops_test: OpsTest) -> None:
 
 
 async def test_has_public_ingress(ops_test: OpsTest) -> None:
-    # Get the traefik address and try to reach hydra
-    public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
-
-    # TODO: We use the "http" endpoint to make requests to hydra, because the
-    # strip-prefix for https fix is not yet release to the traefik stable channel.
-    # Switch to https once that is released.
-    resp = requests.get(
-        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json"
-    )
+    resp = await get_hydra_jwks(ops_test)
 
     assert resp.status_code == 200
 
@@ -148,6 +167,7 @@ async def test_create_client_action(ops_test: OpsTest) -> None:
             **{
                 "redirect-uris": CLIENT_REDIRECT_URIS,
                 "client-secret": CLIENT_SECRET,
+                "grant-types": ["client_credentials"],
             },
         )
     )
@@ -168,6 +188,81 @@ async def test_list_client(ops_test: OpsTest) -> None:
     res = (await action.wait()).results
 
     assert len(res) > 0
+
+
+async def test_get_opaque_access_token(ops_test: OpsTest) -> None:
+    await ops_test.model.applications[HYDRA_APP].set_config({
+        "jwt_access_tokens": "false",
+    })
+
+    await ops_test.model.wait_for_idle(
+        apps=[HYDRA_APP],
+        status="active",
+        timeout=1000,
+    )
+
+    action = (
+        await ops_test.model.applications[HYDRA_APP]
+        .units[0]
+        .run_action(
+            "list-oauth-clients",
+        )
+    )
+    res = (await action.wait()).results
+    client_id = res["0"]
+
+    resp = await client_credentials_grant_request(
+        ops_test,
+        client_id,
+        CLIENT_SECRET,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["access_token"]
+
+    with pytest.raises(jwt.exceptions.DecodeError):
+        jwt.decode(resp.json()["access_token"], algorithms=["RS256"], verify=False)
+
+
+async def test_get_jwt_access_token(ops_test: OpsTest) -> None:
+    await ops_test.model.applications[HYDRA_APP].set_config({
+        "jwt_access_tokens": "true",
+    })
+
+    await ops_test.model.wait_for_idle(
+        apps=[HYDRA_APP],
+        status="active",
+        timeout=1000,
+    )
+
+    action = (
+        await ops_test.model.applications[HYDRA_APP]
+        .units[0]
+        .run_action(
+            "list-oauth-clients",
+        )
+    )
+    res = (await action.wait()).results
+    client_id = res["0"]
+
+    resp = await client_credentials_grant_request(
+        ops_test,
+        client_id,
+        CLIENT_SECRET,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["access_token"]
+
+    token = resp.json()["access_token"]
+
+    public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
+    jwks_client = jwt.PyJWKClient(
+        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json",
+    )
+    signing_key = jwks_client.get_signing_key_from_jwt(token)
+
+    assert jwt.decode(token, signing_key.key, algorithms=["RS256"])
 
 
 async def test_get_client(ops_test: OpsTest) -> None:
@@ -293,11 +388,7 @@ async def test_delete_client(ops_test: OpsTest) -> None:
 
 
 async def test_rotate_keys(ops_test: OpsTest) -> None:
-    public_address = await get_unit_address(ops_test, TRAEFIK_PUBLIC_APP, 0)
-
-    jwks = requests.get(
-        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json"
-    )
+    jwks = await get_hydra_jwks(ops_test)
 
     action = (
         await ops_test.model.applications[HYDRA_APP]
@@ -309,9 +400,7 @@ async def test_rotate_keys(ops_test: OpsTest) -> None:
     res = (await action.wait()).results
 
     new_kid = res["new-key-id"]
-    new_jwks = requests.get(
-        f"http://{public_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json"
-    )
+    new_jwks = await get_hydra_jwks(ops_test)
 
     assert any(jwk["kid"] == new_kid for jwk in new_jwks.json()["keys"])
     assert len(new_jwks.json()["keys"]) == len(jwks.json()["keys"]) + 1
