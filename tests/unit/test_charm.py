@@ -284,6 +284,13 @@ def test_update_container_config(harness: Harness, mocked_run_migration: MagicMo
                 },
             },
         },
+        "strategies": {
+            "access_token": "jwt",
+            "jwt": {
+                "scope_claim": "list",
+            },
+            "scope": "exact",
+        },
         "urls": {
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
@@ -296,7 +303,13 @@ def test_update_container_config(harness: Harness, mocked_run_migration: MagicMo
             },
         },
         "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
+            "jwks": {
+                "broadcast_keys": [
+                    "hydra.openid.id-token",
+                    "hydra.jwt.access-token",
+                ],
+            },
         },
     }
 
@@ -324,6 +337,7 @@ def test_config_updated_on_config_changed(
     harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
     setup_ingress_relation(harness, "public")
     setup_postgres_relation(harness)
+    harness.update_config({"jwt_access_tokens": False})
 
     expected_config = {
         "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
@@ -345,6 +359,13 @@ def test_config_updated_on_config_changed(
                 },
             },
         },
+        "strategies": {
+            "access_token": "opaque",
+            "jwt": {
+                "scope_claim": "list",
+            },
+            "scope": "exact",
+        },
         "urls": {
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
@@ -357,7 +378,12 @@ def test_config_updated_on_config_changed(
             },
         },
         "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
+            "jwks": {
+                "broadcast_keys": [
+                    "hydra.openid.id-token",
+                ],
+            },
         },
     }
 
@@ -409,6 +435,13 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
                 },
             },
         },
+        "strategies": {
+            "access_token": "jwt",
+            "jwt": {
+                "scope_claim": "list",
+            },
+            "scope": "exact",
+        },
         "urls": {
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
@@ -421,7 +454,13 @@ def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
             },
         },
         "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
+            "jwks": {
+                "broadcast_keys": [
+                    "hydra.openid.id-token",
+                    "hydra.jwt.access-token",
+                ],
+            },
         },
     }
 
@@ -448,6 +487,63 @@ def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness
     assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
 
 
+def test_oauth_provider_info_in_databag_when_jwt_at(
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    harness.update_config({"jwt_access_tokens": True})
+    setup_ingress_relation(harness, "public")
+    setup_ingress_relation(harness, "admin")
+    setup_oauth_relation(harness)
+
+    mocked_set_provider_info.assert_called_with(
+        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
+        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        issuer_url="https://public/testing-hydra",
+        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="https://public/testing-hydra/oauth2/token",
+        userinfo_endpoint="https://public/testing-hydra/userinfo",
+        jwt_access_token=True,
+    )
+
+
+def test_provider_info_called_when_oauth_relation_then_jwt_at(
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_oauth_relation(harness)
+    setup_ingress_relation(harness, "public")
+    setup_ingress_relation(harness, "admin")
+    harness.update_config({"jwt_access_tokens": False})
+
+    mocked_set_provider_info.assert_called_with(
+        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
+        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        issuer_url="https://public/testing-hydra",
+        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="https://public/testing-hydra/oauth2/token",
+        userinfo_endpoint="https://public/testing-hydra/userinfo",
+        jwt_access_token=False,
+    )
+
+    harness.update_config({"jwt_access_tokens": True})
+
+    mocked_set_provider_info.assert_called_with(
+        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
+        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        issuer_url="https://public/testing-hydra",
+        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="https://public/testing-hydra/oauth2/token",
+        userinfo_endpoint="https://public/testing-hydra/userinfo",
+        jwt_access_token=True,
+    )
+
+
 def test_provider_info_in_databag_when_ingress_then_oauth_relation(
     harness: Harness, mocked_set_provider_info: MagicMock
 ) -> None:
@@ -465,6 +561,7 @@ def test_provider_info_in_databag_when_ingress_then_oauth_relation(
         scope="openid profile email phone",
         token_endpoint="https://public/testing-hydra/oauth2/token",
         userinfo_endpoint="https://public/testing-hydra/userinfo",
+        jwt_access_token=True,
     )
 
 
@@ -485,6 +582,7 @@ def test_provider_info_called_when_oauth_relation_then_ingress(
         scope="openid profile email phone",
         token_endpoint="https://public/testing-hydra/oauth2/token",
         userinfo_endpoint="https://public/testing-hydra/userinfo",
+        jwt_access_token=True,
     )
 
 
@@ -746,6 +844,13 @@ def test_config_updated_without_login_ui_endpoints_interface(
                 },
             },
         },
+        "strategies": {
+            "access_token": "jwt",
+            "jwt": {
+                "scope_claim": "list",
+            },
+            "scope": "exact",
+        },
         "urls": {
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
@@ -758,7 +863,13 @@ def test_config_updated_without_login_ui_endpoints_interface(
             },
         },
         "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
+            "jwks": {
+                "broadcast_keys": [
+                    "hydra.openid.id-token",
+                    "hydra.jwt.access-token",
+                ],
+            },
         },
     }
 
@@ -798,6 +909,13 @@ def test_config_updated_with_login_ui_endpoints_interface(
                 },
             },
         },
+        "strategies": {
+            "access_token": "jwt",
+            "jwt": {
+                "scope_claim": "list",
+            },
+            "scope": "exact",
+        },
         "urls": {
             "consent": login_databag["consent_url"],
             "error": login_databag["oidc_error_url"],
@@ -810,7 +928,13 @@ def test_config_updated_with_login_ui_endpoints_interface(
             },
         },
         "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
+            "jwks": {
+                "broadcast_keys": [
+                    "hydra.openid.id-token",
+                    "hydra.jwt.access-token",
+                ],
+            },
         },
     }
 
@@ -851,6 +975,13 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
                 },
             },
         },
+        "strategies": {
+            "access_token": "jwt",
+            "jwt": {
+                "scope_claim": "list",
+            },
+            "scope": "exact",
+        },
         "urls": {
             "consent": "http://default-url.com/consent",
             "error": "http://default-url.com/oidc_error",
@@ -863,7 +994,13 @@ def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
             },
         },
         "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]}
+            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
+            "jwks": {
+                "broadcast_keys": [
+                    "hydra.openid.id-token",
+                    "hydra.jwt.access-token",
+                ],
+            },
         },
     }
 

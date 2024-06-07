@@ -9,6 +9,11 @@ options:
       Available values are: panic, fatal, error, warn, info, debug, and trace.
     type: string
     default: "info"
+  jwt_access_tokens:
+    description:
+      Issue JWT access tokens, defaults to True. If set to False, access tokens will be opaque.
+    type: boolean
+    default: True
   dev:
     description:
       Run Hydra in dev mode, it is needed if HTTPS is not set up. This should only be used for development purposes.
