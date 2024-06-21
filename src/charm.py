@@ -333,6 +333,15 @@ class HydraCharm(CharmBase):
         return normalise_url(url) if url else None
 
     @property
+    def _internal_url(self) -> Optional[str]:
+        host = self.internal_ingress.external_host
+        return (
+            f"{self.internal_ingress.scheme}://{host}/{self.model.name}-{self.model.app.name}"
+            if host
+            else None
+        )
+
+    @property
     def _tracing_ready(self) -> bool:
         return self.tracing.is_ready()
 
@@ -546,17 +555,12 @@ class HydraCharm(CharmBase):
         logger.info("Sending endpoints info")
 
         admin_endpoint = (
-            self._admin_url
+            self._internal_url
             or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}"
         )
         public_endpoint = (
-            self._public_url
+            self._internal_url
             or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}"
-        )
-
-        admin_endpoint, public_endpoint = (
-            admin_endpoint.replace("https", "http"),
-            public_endpoint.replace("https", "http"),
         )
 
         self.endpoints_provider.send_endpoint_relation_data(admin_endpoint, public_endpoint)
@@ -990,16 +994,20 @@ class HydraCharm(CharmBase):
         return "relation_id" in client.get("metadata", {})
 
     def _update_oauth_endpoint_info(self, event: RelationEvent) -> None:
-        if not self.admin_ingress.url or not self.public_ingress.url:
+        if not self.public_ingress.url:
             event.defer()
-            logger.info("Ingress URL not available. Deferring the event.")
+            logger.info("Public Ingress URL not available. Deferring the event.")
             return
+
+        internal_api = self._internal_url or normalise_url(
+            f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}"
+        )
 
         self.oauth.set_provider_info_in_relation_data(
             issuer_url=self._public_url,
             authorization_endpoint=join(self._public_url, "oauth2/auth"),
             token_endpoint=join(self._public_url, "oauth2/token"),
-            introspection_endpoint=join(self._admin_url, "admin/oauth2/introspect"),
+            introspection_endpoint=join(internal_api, "admin/oauth2/introspect"),
             userinfo_endpoint=join(self._public_url, "userinfo"),
             jwks_endpoint=join(self._public_url, ".well-known/jwks.json"),
             scope=" ".join(SUPPORTED_SCOPES),
@@ -1048,7 +1056,7 @@ class HydraCharm(CharmBase):
         # and config-change
         if self.internal_ingress.is_ready():
             self.internal_ingress.submit_to_traefik(self._internal_ingress_config)
-            self._update_kratos_endpoints_relation_data(event)
+            self._update_hydra_endpoints_relation_data(event)
 
     @property
     def _internal_ingress_config(self) -> dict:
