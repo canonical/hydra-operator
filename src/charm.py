@@ -41,6 +41,7 @@ from charms.traefik_k8s.v2.ingress import (
     IngressPerAppRequirer,
     IngressPerAppRevokedEvent,
 )
+from charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer
 from jinja2 import Template
 from ops.charm import (
     ActionEvent,
@@ -51,6 +52,7 @@ from ops.charm import (
     RelationCreatedEvent,
     RelationDepartedEvent,
     RelationEvent,
+    RelationJoinedEvent,
     WorkloadEvent,
 )
 from ops.main import main
@@ -65,6 +67,7 @@ from ops.model import (
 )
 from ops.pebble import ChangeError, Error, ExecError, Layer
 
+from constants import INTERNAL_INGRESS_RELATION_NAME
 from hydra_cli import HydraCLI
 from utils import normalise_url, remove_none_values
 
@@ -131,6 +134,16 @@ class HydraCharm(CharmBase):
             strip_prefix=True,
             redirect_https=False,
         )
+
+        # -- ingress via raw traefik_route
+        # TraefikRouteRequirer expects an existing relation to be passed as part of the constructor,
+        # so this may be none. Rely on `self.ingress.is_ready` later to check
+        self.internal_ingress = TraefikRouteRequirer(
+            self,
+            self.model.get_relation(INTERNAL_INGRESS_RELATION_NAME),
+            INTERNAL_INGRESS_RELATION_NAME,
+        )  # type: ignore
+
         self.oauth = OAuthProvider(self)
 
         self.login_ui_endpoints = LoginUIEndpointsRequirer(
@@ -228,6 +241,17 @@ class HydraCharm(CharmBase):
             self.loki_consumer.on.promtail_digest_error,
             self._promtail_error,
         )
+        self.framework.observe(
+            self.on[INTERNAL_INGRESS_RELATION_NAME].relation_joined, self._configure_ingress
+        )
+        self.framework.observe(
+            self.on[INTERNAL_INGRESS_RELATION_NAME].relation_changed, self._configure_ingress
+        )
+        self.framework.observe(
+            self.on[INTERNAL_INGRESS_RELATION_NAME].relation_broken, self._configure_ingress
+        )
+        self.framework.observe(self.on.leader_elected, self._configure_ingress)
+        self.framework.observe(self.on.config_changed, self._configure_ingress)
 
     @property
     def _hydra_service_params(self) -> str:
@@ -313,6 +337,93 @@ class HydraCharm(CharmBase):
     def _admin_url(self) -> Optional[str]:
         url = self.admin_ingress.url
         return normalise_url(url) if url else None
+
+    @property
+    def _internal_url(self) -> Optional[str]:
+        host = self.internal_ingress.external_host
+        return (
+            f"{self.internal_ingress.scheme}://{host}/{self.model.name}-{self.model.app.name}"
+            if host
+            else None
+        )
+
+    @property
+    def _internal_ingress_config(self) -> dict:
+        """Build a raw ingress configuration for Traefik."""
+        # The path prefix is the same as in ingress per app
+        external_path = f"{self.model.name}-{self.model.app.name}"
+
+        middlewares = {
+            f"juju-sidecar-noprefix-{self.model.name}-{self.model.app.name}": {
+                "stripPrefix": {"forceSlash": False, "prefixes": [f"/{external_path}"]},
+            },
+        }
+
+        routers = {
+            "juju-{}-{}-admin-api-router".format(self.model.name, self.model.app.name): {
+                "entryPoints": ["web"],
+                "rule": f"PathPrefix(`/{external_path}/admin`)",
+                "middlewares": list(middlewares.keys()),
+                "service": f"juju-{self.model.name}-{self.app.name}-admin-api-service",
+            },
+            f"juju-{self.model.name}-{self.model.app.name}-admin-api-router-tls": {
+                "entryPoints": ["websecure"],
+                "rule": f"PathPrefix(`/{external_path}/admin`)",
+                "middlewares": list(middlewares.keys()),
+                "service": f"juju-{self.model.name}-{self.app.name}-admin-api-service",
+                "tls": {
+                    "domains": [
+                        {
+                            "main": self.internal_ingress.external_host,
+                            "sans": [f"*.{self.internal_ingress.external_host}"],
+                        },
+                    ],
+                },
+            },
+            f"juju-{self.model.name}-{self.model.app.name}-public-api-router": {
+                "entryPoints": ["web"],
+                "rule": f"PathPrefix(`/{external_path}`)",
+                "middlewares": list(middlewares.keys()),
+                "service": f"juju-{self.model.name}-{self.app.name}-public-api-service",
+            },
+            f"juju-{self.model.name}-{self.model.app.name}-public-api-router-tls": {
+                "entryPoints": ["websecure"],
+                "rule": f"PathPrefix(`/{external_path}`)",
+                "middlewares": list(middlewares.keys()),
+                "service": f"juju-{self.model.name}-{self.app.name}-public-api-service",
+                "tls": {
+                    "domains": [
+                        {
+                            "main": self.internal_ingress.external_host,
+                            "sans": [f"*.{self.internal_ingress.external_host}"],
+                        },
+                    ],
+                },
+            },
+        }
+
+        services = {
+            f"juju-{self.model.name}-{self.app.name}-admin-api-service": {
+                "loadBalancer": {
+                    "servers": [
+                        {
+                            "url": f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}"
+                        }
+                    ]
+                }
+            },
+            f"juju-{self.model.name}-{self.app.name}-public-api-service": {
+                "loadBalancer": {
+                    "servers": [
+                        {
+                            "url": f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}"
+                        }
+                    ]
+                }
+            },
+        }
+
+        return {"http": {"routers": routers, "services": services, "middlewares": middlewares}}
 
     @property
     def _tracing_ready(self) -> bool:
@@ -1008,6 +1119,30 @@ class HydraCharm(CharmBase):
 
     def _promtail_error(self, event: PromtailDigestError) -> None:
         logger.error(event.message)
+
+    def _configure_ingress(self, event: HookEvent) -> None:
+        """Since :class:`TraefikRouteRequirer` may not have been constructed with an existing
+        relation if a :class:`RelationJoinedEvent` comes through during the charm lifecycle, if we
+        get one here, we should recreate it, but OF will give us grief about "two objects claiming
+        to be ...", so manipulate its private `_relation` variable instead.
+
+        Args:
+            event: a :class:`HookEvent` to signal a change we may need to respond to.
+        """
+        if not self.unit.is_leader():
+            return
+
+        # If it's a RelationJoinedEvent, set it in the ingress object
+        if isinstance(event, RelationJoinedEvent):
+            self.internal_ingress._relation = event.relation
+
+        # No matter what, check readiness -- this blindly checks whether `ingress._relation` is not
+        # None, so it overlaps a little with the above, but works as expected on leader elections
+        # and config-change
+        if self.internal_ingress.is_ready():
+            self.internal_ingress.submit_to_traefik(self._internal_ingress_config)
+            self._update_hydra_endpoints_relation_data(event)
+            self._update_oauth_endpoint_info(event)
 
 
 if __name__ == "__main__":
