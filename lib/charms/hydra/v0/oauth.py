@@ -57,7 +57,7 @@ from typing import Dict, List, Mapping, Optional
 import jsonschema
 from ops.charm import CharmBase, RelationBrokenEvent, RelationChangedEvent, RelationCreatedEvent
 from ops.framework import EventBase, EventSource, Handle, Object, ObjectEvents
-from ops.model import Relation, Secret, TooManyRelatedAppsError
+from ops.model import Relation, Secret, SecretNotFoundError, TooManyRelatedAppsError
 
 # The unique Charmhub library identifier, never change it
 LIBID = "a3a301e325e34aac80a2d633ef61fe97"
@@ -67,7 +67,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 9
+LIBPATCH = 10
 
 PYDEPS = ["jsonschema"]
 
@@ -748,8 +748,12 @@ class OAuthProvider(OAuthRelation):
         return juju_secret
 
     def _delete_juju_secret(self, relation: Relation) -> None:
-        secret = self.model.get_secret(label=self._get_secret_label(relation))
-        secret.remove_all_revisions()
+        try:
+            secret = self.model.get_secret(label=self._get_secret_label(relation))
+        except SecretNotFoundError:
+            return
+        else:
+            secret.remove_all_revisions()
 
     def set_provider_info_in_relation_data(
         self,

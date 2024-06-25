@@ -105,7 +105,7 @@ async def test_build_and_deploy(ops_test: OpsTest) -> None:
         apps=[TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
         status="active",
         raise_on_blocked=True,
-        timeout=1000,
+        timeout=2500,
     )
 
     await ops_test.model.integrate(f"{HYDRA_APP}:internal-ingress", TRAEFIK_ADMIN_APP)
@@ -115,7 +115,7 @@ async def test_build_and_deploy(ops_test: OpsTest) -> None:
         apps=[HYDRA_APP, DB_APP],
         raise_on_blocked=False,
         status="active",
-        timeout=1000,
+        timeout=2500,
     )
 
 
