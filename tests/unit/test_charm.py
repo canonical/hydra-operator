@@ -13,6 +13,8 @@ from ops.pebble import ExecError, TimeoutError
 from ops.testing import Harness
 from test_oauth_requirer import CLIENT_CONFIG  # type: ignore
 
+from constants import INTERNAL_INGRESS_RELATION_NAME
+
 CONTAINER_NAME = "hydra"
 DB_USERNAME = "test-username"
 DB_PASSWORD = "test-password"
@@ -44,6 +46,24 @@ def setup_ingress_relation(harness: Harness, type: str) -> int:
         f"{type}-traefik",
         {"ingress": json.dumps({"url": f"http://{type}:80/{harness.model.name}-hydra"})},
     )
+    return relation_id
+
+
+def setup_internal_ingress_relation(harness: Harness, type: str) -> int:
+    relation_id = harness.add_relation(
+        f"{INTERNAL_INGRESS_RELATION_NAME}",
+        f"{type}-traefik",
+    )
+    harness.add_relation_unit(
+        relation_id,
+        f"{type}-traefik/0",
+    )
+    harness.update_relation_data(
+        relation_id,
+        f"{type}-traefik",
+        {"external_host": "test.staging.canonical.com", "scheme": "https"},
+    )
+
     return relation_id
 
 
@@ -487,6 +507,150 @@ def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness
     assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
 
 
+def test_hydra_endpoint_info_relation_data_with_internal_ingress_relation_joined(
+    harness: Harness,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_internal_ingress_relation(harness, "admin")
+
+    hydra_endpoint_info_relation_id = harness.add_relation("hydra-endpoint-info", "kratos")
+    harness.add_relation_unit(hydra_endpoint_info_relation_id, "kratos/0")
+
+    ingress_url = f"{harness.charm.internal_ingress.scheme}://{harness.charm.internal_ingress.external_host}/{harness.model.name}-{harness.model.app.name}"
+
+    expected_data = {
+        "admin_endpoint": ingress_url,
+        "public_endpoint": ingress_url,
+    }
+
+    assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
+
+
+def test_hydra_endpoint_info_relation_data_with_internal_ingress_relation_changed(
+    harness: Harness,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id = setup_internal_ingress_relation(harness, "admin")
+
+    hydra_endpoint_info_relation_id = harness.add_relation("hydra-endpoint-info", "kratos")
+    harness.add_relation_unit(hydra_endpoint_info_relation_id, "kratos/0")
+
+    url_change = "new-test.staging.canonical.com"
+    harness.update_relation_data(
+        relation_id,
+        "admin-traefik",
+        {"external_host": url_change, "scheme": "https"},
+    )
+
+    ingress_url = f"{harness.charm.internal_ingress.scheme}://{url_change}/{harness.model.name}-{harness.model.app.name}"
+
+    expected_data = {
+        "admin_endpoint": ingress_url,
+        "public_endpoint": ingress_url,
+    }
+
+    assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
+
+
+def test_hydra_endpoint_info_relation_data_with_internal_ingress_relation_broken(
+    harness: Harness,
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    relation_id = setup_internal_ingress_relation(harness, "admin")
+
+    hydra_endpoint_info_relation_id = harness.add_relation("hydra-endpoint-info", "kratos")
+    harness.add_relation_unit(hydra_endpoint_info_relation_id, "kratos/0")
+
+    harness.remove_relation(relation_id)
+
+    expected_data = {
+        "admin_endpoint": "http://hydra.testing.svc.cluster.local:4445",
+        "public_endpoint": "http://hydra.testing.svc.cluster.local:4444",
+    }
+
+    assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
+
+
+def test_oauth_provider_info_with_internal_ingress_relation_joined(
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_ingress_relation(harness, "public")
+    setup_oauth_relation(harness)
+    setup_internal_ingress_relation(harness, "admin")
+
+    ingress_url = f"{harness.charm.internal_ingress.scheme}://{harness.charm.internal_ingress.external_host}/{harness.model.name}-{harness.model.app.name}"
+
+    mocked_set_provider_info.assert_called_with(
+        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
+        introspection_endpoint=f"{ingress_url}/admin/oauth2/introspect",
+        issuer_url="https://public/testing-hydra",
+        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="https://public/testing-hydra/oauth2/token",
+        userinfo_endpoint="https://public/testing-hydra/userinfo",
+        jwt_access_token=True,
+    )
+
+
+def test_oauth_provider_info_with_internal_ingress_relation_changed(
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_ingress_relation(harness, "public")
+    setup_oauth_relation(harness)
+    relation_id = setup_internal_ingress_relation(harness, "admin")
+
+    url_change = "new-test.staging.canonical.com"
+    harness.update_relation_data(
+        relation_id,
+        "admin-traefik",
+        {"external_host": url_change, "scheme": "https"},
+    )
+
+    ingress_url = f"{harness.charm.internal_ingress.scheme}://{url_change}/{harness.model.name}-{harness.model.app.name}"
+
+    mocked_set_provider_info.assert_called_with(
+        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
+        introspection_endpoint=f"{ingress_url}/admin/oauth2/introspect",
+        issuer_url="https://public/testing-hydra",
+        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="https://public/testing-hydra/oauth2/token",
+        userinfo_endpoint="https://public/testing-hydra/userinfo",
+        jwt_access_token=True,
+    )
+
+
+def test_oauth_provider_info_with_internal_ingress_relation_broken(
+    harness: Harness, mocked_set_provider_info: MagicMock
+) -> None:
+    harness.set_can_connect(CONTAINER_NAME, True)
+
+    setup_ingress_relation(harness, "public")
+    setup_oauth_relation(harness)
+
+    relation_id = setup_internal_ingress_relation(harness, "admin")
+
+    harness.remove_relation(relation_id)
+
+    mocked_set_provider_info.assert_called_with(
+        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
+        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
+        issuer_url="https://public/testing-hydra",
+        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
+        scope="openid profile email phone",
+        token_endpoint="https://public/testing-hydra/oauth2/token",
+        userinfo_endpoint="https://public/testing-hydra/userinfo",
+        jwt_access_token=True,
+    )
+
+
 def test_oauth_provider_info_in_databag_when_jwt_at(
     harness: Harness, mocked_set_provider_info: MagicMock
 ) -> None:
@@ -494,12 +658,11 @@ def test_oauth_provider_info_in_databag_when_jwt_at(
 
     harness.update_config({"jwt_access_tokens": True})
     setup_ingress_relation(harness, "public")
-    setup_ingress_relation(harness, "admin")
     setup_oauth_relation(harness)
 
     mocked_set_provider_info.assert_called_with(
         authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
         issuer_url="https://public/testing-hydra",
         jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
         scope="openid profile email phone",
@@ -516,12 +679,11 @@ def test_provider_info_called_when_oauth_relation_then_jwt_at(
 
     setup_oauth_relation(harness)
     setup_ingress_relation(harness, "public")
-    setup_ingress_relation(harness, "admin")
     harness.update_config({"jwt_access_tokens": False})
 
     mocked_set_provider_info.assert_called_with(
         authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
         issuer_url="https://public/testing-hydra",
         jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
         scope="openid profile email phone",
@@ -534,7 +696,7 @@ def test_provider_info_called_when_oauth_relation_then_jwt_at(
 
     mocked_set_provider_info.assert_called_with(
         authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
         issuer_url="https://public/testing-hydra",
         jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
         scope="openid profile email phone",
@@ -550,12 +712,11 @@ def test_provider_info_in_databag_when_ingress_then_oauth_relation(
     harness.set_can_connect(CONTAINER_NAME, True)
 
     setup_ingress_relation(harness, "public")
-    setup_ingress_relation(harness, "admin")
     setup_oauth_relation(harness)
 
     mocked_set_provider_info.assert_called_with(
         authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
         issuer_url="https://public/testing-hydra",
         jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
         scope="openid profile email phone",
@@ -572,11 +733,10 @@ def test_provider_info_called_when_oauth_relation_then_ingress(
 
     setup_oauth_relation(harness)
     setup_ingress_relation(harness, "public")
-    setup_ingress_relation(harness, "admin")
 
-    mocked_set_provider_info.assert_called_once_with(
+    mocked_set_provider_info.assert_called_with(
         authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="https://admin/testing-hydra/admin/oauth2/introspect",
+        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
         issuer_url="https://public/testing-hydra",
         jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
         scope="openid profile email phone",
