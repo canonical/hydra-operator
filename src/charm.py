@@ -67,9 +67,10 @@ from ops.model import (
 )
 from ops.pebble import ChangeError, Error, ExecError, Layer
 
+from cli import CommandLine, OAuthClient
 from constants import INTERNAL_INGRESS_RELATION_NAME
 from hydra_cli import HydraCLI
-from utils import normalise_url, remove_none_values
+from utils import normalise_url
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ class HydraCharm(CharmBase):
         self._hydra_cli = HydraCLI(
             f"http://localhost:{HYDRA_ADMIN_PORT}", self._container, self._hydra_config_path
         )
+        self._cli = CommandLine(self._container)
 
         self.service_patcher = KubernetesServicePatch(
             self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
@@ -216,6 +218,8 @@ class HydraCharm(CharmBase):
             self.on[self._login_ui_relation_name].relation_changed,
             self._handle_status_update_config,
         )
+
+        # actions
         self.framework.observe(
             self.on.create_oauth_client_action, self._on_create_oauth_client_action
         )
@@ -872,35 +876,12 @@ class HydraCharm(CharmBase):
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
-        event.log("Creating client")
-
-        cmd_kwargs = remove_none_values({
-            "audience": event.params.get("audience"),
-            "grant_type": event.params.get("grant-types"),
-            "redirect_uri": event.params.get("redirect-uris"),
-            "response_type": event.params.get("response-types"),
-            "scope": event.params.get("scope"),
-            "client_secret": event.params.get("client-secret"),
-            "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method"),
-        })
-
-        try:
-            client = self._hydra_cli.create_client(**cmd_kwargs)
-        except Error as e:
-            event.fail(f"Something went wrong when trying to run the command: {e}")
+        oauth_client = OAuthClient(**event.params)
+        if not (created_client := self._cli.create_oauth_client(oauth_client)):
+            event.fail("Failed to create the OAuth client. Please check the juju logs")
             return
 
-        event.log("Successfully created client")
-        event.set_results({
-            "client-id": client.get("client_id"),
-            "client-secret": client.get("client_secret"),
-            "audience": client.get("audience"),
-            "grant-types": ", ".join(client.get("grant_types", [])),
-            "redirect-uris": ", ".join(client.get("redirect_uris", [])),
-            "response-types": ", ".join(client.get("response_types", [])),
-            "scope": client.get("scope"),
-            "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
-        })
+        event.set_results(created_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_get_oauth_client_info_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
@@ -908,27 +889,11 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        event.log(f"Getting client: {client_id}")
-
-        try:
-            client = self._hydra_cli.get_client(client_id)
-        except ExecError as err:
-            if err.stderr and "Unable to locate the resource" in err.stderr:
-                event.fail(f"No such client: {client_id}")
-                return
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            event.fail(f"Something went wrong when trying to run the command: {e}")
+        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+            event.fail("Failed to get the OAuth client. Please check the juju logs")
             return
 
-        event.log(f"Successfully fetched client: {client_id}")
-        # We dump everything in the result, but we have to first convert it to the
-        # format the juju action expects
-        event.set_results({
-            k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v
-            for k, v in client.items()
-        })
+        event.set_results(oauth_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
@@ -936,52 +901,27 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        try:
-            client = self._hydra_cli.get_client(client_id)
-        except ExecError as err:
-            if err.stderr and "Unable to locate the resource" in err.stderr:
-                event.fail(f"No such client: {client_id}")
-                return
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            logger.error(f"Something went wrong when trying to run the command: {e}")
+        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+            event.fail(f"Failed to get the OAuth client {client_id}. Please check the juju logs")
             return
 
-        if self._is_oauth_relation_client(client):
+        if oauth_client.managed_by_integration:
             event.fail(
-                f"Cannot update client `{client_id}`, it is managed from an oauth relation."
+                f"Cannot update the OAuth client {client_id} because it's managed by an `oauth` integration"
             )
             return
 
-        cmd_kwargs = remove_none_values({
-            "audience": event.params.get("audience") or client.get("audience"),
-            "grant_type": event.params.get("grant-types") or client.get("grant_types"),
-            "redirect_uri": event.params.get("redirect-uris") or client.get("redirect_uris"),
-            "response_type": event.params.get("response-types") or client.get("response_types"),
-            "scope": event.params.get("scope") or client["scope"].split(" "),
-            "client_secret": event.params.get("client-secret") or client.get("client_secret"),
-            "token_endpoint_auth_method": event.params.get("token-endpoint-auth-method")
-            or client.get("token_endpoint_auth_method"),
+        oauth_client = OAuthClient(**{
+            **oauth_client.model_dump(by_alias=True, exclude_none=True),
+            **event.params,
         })
-        event.log(f"Updating client: {client_id}")
-        try:
-            client = self._hydra_cli.update_client(client_id, **cmd_kwargs)
-        except Error as e:
-            event.fail(f"Something went wrong when trying to run the command: {e}")
+        if not (updated_oauth_client := self._cli.update_oauth_client(oauth_client)):
+            event.fail(
+                f"Failed to update the OAuth client {client_id}. Please check the juju logs"
+            )
             return
 
-        event.log(f"Successfully updated client: {client_id}")
-        event.set_results({
-            "client-id": client.get("client_id"),
-            "client-secret": client.get("client_secret"),
-            "audience": client.get("audience"),
-            "grant-types": ", ".join(client.get("grant_types", [])),
-            "redirect-uris": ", ".join(client.get("redirect_uris", [])),
-            "response-types": ", ".join(client.get("response_types", [])),
-            "scope": client.get("scope"),
-            "token-endpoint-auth-method": client.get("token_endpoint_auth_method"),
-        })
+        event.set_results(updated_oauth_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
@@ -989,49 +929,36 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        try:
-            client = self._hydra_cli.get_client(client_id)
-        except ExecError as err:
-            if err.stderr and "Unable to locate the resource" in err.stderr:
-                event.fail(f"No such client: {client_id}")
-                return
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            logger.error(f"Something went wrong when trying to run the command: {e}")
+        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+            event.fail(f"Failed to get the OAuth client {client_id}. Please check the juju logs")
             return
 
-        if self._is_oauth_relation_client(client):
+        if oauth_client.managed_by_integration:
             event.fail(
-                f"Cannot delete client `{client_id}`, it is managed from an oauth relation. "
-                "To delete it, remove the relation."
+                f"Cannot delete the OAuth client {client_id} because it's managed by an `oauth` integration. "
+                f"Please remove the integration first to delete it."
             )
             return
 
-        event.log(f"Deleting client: {client_id}")
-        try:
-            self._hydra_cli.delete_client(client_id)
-        except Error as e:
-            event.fail(f"Something went wrong when trying to run the command: {e}")
-            return
+        if not (res := self._cli.delete_oauth_client(client_id)):
+            event.fail(
+                f"Failed to delete the OAuth client {client_id}. Please check the juju logs"
+            )
 
-        event.log(f"Successfully deleted client: {client_id}")
-        event.set_results({"client-id": client_id})
+        event.set_results({"client-id": res})
 
     def _on_list_oauth_clients_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
-        event.log("Fetching clients")
-        try:
-            clients = self._hydra_cli.list_clients()
-        except Error as e:
-            event.fail(f"Something went wrong when trying to run the command: {e}")
+        if not (oauth_clients := self._cli.list_oauth_clients()):
+            event.fail("Failed to list OAuth clients. Please check the juju logs")
             return
 
-        event.log("Successfully listed clients")
-        event.set_results({str(i): c["client_id"] for i, c in enumerate(clients["items"])})
+        event.set_results({
+            str(idx): client.client_id for idx, client in enumerate(oauth_clients, start=1)
+        })
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
@@ -1039,43 +966,24 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        event.log(f"Deleting all access tokens for client: {client_id}")
-        try:
-            client = self._hydra_cli.delete_client_access_tokens(client_id)
-        except ExecError as err:
-            if err.stderr and "Unable to locate the resource" in err.stderr:
-                event.fail(f"No such client: {client_id}")
-                return
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            event.fail(f"Something went wrong when trying to run the command: {e}")
+        if not (res := self._cli.delete_oauth_client_access_tokens(client_id)):
+            event.fail(
+                f"Failed to revoke the access tokens of the OAuth client {client_id}. Please check juju logs"
+            )
             return
 
-        event.log(f"Successfully deleted all access tokens for client: {client_id}")
-        event.set_results({"client-id": client})
+        event.set_results({"client-id": res})
 
     def _on_rotate_key_action(self, event: ActionEvent) -> None:
         if not self._hydra_service_is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
-        event.log("Rotating keys")
-        try:
-            jwk = self._hydra_cli.create_jwk(alg=event.params["alg"])
-        except ExecError as err:
-            event.fail(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            return
-        except Error as e:
-            event.fail(f"Something went wrong when trying to run the command: {e}")
+        if not (jwk_id := self._cli.create_jwk(algorithm=event.params["algorithm"])):
+            event.fail("Failed to rotate the JWK. Please check the juju logs")
             return
 
-        event.log("Successfully created new key")
-        event.set_results({"new-key-id": jwk["keys"][0]["kid"]})
-
-    def _is_oauth_relation_client(self, client: Dict) -> bool:
-        """Check whether a client is managed from an oauth relation."""
-        return "relation_id" in client.get("metadata", {})
+        event.set_results({"new-key-id": jwk_id})
 
     def _update_oauth_endpoint_info(self, event: RelationEvent) -> None:
         if not self.public_ingress.url:
