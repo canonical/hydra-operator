@@ -91,7 +91,7 @@ juju model-config logging-config="<root>=INFO;unit=DEBUG"
 # Deploy postgresql-k8s charm
 juju deploy postgresql-k8s --channel edge --trust
 # Deploy the charm
-juju deploy ./hydra*.charm --resource oci-image=$(yq eval '.resources.oci-image.upstream-source' metadata.yaml)
+juju deploy ./hydra*.charm --resource oci-image=$(yq eval '.resources.oci-image.upstream-source' charmcraft.yaml)
 # Add integration
 juju integrate postgresql-k8s hydra
 ```
