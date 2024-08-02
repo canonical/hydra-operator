@@ -1,5 +1,5 @@
 pytest
 juju
 pytest-operator==0.35.0
-PyJWT==2.8.0
+PyJWT==2.9.0
 -r requirements.txt
