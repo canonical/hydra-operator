@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
-#
+
 # Learn more at: https://juju.is/docs/sdk
 
 """A Juju charm for Ory Hydra."""
 
-import json
 import logging
 from os.path import join
-from pathlib import Path
 from secrets import token_hex
-from typing import Any, Dict, Optional
+from typing import Any
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
@@ -27,13 +25,9 @@ from charms.hydra.v0.oauth import (
     OAuthProvider,
 )
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
-    LoginUIEndpointsRelationDataMissingError,
-    LoginUIEndpointsRelationMissingError,
     LoginUIEndpointsRequirer,
-    LoginUITooManyRelatedAppsError,
 )
 from charms.loki_k8s.v0.loki_push_api import LogProxyConsumer, PromtailDigestError
-from charms.observability_libs.v0.kubernetes_service_patch import KubernetesServicePatch
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v2.ingress import (
@@ -42,128 +36,130 @@ from charms.traefik_k8s.v2.ingress import (
     IngressPerAppRevokedEvent,
 )
 from charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer
-from jinja2 import Template
 from ops.charm import (
     ActionEvent,
     CharmBase,
     ConfigChangedEvent,
     HookEvent,
     LeaderElectedEvent,
-    RelationCreatedEvent,
-    RelationDepartedEvent,
+    RelationBrokenEvent,
     RelationEvent,
     RelationJoinedEvent,
     WorkloadEvent,
 )
 from ops.main import main
-from ops.model import (
-    ActiveStatus,
-    BlockedStatus,
-    MaintenanceStatus,
-    Relation,
-    Secret,
-    SecretNotFoundError,
-    WaitingStatus,
-)
-from ops.pebble import ChangeError, Error, ExecError, Layer
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
+from ops.pebble import Layer
 
 from cli import CommandLine, OAuthClient
-from constants import INTERNAL_INGRESS_RELATION_NAME
-from hydra_cli import HydraCLI
-from utils import normalise_url
+from configs import CharmConfig, ConfigFile
+from constants import (
+    ADMIN_INGRESS_INTEGRATION_NAME,
+    ADMIN_PORT,
+    COOKIE_SECRET_KEY,
+    COOKIE_SECRET_LABEL,
+    DATABASE_INTEGRATION_NAME,
+    DEFAULT_OAUTH_SCOPES,
+    GRAFANA_DASHBOARD_INTEGRATION_NAME,
+    INTERNAL_INGRESS_INTEGRATION_NAME,
+    LOG_DIR,
+    LOG_FILE,
+    LOGIN_UI_INTEGRATION_NAME,
+    LOKI_API_PUSH_INTEGRATION_NAME,
+    PEER_INTEGRATION_NAME,
+    PROMETHEUS_SCRAPE_INTEGRATION_NAME,
+    PUBLIC_INGRESS_INTEGRATION_NAME,
+    PUBLIC_PORT,
+    SYSTEM_SECRET_KEY,
+    SYSTEM_SECRET_LABEL,
+    TEMPO_TRACING_INTEGRATION_NAME,
+    WORKLOAD_CONTAINER,
+)
+from exceptions import MigrationError, PebbleServiceError
+from integrations import (
+    DatabaseConfig,
+    InternalIngressData,
+    LoginUIEndpointData,
+    PeerData,
+    PublicIngressData,
+    TracingData,
+)
+from secret import Secrets
+from services import PebbleService, WorkloadService
+from utils import (
+    container_connectivity,
+    database_integration_exists,
+    leader_unit,
+    peer_integration_exists,
+)
 
 logger = logging.getLogger(__name__)
 
-EXTRA_USER_ROLES = "SUPERUSER"
-HYDRA_ADMIN_PORT = 4445
-HYDRA_PUBLIC_PORT = 4444
-SUPPORTED_SCOPES = ["openid", "profile", "email", "phone"]
-PEER = "hydra"
-LOG_LEVELS = ["panic", "fatal", "error", "warn", "info", "debug", "trace"]
-DB_MIGRATION_VERSION_KEY = "migration_version"
-COOKIE_SECRET_KEY = "cookie"
-COOKIE_SECRET_LABEL = "cookiesecret"
-SYSTEM_SECRET_KEY = "system"
-SYSTEM_SECRET_LABEL = "systemsecret"
-
 
 class HydraCharm(CharmBase):
-    """Charmed Ory Hydra."""
-
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
 
-        self._container_name = "hydra"
-        self._container = self.unit.get_container(self._container_name)
-        self._hydra_config_path = "/etc/config/hydra.yaml"
-        self._db_name = f"{self.model.name}_{self.app.name}"
-        self._db_relation_name = "pg-database"
-        self._login_ui_relation_name = "ui-endpoint-info"
-        self._prometheus_scrape_relation_name = "metrics-endpoint"
-        self._loki_push_api_relation_name = "logging"
-        self._grafana_dashboard_relation_name = "grafana-dashboard"
-        self._tracing_relation_name = "tracing"
-        self._hydra_service_command = "hydra serve all"
-        self._log_dir = Path("/var/log")
-        self._log_path = self._log_dir / "hydra.log"
+        self._container = self.unit.get_container(WORKLOAD_CONTAINER)
+        self.peer_data = PeerData(self.model)
+        self.secrets = Secrets(self.model)
+        self.charm_config = CharmConfig(self.config)
+        self._workload_service = WorkloadService(self.unit)
+        self._pebble_service = PebbleService(self.unit)
 
-        self._hydra_cli = HydraCLI(
-            f"http://localhost:{HYDRA_ADMIN_PORT}", self._container, self._hydra_config_path
-        )
         self._cli = CommandLine(self._container)
 
-        self.service_patcher = KubernetesServicePatch(
-            self, [("hydra-admin", HYDRA_ADMIN_PORT), ("hydra-public", HYDRA_PUBLIC_PORT)]
+        # self.service_patcher = KubernetesServicePatch(
+        #     self, [("hydra-admin", ADMIN_PORT), ("hydra-public", PUBLIC_PORT)]
+        # )
+
+        self.database_requirer = DatabaseRequires(
+            self,
+            relation_name=DATABASE_INTEGRATION_NAME,
+            database_name=f"{self.model.name}_{self.app.name}",
+            extra_user_roles="SUPERUSER",
         )
 
-        self.database = DatabaseRequires(
-            self,
-            relation_name=self._db_relation_name,
-            database_name=self._db_name,
-            extra_user_roles=EXTRA_USER_ROLES,
-        )
         self.admin_ingress = IngressPerAppRequirer(
             self,
-            relation_name="admin-ingress",
-            port=HYDRA_ADMIN_PORT,
+            relation_name=ADMIN_INGRESS_INTEGRATION_NAME,
+            port=ADMIN_PORT,
             strip_prefix=True,
             redirect_https=False,
         )
         self.public_ingress = IngressPerAppRequirer(
             self,
-            relation_name="public-ingress",
-            port=HYDRA_PUBLIC_PORT,
+            relation_name=PUBLIC_INGRESS_INTEGRATION_NAME,
+            port=PUBLIC_PORT,
             strip_prefix=True,
             redirect_https=False,
         )
 
-        # -- ingress via raw traefik_route
-        # TraefikRouteRequirer expects an existing relation to be passed as part of the constructor,
-        # so this may be none. Rely on `self.ingress.is_ready` later to check
+        # ingress via raw traefik routing configuration
         self.internal_ingress = TraefikRouteRequirer(
             self,
-            self.model.get_relation(INTERNAL_INGRESS_RELATION_NAME),
-            INTERNAL_INGRESS_RELATION_NAME,
-        )  # type: ignore
-
-        self.oauth = OAuthProvider(self)
-
-        self.login_ui_endpoints = LoginUIEndpointsRequirer(
-            self, relation_name=self._login_ui_relation_name
+            self.model.get_relation(INTERNAL_INGRESS_INTEGRATION_NAME),
+            INTERNAL_INGRESS_INTEGRATION_NAME,
         )
 
-        self.endpoints_provider = HydraEndpointsProvider(self)
+        self.oauth_provider = OAuthProvider(self)
+
+        self.login_ui_requirer = LoginUIEndpointsRequirer(
+            self, relation_name=LOGIN_UI_INTEGRATION_NAME
+        )
+
+        self.hydra_endpoints_provider = HydraEndpointsProvider(self)
 
         self.metrics_endpoint = MetricsEndpointProvider(
             self,
-            relation_name=self._prometheus_scrape_relation_name,
+            relation_name=PROMETHEUS_SCRAPE_INTEGRATION_NAME,
             jobs=[
                 {
                     "job_name": "hydra_metrics",
                     "metrics_path": "/admin/metrics/prometheus",
                     "static_configs": [
                         {
-                            "targets": [f"*:{HYDRA_ADMIN_PORT}"],
+                            "targets": [f"*:{ADMIN_PORT}"],
                         }
                     ],
                 }
@@ -172,54 +168,94 @@ class HydraCharm(CharmBase):
 
         self.loki_consumer = LogProxyConsumer(
             self,
-            log_files=[str(self._log_path)],
-            relation_name=self._loki_push_api_relation_name,
-            container_name=self._container_name,
+            log_files=[str(LOG_FILE)],
+            relation_name=LOKI_API_PUSH_INTEGRATION_NAME,
+            container_name=WORKLOAD_CONTAINER,
         )
 
         self._grafana_dashboards = GrafanaDashboardProvider(
-            self, relation_name=self._grafana_dashboard_relation_name
+            self,
+            relation_name=GRAFANA_DASHBOARD_INTEGRATION_NAME,
         )
 
-        self.tracing = TracingEndpointRequirer(
+        self.tracing_requirer = TracingEndpointRequirer(
             self,
-            relation_name=self._tracing_relation_name,
+            relation_name=TEMPO_TRACING_INTEGRATION_NAME,
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+
+        # database
         self.framework.observe(
-            self.endpoints_provider.on.ready, self._update_hydra_endpoints_relation_data
+            self.database_requirer.on.database_created, self._on_database_created
+        )
+        self.framework.observe(
+            self.database_requirer.on.endpoints_changed, self._on_database_changed
+        )
+        self.framework.observe(
+            self.on[DATABASE_INTEGRATION_NAME].relation_broken,
+            self._on_database_integration_broken,
         )
 
-        self.framework.observe(self.database.on.database_created, self._on_database_created)
-        self.framework.observe(self.database.on.endpoints_changed, self._on_database_changed)
-        self.framework.observe(self.on.run_migration_action, self._on_run_migration)
-        self.framework.observe(
-            self.on[self._db_relation_name].relation_departed, self._on_database_relation_departed
-        )
-
+        # admin ingress
         self.framework.observe(self.admin_ingress.on.ready, self._on_admin_ingress_ready)
         self.framework.observe(self.admin_ingress.on.revoked, self._on_ingress_revoked)
 
+        # public ingress
         self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
 
-        self.framework.observe(self.tracing.on.endpoint_changed, self._on_config_changed)
-        self.framework.observe(self.tracing.on.endpoint_removed, self._on_config_changed)
-
-        self.framework.observe(self.on.oauth_relation_created, self._on_oauth_relation_created)
-        self.framework.observe(self.oauth.on.client_created, self._on_client_created)
-        self.framework.observe(self.oauth.on.client_changed, self._on_client_changed)
-        self.framework.observe(self.oauth.on.client_deleted, self._on_client_deleted)
-
+        # internal ingress
         self.framework.observe(
-            self.on[self._login_ui_relation_name].relation_changed,
-            self._handle_status_update_config,
+            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_joined,
+            self._on_internal_ingress_joined,
+        )
+        self.framework.observe(
+            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_changed,
+            self._on_internal_ingress_changed,
+        )
+        self.framework.observe(
+            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_broken,
+            self._on_internal_ingress_changed,
+        )
+
+        # login-ui
+        self.framework.observe(
+            self.on[LOGIN_UI_INTEGRATION_NAME].relation_changed,
+            self._holistic_handler,
+        )
+
+        # hydra-endpoints
+        self.framework.observe(
+            self.hydra_endpoints_provider.on.ready, self._on_hydra_endpoints_ready
+        )
+
+        # oauth
+        self.framework.observe(self.on.oauth_relation_created, self._on_oauth_integration_created)
+        self.framework.observe(
+            self.oauth_provider.on.client_created, self._on_oauth_client_created
+        )
+        self.framework.observe(
+            self.oauth_provider.on.client_changed, self._on_oauth_client_changed
+        )
+        self.framework.observe(
+            self.oauth_provider.on.client_deleted, self._on_oauth_client_deleted
+        )
+
+        # tracing
+        self.framework.observe(self.tracing_requirer.on.endpoint_changed, self._on_config_changed)
+        self.framework.observe(self.tracing_requirer.on.endpoint_removed, self._on_config_changed)
+
+        # loki
+        self.framework.observe(
+            self.loki_consumer.on.promtail_digest_error,
+            self._promtail_error,
         )
 
         # actions
+        self.framework.observe(self.on.run_migration_action, self._on_run_migration)
         self.framework.observe(
             self.on.create_oauth_client_action, self._on_create_oauth_client_action
         )
@@ -241,460 +277,89 @@ class HydraCharm(CharmBase):
         )
         self.framework.observe(self.on.rotate_key_action, self._on_rotate_key_action)
 
-        self.framework.observe(
-            self.loki_consumer.on.promtail_digest_error,
-            self._promtail_error,
-        )
-        self.framework.observe(
-            self.on[INTERNAL_INGRESS_RELATION_NAME].relation_joined, self._configure_ingress
-        )
-        self.framework.observe(
-            self.on[INTERNAL_INGRESS_RELATION_NAME].relation_changed, self._configure_ingress
-        )
-        self.framework.observe(
-            self.on[INTERNAL_INGRESS_RELATION_NAME].relation_broken, self._configure_ingress
-        )
-        self.framework.observe(self.on.leader_elected, self._configure_ingress)
-        self.framework.observe(self.on.config_changed, self._configure_ingress)
+    @property
+    def _pebble_layer(self) -> Layer:
+        tracing_data = TracingData.load(self.tracing_requirer)
+        return self._pebble_service.render_pebble_layer(tracing_data)
 
     @property
-    def _hydra_service_params(self) -> str:
-        ret = ["--config", str(self._hydra_config_path)]
-        if self.config["dev"]:
-            logger.warning("Running Hydra in dev mode, don't do this in production")
-            ret.append("--dev")
-
-        return " ".join(ret)
-
-    @property
-    def _hydra_layer(self) -> Layer:
-        """Returns a pre-configured Pebble layer."""
-        layer_config = {
-            "summary": "hydra-operator layer",
-            "description": "pebble config layer for hydra-operator",
-            "services": {
-                self._container_name: {
-                    "override": "replace",
-                    "summary": "entrypoint of the hydra-operator image",
-                    "command": '/bin/sh -c "{} {} 2>&1 | tee -a {}"'.format(
-                        self._hydra_service_command,
-                        self._hydra_service_params,
-                        str(self._log_path),
-                    ),
-                    "startup": "disabled",
-                }
-            },
-            "checks": {
-                "ready": {
-                    "override": "replace",
-                    "http": {"url": f"http://localhost:{HYDRA_ADMIN_PORT}/health/ready"},
-                },
-            },
-        }
-
-        if self._tracing_ready:
-            layer_config["services"][self._container_name]["environment"] = {
-                "TRACING_PROVIDER": "otel",
-                "TRACING_PROVIDERS_OTLP_SERVER_URL": self._get_tracing_endpoint_info(),
-                "TRACING_PROVIDERS_OTLP_INSECURE": "true",
-                "TRACING_PROVIDERS_OTLP_SAMPLING_SAMPLING_RATIO": "1.0",
-            }
-
-        return Layer(layer_config)
-
-    @property
-    def _hydra_service_is_created(self) -> bool:
-        return (
-            self._container.can_connect()
-            and self._container_name in self._container.get_services()
-        )
-
-    @property
-    def _hydra_service_is_running(self) -> bool:
-        return (
-            self._hydra_service_is_created
-            and self._container.get_service(self._container_name).is_running()
-        )
-
-    @property
-    def _log_level(self) -> str:
-        return self.config["log_level"]
-
-    def _validate_config_log_level(self) -> bool:
-        is_valid = self._log_level in LOG_LEVELS
-        if not is_valid:
-            logger.info(f"Invalid configuration value for log_level: {self._log_level}")
-            self.unit.status = BlockedStatus("Invalid configuration value for log_level")
-        return is_valid
-
-    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
-        """Event Handler for config changed event."""
-        self._handle_status_update_config(event)
-        self._update_oauth_endpoint_info(event)
-
-    @property
-    def _public_url(self) -> Optional[str]:
-        url = self.public_ingress.url
-        return normalise_url(url) if url else None
-
-    @property
-    def _admin_url(self) -> Optional[str]:
-        url = self.admin_ingress.url
-        return normalise_url(url) if url else None
-
-    @property
-    def _internal_url(self) -> Optional[str]:
-        host = self.internal_ingress.external_host
-        return (
-            f"{self.internal_ingress.scheme}://{host}/{self.model.name}-{self.model.app.name}"
-            if host
-            else None
-        )
-
-    @property
-    def _internal_ingress_config(self) -> dict:
-        """Build a raw ingress configuration for Traefik."""
-        # The path prefix is the same as in ingress per app
-        external_path = f"{self.model.name}-{self.model.app.name}"
-
-        middlewares = {
-            f"juju-sidecar-noprefix-{self.model.name}-{self.model.app.name}": {
-                "stripPrefix": {"forceSlash": False, "prefixes": [f"/{external_path}"]},
-            },
-        }
-
-        routers = {
-            "juju-{}-{}-admin-api-router".format(self.model.name, self.model.app.name): {
-                "entryPoints": ["web"],
-                "rule": f"PathPrefix(`/{external_path}/admin`)",
-                "middlewares": list(middlewares.keys()),
-                "service": f"juju-{self.model.name}-{self.app.name}-admin-api-service",
-            },
-            f"juju-{self.model.name}-{self.model.app.name}-admin-api-router-tls": {
-                "entryPoints": ["websecure"],
-                "rule": f"PathPrefix(`/{external_path}/admin`)",
-                "middlewares": list(middlewares.keys()),
-                "service": f"juju-{self.model.name}-{self.app.name}-admin-api-service",
-                "tls": {
-                    "domains": [
-                        {
-                            "main": self.internal_ingress.external_host,
-                            "sans": [f"*.{self.internal_ingress.external_host}"],
-                        },
-                    ],
-                },
-            },
-            f"juju-{self.model.name}-{self.model.app.name}-public-api-router": {
-                "entryPoints": ["web"],
-                "rule": f"PathPrefix(`/{external_path}`)",
-                "middlewares": list(middlewares.keys()),
-                "service": f"juju-{self.model.name}-{self.app.name}-public-api-service",
-            },
-            f"juju-{self.model.name}-{self.model.app.name}-public-api-router-tls": {
-                "entryPoints": ["websecure"],
-                "rule": f"PathPrefix(`/{external_path}`)",
-                "middlewares": list(middlewares.keys()),
-                "service": f"juju-{self.model.name}-{self.app.name}-public-api-service",
-                "tls": {
-                    "domains": [
-                        {
-                            "main": self.internal_ingress.external_host,
-                            "sans": [f"*.{self.internal_ingress.external_host}"],
-                        },
-                    ],
-                },
-            },
-        }
-
-        services = {
-            f"juju-{self.model.name}-{self.app.name}-admin-api-service": {
-                "loadBalancer": {
-                    "servers": [
-                        {
-                            "url": f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}"
-                        }
-                    ]
-                }
-            },
-            f"juju-{self.model.name}-{self.app.name}-public-api-service": {
-                "loadBalancer": {
-                    "servers": [
-                        {
-                            "url": f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}"
-                        }
-                    ]
-                }
-            },
-        }
-
-        return {"http": {"routers": routers, "services": services, "middlewares": middlewares}}
-
-    @property
-    def _tracing_ready(self) -> bool:
-        return self.tracing.is_ready()
-
-    def _render_conf_file(self) -> str:
-        """Render the Hydra configuration file."""
-        with open("templates/hydra.yaml.j2", "r") as file:
-            template = Template(file.read())
-
-        secrets = self._get_secrets()
-        rendered = template.render(
-            cookie_secrets=[secrets["cookie"] if secrets else None],
-            system_secrets=[secrets["system"] if secrets else None],
-            log_level=self._log_level,
-            db_info=self._get_database_relation_info(),
-            consent_url=self._get_login_ui_endpoint_info("consent_url"),
-            error_url=self._get_login_ui_endpoint_info("oidc_error_url"),
-            login_url=self._get_login_ui_endpoint_info("login_url"),
-            device_verification_url=self._get_login_ui_endpoint_info("device_verification_url"),
-            post_device_done_url=self._get_login_ui_endpoint_info("post_device_done_url"),
-            hydra_public_url=self._public_url,
-            supported_scopes=SUPPORTED_SCOPES,
-            access_token_strategy="jwt"
-            if self.config.get("jwt_access_tokens", True)
-            else "opaque",
-        )
-        return rendered
-
-    def _set_version(self) -> None:
-        version = self._hydra_cli.get_version()
-        self.unit.set_workload_version(version)
-
-    def _get_database_relation_info(self) -> dict:
-        if not self.database.relations:
-            return None
-
-        relation_id = self.database.relations[0].id
-        relation_data = self.database.fetch_relation_data()[relation_id]
-
-        if not all([
-            relation_data.get("username"),
-            relation_data.get("password"),
-            relation_data.get("endpoints"),
-        ]):
-            return None
-
-        return {
-            "username": relation_data.get("username"),
-            "password": relation_data.get("password"),
-            # endpoints is a comma separated list, pick the first endpoint as hydra supports only one
-            "endpoints": relation_data.get("endpoints").split(",")[0],
-            "database_name": self._db_name,
-        }
-
-    @property
-    def _dsn(self) -> Optional[str]:
-        db_info = self._get_database_relation_info()
-        if not db_info:
-            return None
-
-        return "postgres://{username}:{password}@{endpoints}/{database_name}".format(
-            username=db_info.get("username"),
-            password=db_info.get("password"),
-            endpoints=db_info.get("endpoints"),
-            database_name=db_info.get("database_name"),
-        )
-
-    def _run_sql_migration(self, timeout: float = 60) -> bool:
-        """Runs a command to create SQL schemas and apply migration plans."""
-        try:
-            self._hydra_cli.run_migration(dsn=self._dsn, timeout=timeout)
-        except ExecError as err:
-            logger.error(f"Exited with code {err.exit_code}. Stderr: {err.stderr}")
+    def migration_needed(self) -> bool:
+        if not peer_integration_exists(self):
             return False
-        return True
 
-    def _oauth_relation_peer_data_key(self, relation_id: int) -> str:
-        return f"oauth_{relation_id}"
-
-    @property
-    def _migration_peer_data_key(self) -> Optional[str]:
-        if not self.database.relations:
-            return None
-        # We append the relation ID to the migration key in peer data, this is
-        # needed in order to be able to store multiple migration versions.
-        #
-        # When a database relation is departed, we can't remove the key because we
-        # can't be sure if the relation is actually departing or if the unit is
-        # dying. If a new database relation is then created we need to be able to tell
-        # that it is a different relation. By appending the relation ID we overcome this
-        # problem.
-        # See https://github.com/canonical/hydra-operator/pull/138#discussion_r1338409081
-        return f"{DB_MIGRATION_VERSION_KEY}_{self.database.relations[0].id}"
-
-    @property
-    def _peers(self) -> Optional[Relation]:
-        """Fetch the peer relation."""
-        return self.model.get_relation(PEER)
-
-    def _set_peer_data(self, key: str, data: Dict) -> None:
-        """Put information into the peer data bucket."""
-        if not (peers := self._peers):
-            return
-        peers.data[self.app][key] = json.dumps(data)
-
-    def _get_peer_data(self, key: str) -> Dict:
-        """Retrieve information from the peer data bucket."""
-        if not (peers := self._peers):
-            return {}
-        data = peers.data[self.app].get(key, "")
-        return json.loads(data) if data else {}
-
-    def _pop_peer_data(self, key: str) -> Dict:
-        """Retrieve and remove information from the peer data bucket."""
-        if not (peers := self._peers):
-            return {}
-        data = peers.data[self.app].pop(key, "")
-        return json.loads(data) if data else {}
-
-    def _set_oauth_relation_peer_data(self, relation_id: int, data: Dict) -> None:
-        key = self._oauth_relation_peer_data_key(relation_id)
-        self._set_peer_data(key, data)
-
-    def _get_oauth_relation_peer_data(self, relation_id: int) -> Dict:
-        key = self._oauth_relation_peer_data_key(relation_id)
-        return self._get_peer_data(key)
-
-    def _pop_oauth_relation_peer_data(self, relation_id: int) -> Dict:
-        key = self._oauth_relation_peer_data_key(relation_id)
-        return self._pop_peer_data(key)
-
-    def _get_secrets(self) -> Optional[Dict[str, str]]:
-        juju_secrets = {}
-        try:
-            juju_secret = self.model.get_secret(label=COOKIE_SECRET_LABEL)
-            juju_secrets["cookie"] = juju_secret.get_content()[COOKIE_SECRET_KEY]
-
-            juju_secret = self.model.get_secret(label=SYSTEM_SECRET_LABEL)
-            juju_secrets["system"] = juju_secret.get_content()[SYSTEM_SECRET_KEY]
-        except SecretNotFoundError:
-            return None
-        return juju_secrets
-
-    def _create_secrets(self) -> Optional[Dict[str, Secret]]:
-        if not self.unit.is_leader():
-            return None
-
-        juju_secrets = {}
-        secret = {COOKIE_SECRET_KEY: token_hex(16)}
-        juju_secrets["cookie"] = self.model.app.add_secret(secret, label=COOKIE_SECRET_LABEL)
-
-        secret = {SYSTEM_SECRET_KEY: token_hex(16)}
-        juju_secrets["system"] = self.model.app.add_secret(secret, label=SYSTEM_SECRET_LABEL)
-        return juju_secrets
-
-    # flake8: noqa: C901
-    def _handle_status_update_config(self, event: HookEvent) -> None:
-        if not self._container.can_connect():
-            event.defer()
-            logger.info("Cannot connect to Hydra container. Deferring the event.")
-            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
-            return
-
-        if not self._validate_config_log_level():
-            return
-
-        self.unit.status = MaintenanceStatus("Configuring resources")
-
-        if not self.model.relations[self._db_relation_name]:
-            self.unit.status = BlockedStatus("Missing required relation with postgresql")
-            return
-
-        if not self.public_ingress.is_ready():
-            self.unit.status = BlockedStatus("Missing required relation with ingress")
-            return
-
-        if not self.database.is_resource_created():
-            self.unit.status = WaitingStatus("Waiting for database creation")
-            return
-
-        if self._migration_is_needed():
-            self.unit.status = WaitingStatus(
-                "Waiting for migration to run, try running the `run-migration` action"
-            )
-            return
-
-        if not self._get_secrets():
-            self.unit.status = WaitingStatus("Waiting for secrets creation")
-            event.defer()
-            return
-
-        self._cleanup_peer_data()
-        self._container.push(self._hydra_config_path, self._render_conf_file(), make_dirs=True)
-        self._container.add_layer(self._container_name, self._hydra_layer, combine=True)
-        try:
-            self._container.restart(self._container_name)
-        except ChangeError as err:
-            logger.error(str(err))
-            self.unit.status = BlockedStatus("Failed to restart, please consult the logs")
-            return
-
-        self.unit.status = ActiveStatus()
-
-    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
-        if not self.unit.is_leader():
-            return
-
-        if not self._get_secrets():
-            self._create_secrets()
-
-    def _update_hydra_endpoints_relation_data(self, event: RelationEvent) -> None:
-        logger.info("Sending endpoints info")
-
-        admin_endpoint = (
-            self._internal_url
-            or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}"
-        )
-        public_endpoint = (
-            self._internal_url
-            or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_PUBLIC_PORT}"
-        )
-
-        self.endpoints_provider.send_endpoint_relation_data(admin_endpoint, public_endpoint)
+        database_config = DatabaseConfig.load(self.database_requirer)
+        return self.peer_data[database_config.migration_version] != self._workload_service.version
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
-        """Event Handler for pebble ready event."""
-        # Necessary directory for log forwarding
-        if not self._container.can_connect():
+        if not container_connectivity(self):
             event.defer()
             self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
             return
-        if not self._container.isdir(str(self._log_dir)):
-            self._container.make_dir(path=str(self._log_dir), make_parents=True)
-            logger.info(f"Created directory {self._log_dir}")
 
-        self._set_version()
-        self._handle_status_update_config(event)
+        self._workload_service.prepare_dir(LOG_DIR)
+        self._workload_service.open_port()
 
-    def _migration_is_needed(self):
-        if not self._peers:
-            return
+        service_version = self._workload_service.version
+        self._workload_service.version = service_version
 
-        return self._get_peer_data(self._migration_peer_data_key) != self._hydra_cli.get_version()
+        self._holistic_handler(event)
+
+    # @leader_unit
+    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
+        logger.info("Run leader elected event.")
+        if not self.secrets.is_ready:
+            logger.info("Setting secrets")
+            self.secrets[COOKIE_SECRET_LABEL] = {COOKIE_SECRET_KEY: token_hex(16)}
+            self.secrets[SYSTEM_SECRET_LABEL] = {SYSTEM_SECRET_KEY: token_hex(16)}
+
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        self._holistic_handler(event)
+        self._on_oauth_integration_created(event)
+
+    def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
+        self._holistic_handler(event)
+        self._on_oauth_integration_created(event)
+        self._on_hydra_endpoints_ready(event)
+
+    def _on_admin_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
+        # self._update_oauth_endpoint_info(event)
+        self._on_hydra_endpoints_ready(event)
+
+    def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
+        self._holistic_handler(event)
+        self._on_oauth_integration_created(event)
+        self._on_hydra_endpoints_ready(event)
+
+    @leader_unit
+    def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
+        self.internal_ingress._relation = event.relation
+        self._on_internal_ingress_changed(event)
+
+    def _on_internal_ingress_changed(self, event: RelationEvent) -> None:
+        if self.internal_ingress.is_ready():
+            internal_ingress_config = InternalIngressData.load(self.internal_ingress).config
+            self.internal_ingress.submit_to_traefik(internal_ingress_config)
+            self._on_hydra_endpoints_ready(event)
+            self._on_oauth_integration_created(event)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
-        """Event Handler for database created event."""
-        logger.info("Retrieved database details")
-
-        if not self._container.can_connect():
-            event.defer()
-            logger.info("Cannot connect to Hydra container. Deferring the event.")
-            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
-            return
-
-        if not self._peers:
-            self.unit.status = WaitingStatus("Waiting for peer relation")
+        if not container_connectivity(self):
+            self.unit.status = WaitingStatus("Container is not connected yet")
             event.defer()
             return
 
-        if not self._get_secrets():
-            self.unit.status = WaitingStatus("Waiting for secret creation")
+        if not peer_integration_exists(self):
+            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
             event.defer()
             return
 
-        if not self._migration_is_needed():
-            self._handle_status_update_config(event)
+        if not self.secrets.is_ready:
+            self.unit.status = WaitingStatus("Missing required secrets")
+            event.defer()
+            return
+
+        if not self.migration_needed:
+            self._holistic_handler(event)
             return
 
         if not self.unit.is_leader():
@@ -703,176 +368,206 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        if not self._run_sql_migration():
-            self.unit.status = BlockedStatus("Database migration job failed")
-            logger.error("Automigration job failed, please use the run-migration action")
+        try:
+            self._cli.migrate(DatabaseConfig.load(self.database_requirer).dsn)
+        except MigrationError:
+            self.unit.status = BlockedStatus("Database migration failed")
+            logger.error("Auto migration job failed. Please use the run-migration action")
             return
 
-        self._set_peer_data(self._migration_peer_data_key, self._hydra_cli.get_version())
-        self._handle_status_update_config(event)
+        migration_version = DatabaseConfig.load(self.database_requirer).migration_version
+        self.peer_data[migration_version] = self._workload_service.version
+        self._holistic_handler(event)
 
     def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
-        """Event Handler for database changed event."""
-        self._handle_status_update_config(event)
+        self._holistic_handler(event)
+
+    def _on_database_integration_broken(self, event: RelationBrokenEvent) -> None:
+        self._holistic_handler(event)
+
+    def _on_oauth_integration_created(self, event: RelationEvent) -> None:
+        if not (public_url := self.public_ingress.url):
+            event.defer()
+            logger.info("Public ingress URL not available. Deferring the event.")
+            return
+
+        internal_endpoints = InternalIngressData.load(self.internal_ingress)
+        self.oauth_provider.set_provider_info_in_relation_data(
+            issuer_url=public_url,
+            authorization_endpoint=join(public_url, "oauth2/auth"),
+            token_endpoint=join(public_url, "oauth2/token"),
+            introspection_endpoint=join(
+                internal_endpoints.admin_endpoint, "admin/oauth2/introspect"
+            ),
+            userinfo_endpoint=join(public_url, "userinfo"),
+            jwks_endpoint=join(public_url, ".well-known/jwks.json"),
+            scope=" ".join(DEFAULT_OAUTH_SCOPES),
+            jwt_access_token=self.config.get("jwt_access_tokens", True),
+        )
+
+    @leader_unit
+    def _on_oauth_client_created(self, event: ClientCreatedEvent) -> None:
+        if not self._workload_service.is_running:
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            event.defer()
+            return
+
+        if not peer_integration_exists(self):
+            self.unit.status = WaitingStatus("Waiting for peer relation")
+            event.defer()
+            return
+
+        target_oauth_client = OAuthClient(
+            **event.snapshot(),
+            **{"metadata": {"integration-id": str(event.relation_id)}},
+        )
+        if not (oauth_client := self._cli.create_oauth_client(target_oauth_client)):
+            logger.error("Failed to create the OAuth client bound with the oauth integration")
+            event.defer()
+            return
+
+        self.peer_data[f"oauth_{event.relation_id}"] = {"client_id": oauth_client.client_id}
+        self.oauth_provider.set_client_credentials_in_relation_data(
+            event.relation_id,
+            oauth_client.client_id,  # type: ignore[arg-type]
+            oauth_client.client_secret,  # type: ignore[arg-type]
+        )
+
+    @leader_unit
+    def _on_oauth_client_changed(self, event: ClientChangedEvent) -> None:
+        if not self._workload_service.is_running:
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            event.defer()
+            return
+
+        target_oauth_client = OAuthClient(
+            **event.snapshot(),
+            **{"metadata": {"integration-id": str(event.relation_id)}},
+        )
+        if not self._cli.update_oauth_client(target_oauth_client):
+            logger.error(
+                "Failed to update the OAuth client bound with the oauth integration: %d",
+                event.relation_id,
+            )
+            event.defer()
+
+    @leader_unit
+    def _on_oauth_client_deleted(self, event: ClientDeletedEvent) -> None:
+        if not self._workload_service.is_running:
+            self.unit.status = WaitingStatus("Waiting for Hydra service")
+            event.defer()
+            return
+
+        if not peer_integration_exists(self):
+            self.unit.status = WaitingStatus("Waiting for peer relation")
+            event.defer()
+            return
+
+        if not (client := self.peer_data[f"oauth_{event.relation_id}"]):
+            logger.error("No OAuth client bound with the oauth integration: %d", event.relation_id)
+            return
+
+        if not self._cli.delete_oauth_client(client["client_id"]):  # type: ignore
+            logger.error(
+                "Failed to delete the OAuth client bound with the oauth integration: %d",
+                event.relation_id,
+            )
+            event.defer()
+            return
+
+        self.peer_data.pop(f"oauth_{event.relation_id}")
+
+    def _on_hydra_endpoints_ready(self, event: RelationEvent) -> None:
+        internal_endpoints = InternalIngressData.load(self.internal_ingress)
+        self.hydra_endpoints_provider.send_endpoint_relation_data(
+            internal_endpoints.admin_endpoint,
+            internal_endpoints.public_endpoint,
+        )
+
+    def _promtail_error(self, event: PromtailDigestError) -> None:
+        logger.error(event.message)
+
+    def _holistic_handler(self, event: HookEvent) -> None:
+        if not container_connectivity(self):
+            event.defer()
+            logger.info("Cannot connect to Hydra container. Deferring the event.")
+            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            return
+
+        self.unit.status = MaintenanceStatus("Configuring resources")
+
+        if not database_integration_exists(self):
+            self.unit.status = BlockedStatus("Missing required relation with postgresql")
+            return
+
+        if not self.public_ingress.is_ready():
+            self.unit.status = BlockedStatus("Missing required relation with ingress")
+            return
+
+        if not self.database_requirer.is_resource_created():
+            self.unit.status = WaitingStatus("Waiting for database creation")
+            return
+
+        if self.migration_needed:
+            self.unit.status = WaitingStatus(
+                "Waiting for migration to run, try running the `run-migration` action"
+            )
+            return
+
+        if not self.secrets.is_ready:
+            self.unit.status = WaitingStatus("Waiting for secrets creation")
+            event.defer()
+            return
+
+        self._pebble_service.push_config_file(
+            ConfigFile.from_sources(
+                self.secrets,
+                self.charm_config,
+                DatabaseConfig.load(self.database_requirer),
+                LoginUIEndpointData.load(self.login_ui_requirer),
+                PublicIngressData.load(self.public_ingress),
+            )
+        )
+
+        try:
+            self._pebble_service.plan(self._pebble_layer)
+        except PebbleServiceError:
+            logger.error("Failed to start the service, please check the container logs")
+            self.unit.status = BlockedStatus(
+                f"Failed to restart the service, please check the {WORKLOAD_CONTAINER} logs"
+            )
+            return
+
+        self.unit.status = ActiveStatus()
 
     def _on_run_migration(self, event: ActionEvent) -> None:
-        """Runs the migration as an action response."""
-        if not self._container.can_connect():
+        if not container_connectivity(self):
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
+        if not peer_integration_exists(self):
+            event.fail("Peer integration is not ready yet.")
+            return
+
+        event.log("Start migrating the database.")
+
         timeout = float(event.params.get("timeout", 120))
-        event.log("Migrating database.")
         try:
-            self._hydra_cli.run_migration(timeout=timeout, dsn=self._dsn)
-        except Error as e:
-            err_msg = e.stderr if isinstance(e, ExecError) else e
-            event.fail(f"Database migration action failed: {err_msg}")
+            self._cli.migrate(dsn=DatabaseConfig.load(self.database_requirer).dsn, timeout=timeout)
+        except MigrationError as err:
+            event.fail(f"Database migration failed: {err}")
             return
-        event.log("Successfully migrated the database.")
+        else:
+            event.log("Successfully migrated the database.")
 
-        if not self._peers:
-            event.fail("Peer relation not ready. Failed to store migration version")
-            return
-        self._set_peer_data(self._migration_peer_data_key, self._hydra_cli.get_version())
-        event.log("Updated migration version in peer data.")
+        migration_version = DatabaseConfig.load(self.database_requirer).migration_version
+        self.peer_data[migration_version] = self._workload_service.version
+        event.log("Successfully updated migration version.")
 
-        self._handle_status_update_config(event)
-
-    def _on_database_relation_departed(self, event: RelationDepartedEvent) -> None:
-        """Event Handler for database relation departed event."""
-        self.unit.status = BlockedStatus("Missing required relation with postgresql")
-
-    def _cleanup_peer_data(self) -> None:
-        if not self._peers:
-            return
-        # We need to remove the migration key from peer data. We can't do that in relation
-        # departed as we can't tell if the event was triggered from a dying unit or if the
-        # relation is actually departing.
-        extra_keys = [
-            k
-            for k in self._peers.data[self.app].keys()
-            if k.startswith(DB_MIGRATION_VERSION_KEY) and k != self._migration_peer_data_key
-        ]
-        for k in extra_keys:
-            self._pop_peer_data(k)
-
-    def _on_admin_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
-        if self.unit.is_leader():
-            logger.info("This app's admin ingress URL: %s", event.url)
-
-        self._update_oauth_endpoint_info(event)
-        self._update_hydra_endpoints_relation_data(event)
-
-    def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
-        if self.unit.is_leader():
-            logger.info("This app's public ingress URL: %s", event.url)
-
-        self._handle_status_update_config(event)
-        self._update_oauth_endpoint_info(event)
-        self._update_hydra_endpoints_relation_data(event)
-
-    def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
-        if self.unit.is_leader():
-            logger.info("This app no longer has ingress")
-
-        self._handle_status_update_config(event)
-        self._update_oauth_endpoint_info(event)
-        self._update_hydra_endpoints_relation_data(event)
-
-    def _on_oauth_relation_created(self, event: RelationCreatedEvent) -> None:
-        self._update_oauth_endpoint_info(event)
-
-    def _on_client_created(self, event: ClientCreatedEvent) -> None:
-        if not self.unit.is_leader():
-            return
-
-        if not self._hydra_service_is_running:
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            event.defer()
-            return
-
-        if not self._peers:
-            self.unit.status = WaitingStatus("Waiting for peer relation")
-            event.defer()
-            return
-
-        try:
-            client = self._hydra_cli.create_client(
-                audience=event.audience,
-                grant_type=event.grant_types,
-                redirect_uri=event.redirect_uri.split(" "),
-                scope=event.scope.split(" "),
-                token_endpoint_auth_method=event.token_endpoint_auth_method,
-                metadata={"relation_id": event.relation_id},
-            )
-        except ExecError as err:
-            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            logger.info("Deferring the event")
-            event.defer()
-            return
-
-        self._set_oauth_relation_peer_data(event.relation_id, {"client_id": client["client_id"]})
-        self.oauth.set_client_credentials_in_relation_data(
-            event.relation_id, client["client_id"], client["client_secret"]
-        )
-
-    def _on_client_changed(self, event: ClientChangedEvent) -> None:
-        if not self.unit.is_leader():
-            return
-
-        if not self._hydra_service_is_running:
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            event.defer()
-            return
-
-        try:
-            self._hydra_cli.update_client(
-                event.client_id,
-                audience=event.audience,
-                grant_type=event.grant_types,
-                redirect_uri=event.redirect_uri.split(" "),
-                scope=event.scope.split(" "),
-                token_endpoint_auth_method=event.token_endpoint_auth_method,
-                metadata={"relation_id": event.relation_id},
-            )
-        except ExecError as err:
-            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            logger.info("Deferring the event")
-            event.defer()
-            return
-
-    def _on_client_deleted(self, event: ClientDeletedEvent) -> None:
-        if not self.unit.is_leader():
-            return
-
-        if not self._hydra_service_is_running:
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            event.defer()
-            return
-
-        if not self._peers:
-            self.unit.status = WaitingStatus("Waiting for peer relation")
-            event.defer()
-            return
-
-        client = self._get_oauth_relation_peer_data(event.relation_id)
-        if not client:
-            logger.error("No client found in peer data")
-            return
-
-        try:
-            self._hydra_cli.delete_client(client["client_id"])
-        except ExecError as err:
-            logger.error(f"Exited with code: {err.exit_code}. Stderr: {err.stderr}")
-            logger.info("Deferring the event")
-            event.defer()
-            return
-
-        self._pop_oauth_relation_peer_data(event.relation_id)
+        self._holistic_handler(event)
 
     def _on_create_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._hydra_service_is_running:
+        if not self._workload_service.is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -884,7 +579,7 @@ class HydraCharm(CharmBase):
         event.set_results(created_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_get_oauth_client_info_action(self, event: ActionEvent) -> None:
-        if not self._hydra_service_is_running:
+        if not self._workload_service.is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -896,7 +591,7 @@ class HydraCharm(CharmBase):
         event.set_results(oauth_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._hydra_service_is_running:
+        if not self._workload_service.is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -921,10 +616,11 @@ class HydraCharm(CharmBase):
             )
             return
 
+        event.log(f"Successfully updated the OAuth client {client_id}")
         event.set_results(updated_oauth_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._hydra_service_is_running:
+        if not self._workload_service.is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -945,10 +641,11 @@ class HydraCharm(CharmBase):
                 f"Failed to delete the OAuth client {client_id}. Please check the juju logs"
             )
 
+        event.log(f"Successfully deleted the OAuth client {client_id}")
         event.set_results({"client-id": res})
 
     def _on_list_oauth_clients_action(self, event: ActionEvent) -> None:
-        if not self._hydra_service_is_running:
+        if not self._workload_service.is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -961,7 +658,7 @@ class HydraCharm(CharmBase):
         })
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
-        if not self._hydra_service_is_running:
+        if not self._workload_service.is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -972,10 +669,11 @@ class HydraCharm(CharmBase):
             )
             return
 
+        event.log(f"Successfully revoked the access tokens of the OAuth client {client_id}")
         event.set_results({"client-id": res})
 
     def _on_rotate_key_action(self, event: ActionEvent) -> None:
-        if not self._hydra_service_is_running:
+        if not self._workload_service.is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -983,76 +681,8 @@ class HydraCharm(CharmBase):
             event.fail("Failed to rotate the JWK. Please check the juju logs")
             return
 
+        event.log("Successfully rotated the JWK")
         event.set_results({"new-key-id": jwk_id})
-
-    def _update_oauth_endpoint_info(self, event: RelationEvent) -> None:
-        if not self.public_ingress.url:
-            event.defer()
-            logger.info("Public Ingress URL not available. Deferring the event.")
-            return
-
-        internal_api = (
-            self._internal_url
-            or f"http://{self.app.name}.{self.model.name}.svc.cluster.local:{HYDRA_ADMIN_PORT}/"
-        )
-
-        self.oauth.set_provider_info_in_relation_data(
-            issuer_url=self._public_url,
-            authorization_endpoint=join(self._public_url, "oauth2/auth"),
-            token_endpoint=join(self._public_url, "oauth2/token"),
-            introspection_endpoint=join(internal_api, "admin/oauth2/introspect"),
-            userinfo_endpoint=join(self._public_url, "userinfo"),
-            jwks_endpoint=join(self._public_url, ".well-known/jwks.json"),
-            scope=" ".join(SUPPORTED_SCOPES),
-            jwt_access_token=self.config.get("jwt_access_tokens", True),
-        )
-
-    def _get_login_ui_endpoint_info(self, key: str) -> Optional[str]:
-        try:
-            login_ui_endpoints = self.login_ui_endpoints.get_login_ui_endpoints()
-            return login_ui_endpoints[key]
-        except LoginUIEndpointsRelationDataMissingError:
-            logger.info("No login ui endpoint-info relation data found")
-        except LoginUIEndpointsRelationMissingError:
-            logger.info("No login ui endpoint-info relation found")
-        except LoginUITooManyRelatedAppsError:
-            logger.info("Too many ui-endpoint-info relations found")
-        return None
-
-    def _get_tracing_endpoint_info(self) -> str:
-        if not self._tracing_ready:
-            return ""
-
-        return self.tracing.otlp_http_endpoint() or ""
-
-    def _promtail_error(self, event: PromtailDigestError) -> None:
-        logger.error(event.message)
-
-    def _configure_ingress(self, event: HookEvent) -> None:
-        """Method setting up the internal networking.
-
-        Since :class:`TraefikRouteRequirer` may not have been constructed with an existing
-        relation if a :class:`RelationJoinedEvent` comes through during the charm lifecycle, if we
-        get one here, we should recreate it, but OF will give us grief about "two objects claiming
-        to be ...", so manipulate its private `_relation` variable instead.
-
-        Args:
-            event: a :class:`HookEvent` to signal a change we may need to respond to.
-        """
-        if not self.unit.is_leader():
-            return
-
-        # If it's a RelationJoinedEvent, set it in the ingress object
-        if isinstance(event, RelationJoinedEvent):
-            self.internal_ingress._relation = event.relation
-
-        # No matter what, check readiness -- this blindly checks whether `ingress._relation` is not
-        # None, so it overlaps a little with the above, but works as expected on leader elections
-        # and config-change
-        if self.internal_ingress.is_ready():
-            self.internal_ingress.submit_to_traefik(self._internal_ingress_config)
-            self._update_hydra_endpoints_relation_data(event)
-            self._update_oauth_endpoint_info(event)
 
 
 if __name__ == "__main__":

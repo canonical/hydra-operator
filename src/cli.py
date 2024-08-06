@@ -5,26 +5,24 @@
 import json
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from ops import Container
 from ops.pebble import Error, ExecError
 from pydantic import AliasChoices, BaseModel, Field, field_serializer, field_validator
 
-from constants import ADMIN_PORT, CONFIG_FILE_NAME
+from constants import ADMIN_PORT, CONFIG_FILE_NAME, DEFAULT_OAUTH_SCOPES, DEFAULT_RESPONSE_TYPES
+from exceptions import MigrationError
 
 logger = logging.getLogger(__name__)
 
 VERSION_REGEX = re.compile(r"Version:\s+(?P<version>v\d+\.\d+\.\d+)")
 
-DEFAULT_RESPONSE_TYPES = ["code"]
-DEFAULT_SCOPES = "openid,profile,email,phone"
-
 
 class OAuthClient(BaseModel):
     redirect_uris: Optional[list[str]] = Field(
         default_factory=list,
-        validation_alias=AliasChoices("redirect-uris", "redirect_uris"),
+        validation_alias=AliasChoices("redirect-uris", "redirect_uris", "redirect_uri"),
         serialization_alias="redirect-uris",
     )
     response_types: list[str] = Field(
@@ -32,13 +30,13 @@ class OAuthClient(BaseModel):
         validation_alias=AliasChoices("response-types", "response_types"),
         serialization_alias="response-types",
     )
-    scope: str = DEFAULT_SCOPES
+    scope: str = ",".join(DEFAULT_OAUTH_SCOPES)
     token_endpoint_auth_method: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("token-endpoint-auth-method", "token_endpoint_auth_method"),
         serialization_alias="token-endpoint-auth-method",
     )
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     audience: Optional[list[str]] = None
     client_id: Optional[str] = Field(
         default=None,
@@ -58,7 +56,15 @@ class OAuthClient(BaseModel):
 
     @property
     def managed_by_integration(self) -> bool:
-        return "integration_id" in self.metadata
+        return "integration-id" in self.metadata
+
+    @field_validator("redirect_uris", mode="before")
+    @classmethod
+    def deserialize_redirect_uris(cls, v: str | list[str]) -> list[str]:
+        if isinstance(v, list):
+            return v
+
+        return v.split()
 
     @field_validator("scope", mode="before")
     @classmethod
@@ -117,7 +123,7 @@ class CommandLine:
         matched = VERSION_REGEX.search(stdout)
         return matched.group("version") if matched else None
 
-    def migration(self, dsn: Optional[str] = None, timeout: float = 60) -> None:
+    def migrate(self, dsn: Optional[str] = None, timeout: float = 60) -> None:
         """Apply Hydra migration plan.
 
         More information: https://www.ory.sh/docs/hydra/cli/hydra-migrate-sql
@@ -132,6 +138,7 @@ class CommandLine:
             self._run_cmd(cmd, timeout=timeout, environment=env_vars)
         except Error as err:
             logger.error("Failed to migrate the hydra service: %s", err)
+            raise MigrationError from err
 
     def create_jwk(
         self, key_set_id: str = "hydra.openid.id-token", algorithm: str = "RS256"

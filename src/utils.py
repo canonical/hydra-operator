@@ -1,42 +1,42 @@
-#!/usr/bin/env python3
-# Copyright 2023 Canonical Ltd.
+# Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Utility functions for the Hydra charm."""
+from functools import wraps
+from typing import Any, Callable, Optional, TypeVar
 
-from typing import Dict
-from urllib.parse import urlparse
+from ops.charm import CharmBase
+
+from constants import DATABASE_INTEGRATION_NAME, PEER_INTEGRATION_NAME, WORKLOAD_CONTAINER
+
+CharmEventHandler = TypeVar("CharmEventHandler", bound=Callable[..., Any])
+Condition = Callable[[CharmBase], bool]
 
 
-def remove_none_values(dic: Dict) -> Dict:
-    """Remove all entries in a dict with `None` values."""
-    return {k: v for k, v in dic.items() if v is not None}
+def leader_unit(func: CharmEventHandler) -> CharmEventHandler:
+    """A decorator, applied to any event hook handler, to validate juju unit leadership."""
+
+    @wraps(func)
+    def wrapper(charm: CharmBase, *args: Any, **kwargs: Any) -> Optional[Any]:
+        if not charm.unit.is_leader():
+            return None
+
+        return func(charm, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
 
 
-def normalise_url(url: str) -> str:
-    """Convert a URL to a more user-friendly HTTPS URL.
+def integration_existence(integration_name: str) -> Condition:
+    """A factory of integration existence condition."""
 
-    The user will be redirected to this URL, we need to use the https prefix
-    in order to be able to set cookies (secure attribute is set). Also we remove
-    the port from the URL to make it more user-friendly.
+    def wrapped(charm: CharmBase) -> bool:
+        return bool(charm.model.relations[integration_name])
 
-    For example:
-        http://ingress:80 -> https://ingress
-        http://ingress:80/ -> https://ingress/
-        http://ingress:80/path/subpath -> https://ingress/path/subpath
+    return wrapped
 
-    This conversion works under the following assumptions:
-    1) The ingress will serve https under the 443 port, the user-agent will
-       implicitly make the request on that port
-    2) The provided URL is not a relative path
-    3) No user/password is provided in the netloc
 
-    This is a hack and should be removed once traefik provides a way for us to
-    request the https URL.
-    """
-    parsed_url = urlparse(url)
+peer_integration_exists = integration_existence(PEER_INTEGRATION_NAME)
+database_integration_exists = integration_existence(DATABASE_INTEGRATION_NAME)
 
-    parsed_url = parsed_url._replace(scheme="https")
-    parsed_url = parsed_url._replace(netloc=parsed_url.netloc.rsplit(":", 1)[0])
 
-    return parsed_url.geturl()
+def container_connectivity(charm: CharmBase) -> bool:
+    return charm.unit.get_container(WORKLOAD_CONTAINER).can_connect()
