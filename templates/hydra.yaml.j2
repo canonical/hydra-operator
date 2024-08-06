@@ -1,4 +1,7 @@
-dsn: postgres://{{ db_info.get('username') }}:{{ db_info.get('password') }}@{{ db_info.get('endpoints') }}/{{ db_info.get('database_name') }}
+{% set valid_log_levels = ["panic", "fatal", "error", "warn", "info", "debug", "trace"] %}
+{% set log_level = log_level if log_level in valid_log_levels else "info" %}
+
+dsn: {{ dsn }}
 log:
   level: {{ log_level }}
   format: json
@@ -36,8 +39,8 @@ urls:
   device_verification: {{ device_verification_url | d("http://default-url.com/device_verification", true) }}
   post_device_done: {{ post_device_done_url | d("http://default-url.com/post_device_done", true) }}
   self:
-    issuer: {{ hydra_public_url }}
-    public: {{ hydra_public_url }}
+    issuer: {{ public_url }}
+    public: {{ public_url }}
 
 webfinger:
   oidc_discovery:
@@ -48,3 +51,5 @@ webfinger:
       {%- if access_token_strategy != "opaque" %}
       - hydra.jwt.access-token
       {%- endif %}
+
+dev: {{ dev_mode | d(false) }}
