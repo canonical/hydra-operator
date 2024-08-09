@@ -33,6 +33,7 @@ repos:
       args: ["--config-file", "pyproject.toml"]
       additional_dependencies:
         - types-PyYAML
+        - pydantic
 - repo: https://github.com/compilerla/conventional-pre-commit
   rev: v3.4.0
   hooks:
