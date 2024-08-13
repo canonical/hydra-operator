@@ -7,7 +7,6 @@
 """A Juju charm for Ory Hydra."""
 
 import logging
-from os.path import join
 from secrets import token_hex
 from typing import Any
 
@@ -100,18 +99,14 @@ class HydraCharm(CharmBase):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
 
-        self._container = self.unit.get_container(WORKLOAD_CONTAINER)
         self.peer_data = PeerData(self.model)
         self.secrets = Secrets(self.model)
         self.charm_config = CharmConfig(self.config)
+
+        self._container = self.unit.get_container(WORKLOAD_CONTAINER)
         self._workload_service = WorkloadService(self.unit)
         self._pebble_service = PebbleService(self.unit)
-
         self._cli = CommandLine(self._container)
-
-        # self.service_patcher = KubernetesServicePatch(
-        #     self, [("hydra-admin", ADMIN_PORT), ("hydra-public", PUBLIC_PORT)]
-        # )
 
         self.database_requirer = DatabaseRequires(
             self,
@@ -293,10 +288,10 @@ class HydraCharm(CharmBase):
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         if not container_connectivity(self):
             event.defer()
-            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            self.unit.status = WaitingStatus("Container is not connected yet")
             return
 
-        self._workload_service.prepare_dir(LOG_DIR)
+        self._pebble_service.prepare_dir(LOG_DIR)
         self._workload_service.open_port()
 
         service_version = self._workload_service.version
@@ -304,11 +299,8 @@ class HydraCharm(CharmBase):
 
         self._holistic_handler(event)
 
-    # @leader_unit
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
-        logger.info("Run leader elected event.")
         if not self.secrets.is_ready:
-            logger.info("Setting secrets")
             self.secrets[COOKIE_SECRET_LABEL] = {COOKIE_SECRET_KEY: token_hex(16)}
             self.secrets[SYSTEM_SECRET_LABEL] = {SYSTEM_SECRET_KEY: token_hex(16)}
 
@@ -322,7 +314,6 @@ class HydraCharm(CharmBase):
         self._on_hydra_endpoints_ready(event)
 
     def _on_admin_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
-        # self._update_oauth_endpoint_info(event)
         self._on_hydra_endpoints_ready(event)
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
@@ -335,6 +326,7 @@ class HydraCharm(CharmBase):
         self.internal_ingress._relation = event.relation
         self._on_internal_ingress_changed(event)
 
+    @leader_unit
     def _on_internal_ingress_changed(self, event: RelationEvent) -> None:
         if self.internal_ingress.is_ready():
             internal_ingress_config = InternalIngressData.load(self.internal_ingress).config
@@ -363,8 +355,10 @@ class HydraCharm(CharmBase):
             return
 
         if not self.unit.is_leader():
-            logger.info("Unit does not have leadership")
-            self.unit.status = WaitingStatus("Unit waiting for leadership to run the migration")
+            logger.info(
+                "Unit does not have leadership. Wait for leader unit to run the migration."
+            )
+            self.unit.status = WaitingStatus("Waiting for leader unit to run the migration")
             event.defer()
             return
 
@@ -386,21 +380,21 @@ class HydraCharm(CharmBase):
         self._holistic_handler(event)
 
     def _on_oauth_integration_created(self, event: RelationEvent) -> None:
-        if not (public_url := self.public_ingress.url):
+        if not (public_url := PublicIngressData.load(self.public_ingress).url):
             event.defer()
-            logger.info("Public ingress URL not available. Deferring the event.")
+            logger.info("Public ingress URL is not available. Deferring the event.")
             return
 
         internal_endpoints = InternalIngressData.load(self.internal_ingress)
         self.oauth_provider.set_provider_info_in_relation_data(
-            issuer_url=public_url,
-            authorization_endpoint=join(public_url, "oauth2/auth"),
-            token_endpoint=join(public_url, "oauth2/token"),
-            introspection_endpoint=join(
-                internal_endpoints.admin_endpoint, "admin/oauth2/introspect"
+            issuer_url=str(public_url),
+            authorization_endpoint=str(public_url / "oauth2/auth"),
+            token_endpoint=str(public_url / "oauth2/token"),
+            introspection_endpoint=str(
+                internal_endpoints.admin_endpoint / "admin/oauth2/introspect"
             ),
-            userinfo_endpoint=join(public_url, "userinfo"),
-            jwks_endpoint=join(public_url, ".well-known/jwks.json"),
+            userinfo_endpoint=str(public_url / "userinfo"),
+            jwks_endpoint=str(public_url / ".well-known/jwks.json"),
             scope=" ".join(DEFAULT_OAUTH_SCOPES),
             jwt_access_token=self.config.get("jwt_access_tokens", True),
         )
@@ -413,7 +407,7 @@ class HydraCharm(CharmBase):
             return
 
         if not peer_integration_exists(self):
-            self.unit.status = WaitingStatus("Waiting for peer relation")
+            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
             event.defer()
             return
 
@@ -459,7 +453,7 @@ class HydraCharm(CharmBase):
             return
 
         if not peer_integration_exists(self):
-            self.unit.status = WaitingStatus("Waiting for peer relation")
+            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
             event.defer()
             return
 
@@ -480,8 +474,8 @@ class HydraCharm(CharmBase):
     def _on_hydra_endpoints_ready(self, event: RelationEvent) -> None:
         internal_endpoints = InternalIngressData.load(self.internal_ingress)
         self.hydra_endpoints_provider.send_endpoint_relation_data(
-            internal_endpoints.admin_endpoint,
-            internal_endpoints.public_endpoint,
+            str(internal_endpoints.admin_endpoint),
+            str(internal_endpoints.public_endpoint),
         )
 
     def _promtail_error(self, event: PromtailDigestError) -> None:
@@ -490,18 +484,19 @@ class HydraCharm(CharmBase):
     def _holistic_handler(self, event: HookEvent) -> None:
         if not container_connectivity(self):
             event.defer()
-            logger.info("Cannot connect to Hydra container. Deferring the event.")
-            self.unit.status = WaitingStatus("Waiting to connect to Hydra container")
+            self.unit.status = WaitingStatus("Container is not connected yet")
             return
 
         self.unit.status = MaintenanceStatus("Configuring resources")
 
         if not database_integration_exists(self):
-            self.unit.status = BlockedStatus("Missing required relation with postgresql")
+            self.unit.status = BlockedStatus(f"Missing integration {DATABASE_INTEGRATION_NAME}")
             return
 
         if not self.public_ingress.is_ready():
-            self.unit.status = BlockedStatus("Missing required relation with ingress")
+            self.unit.status = BlockedStatus(
+                f"Missing required relation with {PUBLIC_INGRESS_INTEGRATION_NAME}"
+            )
             return
 
         if not self.database_requirer.is_resource_created():
@@ -541,15 +536,15 @@ class HydraCharm(CharmBase):
         self.unit.status = ActiveStatus()
 
     def _on_run_migration(self, event: ActionEvent) -> None:
-        if not container_connectivity(self):
+        if not self._workload_service.is_running:
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
         if not peer_integration_exists(self):
-            event.fail("Peer integration is not ready yet.")
+            event.fail("Peer integration is not ready yet")
             return
 
-        event.log("Start migrating the database.")
+        event.log("Start migrating the database")
 
         timeout = float(event.params.get("timeout", 120))
         try:
@@ -558,11 +553,11 @@ class HydraCharm(CharmBase):
             event.fail(f"Database migration failed: {err}")
             return
         else:
-            event.log("Successfully migrated the database.")
+            event.log("Successfully migrated the database")
 
         migration_version = DatabaseConfig.load(self.database_requirer).migration_version
         self.peer_data[migration_version] = self._workload_service.version
-        event.log("Successfully updated migration version.")
+        event.log("Successfully updated migration version")
 
         self._holistic_handler(event)
 

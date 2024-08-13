@@ -1,1515 +1,718 @@
-# Copyright 2023 Canonical Ltd.
+# Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import json
-import logging
-from typing import Any, Dict, Tuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
-import yaml
-from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.pebble import ExecError, TimeoutError
+from ops import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.testing import Harness
-from test_oauth_requirer import CLIENT_CONFIG  # type: ignore
-
-from constants import INTERNAL_INGRESS_RELATION_NAME
-
-CONTAINER_NAME = "hydra"
-DB_USERNAME = "test-username"
-DB_PASSWORD = "test-password"
-DB_ENDPOINT = "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
-
-
-def setup_postgres_relation(harness: Harness) -> int:
-    db_relation_id = harness.add_relation("pg-database", "postgresql-k8s")
-    harness.add_relation_unit(db_relation_id, "postgresql-k8s/0")
-    harness.update_relation_data(
-        db_relation_id,
-        "postgresql-k8s",
-        {
-            "data": '{"database": "hydra", "extra-user-roles": "SUPERUSER"}',
-            "endpoints": DB_ENDPOINT,
-            "password": DB_PASSWORD,
-            "username": DB_USERNAME,
-        },
-    )
-
-    return db_relation_id
-
-
-def setup_ingress_relation(harness: Harness, type: str) -> int:
-    relation_id = harness.add_relation(f"{type}-ingress", f"{type}-traefik")
-    harness.add_relation_unit(relation_id, f"{type}-traefik/0")
-    harness.update_relation_data(
-        relation_id,
-        f"{type}-traefik",
-        {"ingress": json.dumps({"url": f"http://{type}:80/{harness.model.name}-hydra"})},
-    )
-    return relation_id
-
-
-def setup_internal_ingress_relation(harness: Harness, type: str) -> int:
-    relation_id = harness.add_relation(
-        f"{INTERNAL_INGRESS_RELATION_NAME}",
-        f"{type}-traefik",
-    )
-    harness.add_relation_unit(
-        relation_id,
-        f"{type}-traefik/0",
-    )
-    harness.update_relation_data(
-        relation_id,
-        f"{type}-traefik",
-        {"external_host": "test.staging.canonical.com", "scheme": "https"},
-    )
-
-    return relation_id
-
-
-def setup_oauth_relation(harness: Harness) -> Tuple[int, str]:
-    app_name = "requirer"
-    relation_id = harness.add_relation("oauth", app_name)
-    harness.add_relation_unit(relation_id, "requirer/0")
-    return relation_id, app_name
-
-
-def setup_peer_relation(harness: Harness) -> Tuple[int, str]:
-    app_name = "hydra"
-    relation_id = harness.add_relation("hydra", app_name)
-    return relation_id, app_name
-
-
-def setup_login_ui_relation(harness: Harness) -> tuple[int, dict]:
-    relation_id = harness.add_relation("ui-endpoint-info", "identity-platform-login-ui-operator")
-    harness.add_relation_unit(relation_id, "identity-platform-login-ui-operator/0")
-    endpoint = f"http://public:80/{harness.model.name}-identity-platform-login-ui-operator"
-    login_databag = {
-        "consent_url": f"{endpoint}/ui/consent",
-        "error_url": f"{endpoint}/ui/error",
-        "login_url": f"{endpoint}/ui/login",
-        "oidc_error_url": f"{endpoint}/ui/oidc_error",
-        "device_verification_url": f"{endpoint}/ui/device_verification",
-        "post_device_done_url": f"{endpoint}/ui/post_device_done",
-    }
-    harness.update_relation_data(
-        relation_id,
-        "identity-platform-login-ui-operator",
-        login_databag,
-    )
-    return (relation_id, login_databag)
-
-
-def setup_login_ui_without_proxy_relation(harness: Harness) -> tuple[int, dict]:
-    relation_id = harness.add_relation("ui-endpoint-info", "identity-platform-login-ui-operator")
-    harness.add_relation_unit(relation_id, "identity-platform-login-ui-operator/0")
-    login_databag = {
-        "consent_url": "",
-        "error_url": "",
-        "login_url": "",
-        "oidc_error_url": "",
-    }
-    harness.update_relation_data(
-        relation_id,
-        "identity-platform-login-ui-operator",
-        login_databag,
-    )
-    return (relation_id, login_databag)
-
-
-def setup_loki_relation(harness: Harness) -> int:
-    relation_id = harness.add_relation("logging", "loki-k8s")
-    harness.add_relation_unit(relation_id, "loki-k8s/0")
-    databag = {
-        "promtail_binary_zip_url": json.dumps({
-            "amd64": {
-                "filename": "promtail-static-amd64",
-                "zipsha": "543e333b0184e14015a42c3c9e9e66d2464aaa66eca48b29e185a6a18f67ab6d",
-                "binsha": "17e2e271e65f793a9fbe81eab887b941e9d680abe82d5a0602888c50f5e0cac9",
-                "url": "https://github.com/canonical/loki-k8s-operator/releases/download/promtail-v2.5.0/promtail-static-amd64.gz",
-            }
-        }),
-    }
-    unit_databag = {
-        "endpoint": json.dumps({
-            "url": "http://loki-k8s-0.loki-k8s-endpoints.model0.svc.cluster.local:3100/loki/api/v1/push"
-        })
-    }
-    harness.update_relation_data(
-        relation_id,
-        "loki-k8s/0",
-        unit_databag,
-    )
-    harness.update_relation_data(
-        relation_id,
-        "loki-k8s",
-        databag,
-    )
-
-    return relation_id
-
-
-def setup_tempo_relation(harness: Harness) -> int:
-    relation_id = harness.add_relation("tracing", "tempo-k8s")
-    harness.add_relation_unit(relation_id, "tempo-k8s/0")
-    trace_databag = {
-        "host": '"tempo-k8s-0.tempo-k8s-endpoints.namespace.svc.cluster.local"',
-        "ingesters": '[{"protocol": "tempo", "port": 3200}, {"protocol": "otlp_grpc", "port": 4317}, {"protocol": "otlp_http", "port": 4318}, {"protocol": "zipkin", "port": 9411}, {"protocol": "jaeger_http_thrift", "port": 14268}, {"protocol": "jaeger_grpc", "port": 14250}]',
-    }
-    harness.update_relation_data(
-        relation_id,
-        "tempo-k8s",
-        trace_databag,
-    )
-    return relation_id
-
-
-def validate_config(expected_config: Dict[str, Any], config: Dict[str, Any]) -> None:
-    secrets = config.pop("secrets")
-
-    assert "cookie" in secrets
-    assert len(secrets["cookie"]) > 0
-    assert "system" in secrets
-    assert len(secrets["system"]) > 0
-    assert config == expected_config
-
-
-def test_not_leader(harness: Harness, mocked_get_secrets: MagicMock) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.set_leader(False)
-    setup_peer_relation(harness)
-    setup_postgres_relation(harness)
-
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    assert (
-        "status_set",
-        "waiting",
-        "Unit waiting for leadership to run the migration",
-        {"is_app": False},
-    ) in harness._get_backend_calls()
-
-
-def test_install_without_relation(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
-
-
-def test_install_without_database(harness: Harness) -> None:
-    setup_ingress_relation(harness, "public")
-    db_relation_id = harness.add_relation("pg-database", "postgresql-k8s")
-    harness.add_relation_unit(db_relation_id, "postgresql-k8s/0")
-
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    assert harness.charm.unit.status == WaitingStatus("Waiting for database creation")
-
-
-def test_relation_data(harness: Harness, mocked_run_migration: MagicMock) -> None:
-    db_relation_id = setup_postgres_relation(harness)
-
-    relation_data = harness.get_relation_data(db_relation_id, "postgresql-k8s")
-    assert relation_data["username"] == "test-username"
-    assert relation_data["password"] == "test-password"
-    assert relation_data["endpoints"] == "postgresql-k8s-primary.namespace.svc.cluster.local:5432"
-
-
-def test_relation_departed(harness: Harness) -> None:
-    db_relation_id = setup_postgres_relation(harness)
-
-    harness.remove_relation_unit(db_relation_id, "postgresql-k8s/0")
-    assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
-
-
-def test_pebble_container_can_connect(
-    harness: Harness, mocked_migration_is_needed: MagicMock
-) -> None:
-    setup_ingress_relation(harness, "public")
-    setup_postgres_relation(harness)
-    harness.charm.on.leader_elected.emit()
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    assert isinstance(harness.charm.unit.status, ActiveStatus)
-    service = harness.model.unit.get_container(CONTAINER_NAME).get_service("hydra")
-    assert service.is_running()
-
-
-def test_pebble_container_cannot_connect(
-    harness: Harness, mocked_run_migration: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, False)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    setup_postgres_relation(harness)
-
-    assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
-
-
-def test_postgres_created_when_no_peers(harness: Harness, mocked_run_migration: MagicMock) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    setup_postgres_relation(harness)
-
-    assert harness.charm.unit.status == WaitingStatus("Waiting for peer relation")
-
-
-def test_postgres_created_when_migration_has_run(
-    harness: Harness,
-    mocked_run_migration: MagicMock,
-    mocked_migration_is_needed: MagicMock,
-    mocked_get_secrets: MagicMock,
-) -> None:
-    harness.set_leader(False)
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    setup_ingress_relation(harness, "public")
-    setup_peer_relation(harness)
-
-    setup_postgres_relation(harness)
-
-    assert harness.charm.unit.status == ActiveStatus()
-    mocked_run_migration.assert_not_called()
-
-
-def test_update_container_config(harness: Harness, mocked_run_migration: MagicMock) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    setup_ingress_relation(harness, "public")
-    setup_postgres_relation(harness)
-
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    expected_config = {
-        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {
-            "level": "info",
-            "format": "json",
-        },
-        "serve": {
-            "admin": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-            "public": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-        },
-        "strategies": {
-            "access_token": "jwt",
-            "jwt": {
-                "scope_claim": "list",
-            },
-            "scope": "exact",
-        },
-        "urls": {
-            "consent": "http://default-url.com/consent",
-            "error": "http://default-url.com/oidc_error",
-            "login": "http://default-url.com/login",
-            "device_verification": "http://default-url.com/device_verification",
-            "post_device_done": "http://default-url.com/post_device_done",
-            "self": {
-                "issuer": "https://public/testing-hydra",
-                "public": "https://public/testing-hydra",
-            },
-        },
-        "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
-            "jwks": {
-                "broadcast_keys": [
-                    "hydra.openid.id-token",
-                    "hydra.jwt.access-token",
-                ],
-            },
-        },
-    }
-
-    validate_config(expected_config, yaml.safe_load(harness.charm._render_conf_file()))
-
-
-def test_on_config_changed_without_service(harness: Harness) -> None:
-    setup_peer_relation(harness)
-    setup_postgres_relation(harness)
-
-    assert harness.charm.unit.status == WaitingStatus("Waiting to connect to Hydra container")
-
-
-def test_on_config_changed_without_database(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    assert harness.charm.unit.status == BlockedStatus("Missing required relation with postgresql")
-
-
-def test_config_updated_on_config_changed(
-    harness: Harness, mocked_run_migration: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    setup_ingress_relation(harness, "public")
-    setup_postgres_relation(harness)
-    harness.update_config({"jwt_access_tokens": False})
-
-    expected_config = {
-        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {
-            "level": "info",
-            "format": "json",
-        },
-        "serve": {
-            "admin": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-            "public": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-        },
-        "strategies": {
-            "access_token": "opaque",
-            "jwt": {
-                "scope_claim": "list",
-            },
-            "scope": "exact",
-        },
-        "urls": {
-            "consent": "http://default-url.com/consent",
-            "error": "http://default-url.com/oidc_error",
-            "login": "http://default-url.com/login",
-            "device_verification": "http://default-url.com/device_verification",
-            "post_device_done": "http://default-url.com/post_device_done",
-            "self": {
-                "issuer": "https://public/testing-hydra",
-                "public": "https://public/testing-hydra",
-            },
-        },
-        "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
-            "jwks": {
-                "broadcast_keys": [
-                    "hydra.openid.id-token",
-                ],
-            },
-        },
-    }
-
-    validate_config(expected_config, yaml.safe_load(harness.charm._render_conf_file()))
-
-
-@pytest.mark.parametrize("api_type,port", [("admin", 4445), ("public", 4444)])
-def test_ingress_relation_created(
-    harness: Harness, mocked_fqdn: MagicMock, api_type: str, port: int
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    relation_id = setup_ingress_relation(harness, api_type)
-    app_data = harness.get_relation_data(relation_id, harness.charm.app)
-
-    assert app_data == {
-        "model": json.dumps(harness.model.name),
-        "name": json.dumps("hydra"),
-        "port": json.dumps(port),
-        "redirect-https": json.dumps(False),
-        "scheme": json.dumps("http"),
-        "strip-prefix": json.dumps(True),
-    }
-
-
-def test_config_updated_on_ingress_relation_joined(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_postgres_relation(harness)
-    setup_ingress_relation(harness, "public")
-
-    expected_config = {
-        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {
-            "level": "info",
-            "format": "json",
-        },
-        "serve": {
-            "admin": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-            "public": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-        },
-        "strategies": {
-            "access_token": "jwt",
-            "jwt": {
-                "scope_claim": "list",
-            },
-            "scope": "exact",
-        },
-        "urls": {
-            "consent": "http://default-url.com/consent",
-            "error": "http://default-url.com/oidc_error",
-            "login": "http://default-url.com/login",
-            "device_verification": "http://default-url.com/device_verification",
-            "post_device_done": "http://default-url.com/post_device_done",
-            "self": {
-                "issuer": "https://public/testing-hydra",
-                "public": "https://public/testing-hydra",
-            },
-        },
-        "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
-            "jwks": {
-                "broadcast_keys": [
-                    "hydra.openid.id-token",
-                    "hydra.jwt.access-token",
-                ],
-            },
-        },
-    }
-
-    validate_config(expected_config, yaml.safe_load(harness.charm._render_conf_file()))
-
-
-def test_hydra_endpoint_info_relation_data_without_ingress_relation_data(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    # set relations without data
-    public_ingress_relation_id = harness.add_relation("public-ingress", "public-traefik")
-    harness.add_relation_unit(public_ingress_relation_id, "public-traefik/0")
-    admin_ingress_relation_id = harness.add_relation("admin-ingress", "admin-traefik")
-    harness.add_relation_unit(admin_ingress_relation_id, "admin-traefik/0")
-
-    hydra_endpoint_info_relation_id = harness.add_relation("hydra-endpoint-info", "kratos")
-    harness.add_relation_unit(hydra_endpoint_info_relation_id, "kratos/0")
-
-    expected_data = {
-        "admin_endpoint": "http://hydra.testing.svc.cluster.local:4445",
-        "public_endpoint": "http://hydra.testing.svc.cluster.local:4444",
-    }
-
-    assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
-
-
-def test_hydra_endpoint_info_relation_data_with_internal_ingress_relation_joined(
-    harness: Harness,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_internal_ingress_relation(harness, "admin")
-
-    hydra_endpoint_info_relation_id = harness.add_relation("hydra-endpoint-info", "kratos")
-    harness.add_relation_unit(hydra_endpoint_info_relation_id, "kratos/0")
-
-    ingress_url = f"{harness.charm.internal_ingress.scheme}://{harness.charm.internal_ingress.external_host}/{harness.model.name}-{harness.model.app.name}"
-
-    expected_data = {
-        "admin_endpoint": ingress_url,
-        "public_endpoint": ingress_url,
-    }
-
-    assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
-
-
-def test_hydra_endpoint_info_relation_data_with_internal_ingress_relation_changed(
-    harness: Harness,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    relation_id = setup_internal_ingress_relation(harness, "admin")
-
-    hydra_endpoint_info_relation_id = harness.add_relation("hydra-endpoint-info", "kratos")
-    harness.add_relation_unit(hydra_endpoint_info_relation_id, "kratos/0")
-
-    url_change = "new-test.staging.canonical.com"
-    harness.update_relation_data(
-        relation_id,
-        "admin-traefik",
-        {"external_host": url_change, "scheme": "https"},
-    )
-
-    ingress_url = f"{harness.charm.internal_ingress.scheme}://{url_change}/{harness.model.name}-{harness.model.app.name}"
-
-    expected_data = {
-        "admin_endpoint": ingress_url,
-        "public_endpoint": ingress_url,
-    }
-
-    assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
-
-
-def test_hydra_endpoint_info_relation_data_with_internal_ingress_relation_broken(
-    harness: Harness,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    relation_id = setup_internal_ingress_relation(harness, "admin")
-
-    hydra_endpoint_info_relation_id = harness.add_relation("hydra-endpoint-info", "kratos")
-    harness.add_relation_unit(hydra_endpoint_info_relation_id, "kratos/0")
-
-    harness.remove_relation(relation_id)
-
-    expected_data = {
-        "admin_endpoint": "http://hydra.testing.svc.cluster.local:4445",
-        "public_endpoint": "http://hydra.testing.svc.cluster.local:4444",
-    }
-
-    assert harness.get_relation_data(hydra_endpoint_info_relation_id, "hydra") == expected_data
-
-
-def test_oauth_provider_info_with_internal_ingress_relation_joined(
-    harness: Harness, mocked_set_provider_info: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_ingress_relation(harness, "public")
-    setup_oauth_relation(harness)
-    setup_internal_ingress_relation(harness, "admin")
-
-    ingress_url = f"{harness.charm.internal_ingress.scheme}://{harness.charm.internal_ingress.external_host}/{harness.model.name}-{harness.model.app.name}"
-
-    mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint=f"{ingress_url}/admin/oauth2/introspect",
-        issuer_url="https://public/testing-hydra",
-        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
-        scope="openid profile email phone",
-        token_endpoint="https://public/testing-hydra/oauth2/token",
-        userinfo_endpoint="https://public/testing-hydra/userinfo",
-        jwt_access_token=True,
-    )
-
-
-def test_oauth_provider_info_with_internal_ingress_relation_changed(
-    harness: Harness, mocked_set_provider_info: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_ingress_relation(harness, "public")
-    setup_oauth_relation(harness)
-    relation_id = setup_internal_ingress_relation(harness, "admin")
-
-    url_change = "new-test.staging.canonical.com"
-    harness.update_relation_data(
-        relation_id,
-        "admin-traefik",
-        {"external_host": url_change, "scheme": "https"},
-    )
-
-    ingress_url = f"{harness.charm.internal_ingress.scheme}://{url_change}/{harness.model.name}-{harness.model.app.name}"
-
-    mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint=f"{ingress_url}/admin/oauth2/introspect",
-        issuer_url="https://public/testing-hydra",
-        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
-        scope="openid profile email phone",
-        token_endpoint="https://public/testing-hydra/oauth2/token",
-        userinfo_endpoint="https://public/testing-hydra/userinfo",
-        jwt_access_token=True,
-    )
-
-
-def test_oauth_provider_info_with_internal_ingress_relation_broken(
-    harness: Harness, mocked_set_provider_info: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_ingress_relation(harness, "public")
-    setup_oauth_relation(harness)
-
-    relation_id = setup_internal_ingress_relation(harness, "admin")
-
-    harness.remove_relation(relation_id)
-
-    mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
-        issuer_url="https://public/testing-hydra",
-        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
-        scope="openid profile email phone",
-        token_endpoint="https://public/testing-hydra/oauth2/token",
-        userinfo_endpoint="https://public/testing-hydra/userinfo",
-        jwt_access_token=True,
-    )
-
-
-def test_oauth_provider_info_in_databag_when_jwt_at(
-    harness: Harness, mocked_set_provider_info: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    harness.update_config({"jwt_access_tokens": True})
-    setup_ingress_relation(harness, "public")
-    setup_oauth_relation(harness)
-
-    mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
-        issuer_url="https://public/testing-hydra",
-        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
-        scope="openid profile email phone",
-        token_endpoint="https://public/testing-hydra/oauth2/token",
-        userinfo_endpoint="https://public/testing-hydra/userinfo",
-        jwt_access_token=True,
-    )
-
-
-def test_provider_info_called_when_oauth_relation_then_jwt_at(
-    harness: Harness, mocked_set_provider_info: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_oauth_relation(harness)
-    setup_ingress_relation(harness, "public")
-    harness.update_config({"jwt_access_tokens": False})
-
-    mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
-        issuer_url="https://public/testing-hydra",
-        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
-        scope="openid profile email phone",
-        token_endpoint="https://public/testing-hydra/oauth2/token",
-        userinfo_endpoint="https://public/testing-hydra/userinfo",
-        jwt_access_token=False,
-    )
-
-    harness.update_config({"jwt_access_tokens": True})
-
-    mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
-        issuer_url="https://public/testing-hydra",
-        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
-        scope="openid profile email phone",
-        token_endpoint="https://public/testing-hydra/oauth2/token",
-        userinfo_endpoint="https://public/testing-hydra/userinfo",
-        jwt_access_token=True,
-    )
-
-
-def test_provider_info_in_databag_when_ingress_then_oauth_relation(
-    harness: Harness, mocked_set_provider_info: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_ingress_relation(harness, "public")
-    setup_oauth_relation(harness)
-
-    mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
-        issuer_url="https://public/testing-hydra",
-        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
-        scope="openid profile email phone",
-        token_endpoint="https://public/testing-hydra/oauth2/token",
-        userinfo_endpoint="https://public/testing-hydra/userinfo",
-        jwt_access_token=True,
-    )
-
-
-def test_provider_info_called_when_oauth_relation_then_ingress(
-    harness: Harness, mocked_set_provider_info: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    setup_oauth_relation(harness)
-    setup_ingress_relation(harness, "public")
-
-    mocked_set_provider_info.assert_called_with(
-        authorization_endpoint="https://public/testing-hydra/oauth2/auth",
-        introspection_endpoint="http://hydra.testing.svc.cluster.local:4445/admin/oauth2/introspect",
-        issuer_url="https://public/testing-hydra",
-        jwks_endpoint="https://public/testing-hydra/.well-known/jwks.json",
-        scope="openid profile email phone",
-        token_endpoint="https://public/testing-hydra/oauth2/token",
-        userinfo_endpoint="https://public/testing-hydra/userinfo",
-        jwt_access_token=True,
-    )
-
-
-def test_client_created_event_emitted(
-    harness: Harness,
-    mocked_create_client: MagicMock,
-    mocked_set_client_credentials: MagicMock,
-    mocked_hydra_is_running: MagicMock,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    client_credentials = mocked_create_client.return_value
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    peer_relation_id, _ = setup_peer_relation(harness)
-    relation_id, _ = setup_oauth_relation(harness)
-
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-    peer_data = harness.get_relation_data(peer_relation_id, harness.charm.app)
-
-    assert peer_data
-    mocked_set_client_credentials.assert_called_once_with(
-        relation_id, client_credentials["client_id"], client_credentials["client_secret"]
-    )
-
-
-def test_client_created_event_emitted_without_peers(
-    harness: Harness,
-    mocked_create_client: MagicMock,
-    mocked_set_client_credentials: MagicMock,
-    mocked_hydra_is_running: MagicMock,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    relation_id, _ = setup_oauth_relation(harness)
-
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-
-    assert not mocked_set_client_credentials.called
-
-
-def test_client_created_event_emitted_cannot_connect(
-    harness: Harness, mocked_create_client: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, False)
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-
-    assert not mocked_create_client.called
-
-
-def test_client_created_event_emitted_without_service(
-    harness: Harness, mocked_create_client: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-
-    assert not mocked_create_client.called
-
-
-def test_exec_error_on_client_created_event_emitted(
-    harness: Harness,
-    mocked_create_client: MagicMock,
-    mocked_hydra_is_running: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level(logging.ERROR)
-    harness.set_can_connect(CONTAINER_NAME, True)
-    setup_peer_relation(harness)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    err = ExecError(
-        command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
-    )
-    mocked_create_client.side_effect = err
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-
-    error_messages = [record[2] for record in caplog.record_tuples]
-    assert f"Exited with code: {err.exit_code}. Stderr: {err.stderr}" in error_messages
-
-
-def test_client_changed_event_emitted(
-    harness: Harness, mocked_update_client: MagicMock, mocked_hydra_is_running: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_changed.emit(
-        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
-    )
-
-    assert mocked_update_client.called
-
-
-def test_client_changed_event_emitted_cannot_connect(
-    harness: Harness, mocked_update_client: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, False)
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_changed.emit(
-        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
-    )
-
-    assert not mocked_update_client.called
-
-
-def test_client_changed_event_emitted_without_service(
-    harness: Harness, mocked_update_client: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_changed.emit(
-        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
-    )
-
-    assert not mocked_update_client.called
-
-
-def test_exec_error_on_client_changed_event_emitted(
-    harness: Harness,
-    mocked_update_client: MagicMock,
-    mocked_hydra_is_running: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level(logging.ERROR)
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    err = ExecError(
-        command=["hydra", "create", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
-    )
-    mocked_update_client.side_effect = err
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_changed.emit(
-        relation_id=relation_id, client_id="client_id", **CLIENT_CONFIG
-    )
-
-    error_messages = [record[2] for record in caplog.record_tuples]
-    assert f"Exited with code: {err.exit_code}. Stderr: {err.stderr}" in error_messages
-
-
-def test_client_deleted_event_emitted(
-    harness: Harness,
-    mocked_create_client: MagicMock,
-    mocked_delete_client: MagicMock,
-    mocked_hydra_is_running: MagicMock,
-) -> None:
-    client_id = mocked_delete_client.return_value
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    peer_relation_id, _ = setup_peer_relation(harness)
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-
-    harness.charm.oauth.on.client_deleted.emit(relation_id)
-
-    mocked_delete_client.assert_called_with(client_id)
-    assert harness.get_relation_data(peer_relation_id, harness.charm.app) == {}
-
-
-def test_client_deleted_event_emitted_without_peers(
-    harness: Harness,
-    mocked_create_client: MagicMock,
-    mocked_delete_client: MagicMock,
-    mocked_hydra_is_running: MagicMock,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-
-    harness.charm.oauth.on.client_deleted.emit(relation_id)
-
-    assert not mocked_delete_client.called
-
-
-def test_client_deleted_event_emitted_cannot_connect(
-    harness: Harness, mocked_delete_client: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, False)
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_deleted.emit(relation_id)
-
-    assert not mocked_delete_client.called
-
-
-def test_client_deleted_event_emitted_without_service(
-    harness: Harness, mocked_delete_client: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_deleted.emit(relation_id)
-
-    assert not mocked_delete_client.called
-
-
-def test_exec_error_on_client_deleted_event_emitted(
-    harness: Harness,
-    mocked_create_client: MagicMock,
-    mocked_delete_client: MagicMock,
-    mocked_hydra_is_running: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level(logging.ERROR)
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    err = ExecError(
-        command=["hydra", "delete", "client", "1234"], exit_code=1, stdout="Out", stderr="Error"
-    )
-    mocked_delete_client.side_effect = err
-    setup_peer_relation(harness)
-    relation_id, _ = setup_oauth_relation(harness)
-    harness.charm.oauth.on.client_created.emit(relation_id=relation_id, **CLIENT_CONFIG)
-
-    harness.charm.oauth.on.client_deleted.emit(relation_id)
-
-    error_messages = [record[2] for record in caplog.record_tuples]
-    assert f"Exited with code: {err.exit_code}. Stderr: {err.stderr}" in error_messages
-
-
-def test_config_updated_without_login_ui_endpoints_interface(
-    harness: Harness, mocked_run_migration: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.leader_elected.emit()
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    setup_ingress_relation(harness, "public")
-    setup_peer_relation(harness)
-    setup_postgres_relation(harness)
-
-    expected_config = {
-        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {
-            "level": "info",
-            "format": "json",
-        },
-        "serve": {
-            "admin": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-            "public": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-        },
-        "strategies": {
-            "access_token": "jwt",
-            "jwt": {
-                "scope_claim": "list",
-            },
-            "scope": "exact",
-        },
-        "urls": {
-            "consent": "http://default-url.com/consent",
-            "error": "http://default-url.com/oidc_error",
-            "login": "http://default-url.com/login",
-            "device_verification": "http://default-url.com/device_verification",
-            "post_device_done": "http://default-url.com/post_device_done",
-            "self": {
-                "issuer": "https://public/testing-hydra",
-                "public": "https://public/testing-hydra",
-            },
-        },
-        "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
-            "jwks": {
-                "broadcast_keys": [
-                    "hydra.openid.id-token",
-                    "hydra.jwt.access-token",
-                ],
-            },
-        },
-    }
-
-    container_config = harness.charm._container.pull(
-        path="/etc/config/hydra.yaml", encoding="utf-8"
-    )
-    validate_config(expected_config, yaml.safe_load(container_config.read()))
-
-
-def test_config_updated_with_login_ui_endpoints_interface(
-    harness: Harness, mocked_migration_is_needed: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.leader_elected.emit()
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    setup_ingress_relation(harness, "public")
-    setup_postgres_relation(harness)
-    (_, login_databag) = setup_login_ui_relation(harness)
-
-    expected_config = {
-        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {
-            "level": "info",
-            "format": "json",
-        },
-        "serve": {
-            "admin": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-            "public": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-        },
-        "strategies": {
-            "access_token": "jwt",
-            "jwt": {
-                "scope_claim": "list",
-            },
-            "scope": "exact",
-        },
-        "urls": {
-            "consent": login_databag["consent_url"],
-            "error": login_databag["oidc_error_url"],
-            "login": login_databag["login_url"],
-            "device_verification": login_databag["device_verification_url"],
-            "post_device_done": login_databag["post_device_done_url"],
-            "self": {
-                "issuer": "https://public/testing-hydra",
-                "public": "https://public/testing-hydra",
-            },
-        },
-        "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
-            "jwks": {
-                "broadcast_keys": [
-                    "hydra.openid.id-token",
-                    "hydra.jwt.access-token",
-                ],
-            },
-        },
-    }
-
-    container_config = harness.charm._container.pull(
-        path="/etc/config/hydra.yaml", encoding="utf-8"
-    )
-    validate_config(expected_config, yaml.safe_load(container_config.read()))
-
-
-def test_config_updated_with_login_ui_endpoints_proxy_down_interface(
-    harness: Harness, mocked_migration_is_needed: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    harness.charm.on.leader_elected.emit()
-    harness.charm.on.hydra_pebble_ready.emit(CONTAINER_NAME)
-    setup_peer_relation(harness)
-    setup_ingress_relation(harness, "public")
-    setup_postgres_relation(harness)
-    setup_login_ui_without_proxy_relation(harness)
-
-    expected_config = {
-        "dsn": f"postgres://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}/testing_hydra",
-        "log": {
-            "level": "info",
-            "format": "json",
-        },
-        "serve": {
-            "admin": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-            "public": {
-                "cors": {
-                    "allowed_origins": ["*"],
-                    "enabled": True,
-                },
-            },
-        },
-        "strategies": {
-            "access_token": "jwt",
-            "jwt": {
-                "scope_claim": "list",
-            },
-            "scope": "exact",
-        },
-        "urls": {
-            "consent": "http://default-url.com/consent",
-            "error": "http://default-url.com/oidc_error",
-            "login": "http://default-url.com/login",
-            "device_verification": "http://default-url.com/device_verification",
-            "post_device_done": "http://default-url.com/post_device_done",
-            "self": {
-                "issuer": "https://public/testing-hydra",
-                "public": "https://public/testing-hydra",
-            },
-        },
-        "webfinger": {
-            "oidc_discovery": {"supported_scope": ["openid", "profile", "email", "phone"]},
-            "jwks": {
-                "broadcast_keys": [
-                    "hydra.openid.id-token",
-                    "hydra.jwt.access-token",
-                ],
-            },
-        },
-    }
-
-    container_config = harness.charm._container.pull(
-        path="/etc/config/hydra.yaml", encoding="utf-8"
-    )
-    validate_config(expected_config, yaml.safe_load(container_config.read()))
-
-
-@pytest.mark.parametrize(
-    "action",
-    [
-        "_on_create_oauth_client_action",
-        "_on_get_oauth_client_info_action",
-        "_on_update_oauth_client_action",
-        "_on_delete_oauth_client_action",
-        "_on_list_oauth_clients_action",
-        "_on_revoke_oauth_client_access_tokens_action",
-        "_on_rotate_key_action",
-    ],
+from pytest_mock import MockerFixture
+
+from cli import OAuthClient
+from constants import (
+    DATABASE_INTEGRATION_NAME,
+    OAUTH_INTEGRATION_NAME,
+    PEER_INTEGRATION_NAME,
+    PUBLIC_INGRESS_INTEGRATION_NAME,
+    WORKLOAD_CONTAINER,
 )
-def test_actions_when_cannot_connect(harness: Harness, action: str) -> None:
-    harness.set_can_connect(CONTAINER_NAME, False)
-    event = MagicMock()
-
-    getattr(harness.charm, action)(event)
-
-    event.fail.assert_called_with(
-        "Service is not ready. Please re-run the action when the charm is active"
-    )
-
-
-def test_create_oauth_client_action(
-    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_create_client: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    event = MagicMock()
-    event.params = {}
-
-    harness.charm._on_create_oauth_client_action(event)
-
-    ret = mocked_create_client.return_value
-    event.set_results.assert_called_with({
-        "client-id": ret.get("client_id"),
-        "client-secret": ret.get("client_secret"),
-        "audience": ret.get("audience"),
-        "grant-types": ", ".join(ret.get("grant_types")),
-        "redirect-uris": ", ".join(ret.get("redirect_uris")),
-        "response-types": ", ".join(ret.get("response_types")),
-        "scope": ret.get("scope"),
-        "token-endpoint-auth-method": ret.get("token_endpoint_auth_method"),
-    })
-
-
-def test_get_oauth_client_info_action(
-    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_get_client: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    ret = mocked_get_client.return_value
-    event = MagicMock()
-    event.params = {
-        "client-id": ret.get("client_id"),
-    }
-
-    harness.charm._on_get_oauth_client_info_action(event)
-
-    event.set_results.assert_called_with({
-        k.replace("_", "-"): ", ".join(v) if isinstance(v, list) else v for k, v in ret.items()
-    })
-
-
-def test_update_oauth_client_action(
-    harness: Harness,
-    mocked_hydra_is_running: MagicMock,
-    mocked_update_client: MagicMock,
-    mocked_get_client: MagicMock,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    ret = mocked_update_client.return_value
-    event = MagicMock()
-    event.params = {
-        "client-id": ret.get("client_id"),
-    }
-
-    harness.charm._on_update_oauth_client_action(event)
-
-    event.set_results.assert_called_with({
-        "client-id": ret.get("client_id"),
-        "client-secret": ret.get("client_secret"),
-        "audience": ret.get("audience"),
-        "grant-types": ", ".join(ret.get("grant_types")),
-        "redirect-uris": ", ".join(ret.get("redirect_uris")),
-        "response-types": ", ".join(ret.get("response_types")),
-        "scope": ret.get("scope"),
-        "token-endpoint-auth-method": ret.get("token_endpoint_auth_method"),
-    })
-
-
-def test_update_oauth_client_action_when_oauth_relation_client(
-    harness: Harness,
-    mocked_hydra_is_running: MagicMock,
-    mocked_update_client: MagicMock,
-    mocked_get_client: MagicMock,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    ret = mocked_update_client.return_value
-    event = MagicMock()
-    event.params = {
-        "client-id": ret.get("client_id"),
-    }
-    mocked_get_client.return_value["metadata"]["relation_id"] = 123
-
-    harness.charm._on_update_oauth_client_action(event)
-
-    event.fail.assert_called_with(
-        f"Cannot update client `{ret.get('client_id')}`, " "it is managed from an oauth relation."
-    )
-
-
-def test_delete_oauth_client_action(
-    harness: Harness,
-    mocked_hydra_is_running: MagicMock,
-    mocked_delete_client: MagicMock,
-    mocked_get_client: MagicMock,
-) -> None:
-    client_id = "client_id"
-    harness.set_can_connect(CONTAINER_NAME, True)
-    event = MagicMock()
-    event.params = {
-        "client-id": client_id,
-    }
-
-    harness.charm._on_delete_oauth_client_action(event)
-
-    event.set_results.assert_called_with({"client-id": client_id})
-
-
-def test_delete_oauth_client_action_when_oauth_relation_client(
-    harness: Harness,
-    mocked_hydra_is_running: MagicMock,
-    mocked_delete_client: MagicMock,
-    mocked_get_client: MagicMock,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    client_id = mocked_delete_client.return_value
-    event = MagicMock()
-    event.params = {
-        "client-id": client_id,
-    }
-    mocked_get_client.return_value["metadata"]["relation_id"] = 123
-
-    harness.charm._on_delete_oauth_client_action(event)
-
-    event.fail.assert_called_with(
-        f"Cannot delete client `{client_id}`, "
-        "it is managed from an oauth relation. "
-        "To delete it, remove the relation."
-    )
-
-
-def test_list_oauth_client_action(
-    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_list_client: MagicMock
-) -> None:
-    client_id = "client_id"
-    harness.set_can_connect(CONTAINER_NAME, True)
-    event = MagicMock()
-    event.params = {
-        "client-id": client_id,
-    }
-
-    harness.charm._on_list_oauth_clients_action(event)
-
-    ret = mocked_list_client.return_value
-    expected_output = {i["client_id"] for i in ret["items"]}
-    assert set(event.set_results.call_args_list[0][0][0].values()) == expected_output
-
-
-def test_revoke_oauth_client_access_tokens_action(
-    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_revoke_tokens: MagicMock
-) -> None:
-    client_id = "client_id"
-    harness.set_can_connect(CONTAINER_NAME, True)
-    event = MagicMock()
-    event.params = {
-        "client-id": client_id,
-    }
-
-    harness.charm._on_revoke_oauth_client_access_tokens_action(event)
-
-    event.set_results.assert_called_with({"client-id": client_id})
-
-
-def test_rotate_key_action(
-    harness: Harness, mocked_hydra_is_running: MagicMock, mocked_create_jwk: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    ret = mocked_create_jwk.return_value
-    event = MagicMock()
-    event.params = {"alg": "SHA256"}
-
-    harness.charm._on_rotate_key_action(event)
-
-    event.set_results.assert_called_with({"new-key-id": ret["keys"][0]["kid"]})
-
-
-def test_on_pebble_ready_with_loki(
-    harness: Harness, mocked_migration_is_needed: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    setup_ingress_relation(harness, "public")
-    setup_postgres_relation(harness)
-    container = harness.model.unit.get_container(CONTAINER_NAME)
-    harness.charm.on.leader_elected.emit()
-    harness.charm.on.hydra_pebble_ready.emit(container)
-
-    setup_loki_relation(harness)
-
-    assert harness.model.unit.status == ActiveStatus()
-
-
-def test_on_pebble_ready_with_bad_config(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    setup_postgres_relation(harness)
-    harness.update_config({"log_level": "invalid_config"})
-    container = harness.model.unit.get_container(CONTAINER_NAME)
-    harness.charm.on.hydra_pebble_ready.emit(container)
-
-    assert isinstance(harness.model.unit.status, BlockedStatus)
-    assert "Invalid configuration value for log_level" in harness.charm.unit.status.message
-
-
-def test_on_config_changed_with_invalid_log_level(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    setup_postgres_relation(harness)
-    harness.update_config({"log_level": "invalid_config"})
-
-    assert isinstance(harness.model.unit.status, BlockedStatus)
-    assert "Invalid configuration value for log_level" in harness.charm.unit.status.message
-
-
-def test_on_pebble_ready_make_dir_called(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    container = harness.model.unit.get_container(CONTAINER_NAME)
-    harness.charm.on.hydra_pebble_ready.emit(container)
-    assert container.isdir("/var/log")
-
-
-def test_verify_pebble_layer_tempo_k8s(harness: Harness) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    container = harness.model.unit.get_container(CONTAINER_NAME)
-    harness.charm.on.hydra_pebble_ready.emit(container)
-    setup_tempo_relation(harness)
-
-    expected_layer = {
-        "summary": "hydra-operator layer",
-        "description": "pebble config layer for hydra-operator",
-        "services": {
-            "hydra": {
-                "override": "replace",
-                "summary": "entrypoint of the hydra-operator image",
-                "command": '/bin/sh -c "hydra serve all --config /etc/config/hydra.yaml 2>&1 | tee -a /var/log/hydra.log"',
-                "startup": "disabled",
-                "environment": {
-                    "TRACING_PROVIDER": "otel",
-                    "TRACING_PROVIDERS_OTLP_SERVER_URL": "tempo-k8s-0.tempo-k8s-endpoints.namespace.svc.cluster.local:4318",
-                    "TRACING_PROVIDERS_OTLP_INSECURE": "true",
-                    "TRACING_PROVIDERS_OTLP_SAMPLING_SAMPLING_RATIO": "1.0",
-                },
-            }
-        },
-        "checks": {
-            "ready": {
-                "override": "replace",
-                "http": {"url": "http://localhost:4445/health/ready"},
-            },
-        },
-    }
-
-    assert harness.charm._hydra_layer.to_dict() == expected_layer
-
-
-def test_run_migration_action(harness: Harness, mocked_run_migration: MagicMock) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    setup_peer_relation(harness)
-    setup_postgres_relation(harness)
-    event = MagicMock()
-
-    harness.charm._on_run_migration(event)
-
-    mocked_run_migration.assert_called_once()
-    event.fail.assert_not_called()
-
-
-def test_error_on_run_migration_action(harness: Harness, mocked_run_migration: MagicMock) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    mocked_run_migration.side_effect = ExecError(
-        command=[], exit_code=1, stdout="", stderr="Error"
-    )
-    event = MagicMock()
-
-    harness.charm._on_run_migration(event)
-
-    mocked_run_migration.assert_called_once()
-    event.fail.assert_called()
-
-
-def test_timeout_on_run_migration_action(
-    harness: Harness, mocked_run_migration: MagicMock
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    mocked_run_migration.side_effect = TimeoutError
-    event = MagicMock()
-
-    harness.charm._on_run_migration(event)
-
-    mocked_run_migration.assert_called_once()
-    event.fail.assert_called()
-
-
-def test_unit_status_before_run_migration_action(
-    harness: Harness,
-    mocked_migration_is_needed: MagicMock,
-    mocked_run_migration: MagicMock,
-    mocked_get_secrets: MagicMock,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    mocked_migration_is_needed.return_value = True
-    setup_peer_relation(harness)
-    setup_ingress_relation(harness, "public")
-    setup_postgres_relation(harness)
-    assert harness.charm.unit.status == WaitingStatus(
-        "Waiting for migration to run, try running the `run-migration` action"
-    )
-
-
-def test_unit_status_after_run_migration_action(
-    harness: Harness,
-    mocked_migration_is_needed: MagicMock,
-    mocked_run_migration: MagicMock,
-    mocked_get_secrets: MagicMock,
-) -> None:
-    harness.set_can_connect(CONTAINER_NAME, True)
-    mocked_migration_is_needed.return_value = True
-    setup_peer_relation(harness)
-    setup_ingress_relation(harness, "public")
-    setup_postgres_relation(harness)
-
-    mocked_migration_is_needed.return_value = False
-    event = MagicMock()
-    harness.charm._on_run_migration(event)
-
-    assert isinstance(harness.model.unit.status, ActiveStatus)
+from exceptions import PebbleServiceError
+from integrations import InternalIngressData, PublicIngressData
+
+
+class TestPebbleReadyEvent:
+    def test_when_container_not_connected(
+        self,
+        harness: Harness,
+        mocked_pebble_service: MagicMock,
+        mocked_workload_service: MagicMock,
+        mocked_charm_holistic_handler: MagicMock,
+    ) -> None:
+        harness.set_can_connect(WORKLOAD_CONTAINER, False)
+
+        container = harness.model.unit.get_container(WORKLOAD_CONTAINER)
+        harness.charm.on.hydra_pebble_ready.emit(container)
+
+        assert isinstance(harness.model.unit.status, WaitingStatus)
+        mocked_pebble_service.prepare_dir.assert_not_called()
+        mocked_workload_service.open_port.assert_not_called()
+        mocked_charm_holistic_handler.assert_not_called()
+
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        mocked_pebble_service: MagicMock,
+        mocked_workload_service_version: MagicMock,
+        mocked_charm_holistic_handler: MagicMock,
+    ) -> None:
+        container = harness.model.unit.get_container(WORKLOAD_CONTAINER)
+        harness.charm.on.hydra_pebble_ready.emit(container)
+
+        mocked_pebble_service.prepare_dir.assert_called_once()
+        mocked_charm_holistic_handler.assert_called_once()
+        assert (
+            mocked_workload_service_version.call_count > 1
+        ), "workload service version should be set"
+        assert mocked_workload_service_version.call_args[0] == (
+            mocked_workload_service_version.return_value,
+        )
+
+
+class TestLeaderElectedEvent:
+    @patch("charm.Secrets")
+    def test_when_secrets_ready(self, mocked_secrets: MagicMock, harness: Harness) -> None:
+        harness.charm.secrets = mocked_secrets
+        mocked_secrets.is_ready = True
+
+        harness.set_leader(True)
+
+        mocked_secrets.__setitem__.assert_not_called()
+
+    def test_when_event_emitted(self, harness: Harness) -> None:
+        harness.set_leader(True)
+
+        secrets = harness.charm.secrets
+        assert secrets.is_ready is True
+
+
+class TestConfigChangeEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        mocked_charm_holistic_handler: MagicMock,
+        mocked_oauth_integration_created_handler: MagicMock,
+    ) -> None:
+        harness.update_config({"jwt_access_tokens": False})
+
+        mocked_charm_holistic_handler.assert_called_once()
+        mocked_oauth_integration_created_handler.assert_called_once()
+
+
+class TestHydraEndpointsReadyEvent:
+    def test_when_event_emitted(
+        self,
+        harness: MagicMock,
+        mocked_internal_ingress_data: MagicMock,
+    ) -> None:
+        with patch("charm.HydraEndpointsProvider.send_endpoint_relation_data") as mocked:
+            harness.charm.hydra_endpoints_provider.on.ready.emit()
+
+        mocked.assert_called_once_with(
+            str(mocked_internal_ingress_data.admin_endpoint),
+            str(mocked_internal_ingress_data.public_endpoint),
+        )
+
+
+class TestPublicIngressReadyEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        public_ingress_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+        mocked_oauth_integration_created_handler: MagicMock,
+        mocked_hydra_endpoints_ready_handler: MagicMock,
+    ) -> None:
+        harness.charm.public_ingress.on.ready.emit(
+            harness.model.get_relation("public-ingress"), "url"
+        )
+
+        mocked_charm_holistic_handler.assert_called_once()
+        mocked_oauth_integration_created_handler.assert_called_once()
+        mocked_hydra_endpoints_ready_handler.assert_called_once()
+
+
+class TestPublicIngressRevokedEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        public_ingress_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+        mocked_oauth_integration_created_handler: MagicMock,
+        mocked_hydra_endpoints_ready_handler: MagicMock,
+    ) -> None:
+        harness.charm.public_ingress.on.revoked.emit(harness.model.get_relation("public-ingress"))
+
+        mocked_charm_holistic_handler.assert_called_once()
+        mocked_oauth_integration_created_handler.assert_called_once()
+        mocked_hydra_endpoints_ready_handler.assert_called_once()
+
+
+class TestDatabaseCreatedEvent:
+    @pytest.fixture(autouse=True)
+    def mocked_secrets(self, mocker: MockerFixture, harness: Harness) -> MagicMock:
+        mocked = mocker.patch("charm.Secrets", autospec=True)
+        mocked.is_ready = True
+        harness.charm.secrets = mocked
+        return mocked
+
+    @pytest.fixture(autouse=True)
+    def migration_needed(self, mocker: MockerFixture, harness: Harness) -> None:
+        mocker.patch(
+            "charm.HydraCharm.migration_needed", new_callable=PropertyMock, return_value=True
+        )
+
+    def test_when_container_not_connected(
+        self,
+        harness: Harness,
+        database_integration: int,
+        peer_integration: int,
+    ) -> None:
+        harness.set_can_connect(WORKLOAD_CONTAINER, False)
+
+        harness.charm.database_requirer.on.database_created.emit(
+            harness.model.get_relation(DATABASE_INTEGRATION_NAME)
+        )
+        assert harness.model.unit.status == WaitingStatus("Container is not connected yet")
+
+    def test_when_peer_integration_not_exists(
+        self,
+        harness: Harness,
+        database_integration: int,
+    ) -> None:
+        harness.charm.database_requirer.on.database_created.emit(
+            harness.model.get_relation(DATABASE_INTEGRATION_NAME)
+        )
+        assert harness.model.unit.status == WaitingStatus(
+            f"Missing integration {PEER_INTEGRATION_NAME}"
+        )
+
+    def test_when_secrets_not_ready(
+        self,
+        harness: Harness,
+        database_integration: int,
+        peer_integration: int,
+        mocked_secrets: MagicMock,
+    ) -> None:
+        mocked_secrets.is_ready = False
+        harness.charm.database_requirer.on.database_created.emit(
+            harness.model.get_relation(DATABASE_INTEGRATION_NAME)
+        )
+        assert harness.model.unit.status == WaitingStatus("Missing required secrets")
+
+    @patch("charm.CommandLine.migrate")
+    def test_when_migration_not_needed(
+        self,
+        mocked_cli_migrate: MagicMock,
+        harness: Harness,
+        database_integration: int,
+        peer_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+    ) -> None:
+        with patch(
+            "charm.HydraCharm.migration_needed", new_callable=PropertyMock, return_value=False
+        ):
+            harness.charm.database_requirer.on.database_created.emit(
+                harness.model.get_relation(DATABASE_INTEGRATION_NAME)
+            )
+
+        mocked_charm_holistic_handler.assert_called_once()
+        mocked_cli_migrate.assert_not_called()
+
+    @patch("charm.CommandLine.migrate")
+    def test_when_not_leader_unit(
+        self,
+        mocked_cli_migration: MagicMock,
+        harness: Harness,
+        database_integration: int,
+        peer_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+    ) -> None:
+        harness.charm.database_requirer.on.database_created.emit(
+            harness.model.get_relation(DATABASE_INTEGRATION_NAME)
+        )
+
+        mocked_cli_migration.assert_not_called()
+        mocked_charm_holistic_handler.assert_not_called()
+        assert harness.model.unit.status == WaitingStatus(
+            "Waiting for leader unit to run the migration"
+        )
+
+    @patch("charm.CommandLine.migrate")
+    def test_when_leader_unit(
+        self,
+        mocked_cli_migration: MagicMock,
+        harness: Harness,
+        database_integration: int,
+        peer_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+        mocked_workload_service_version: MagicMock,
+    ) -> None:
+        harness.set_leader(True)
+
+        harness.charm.database_requirer.on.database_created.emit(
+            harness.model.get_relation(DATABASE_INTEGRATION_NAME)
+        )
+
+        mocked_cli_migration.assert_called_once()
+        mocked_charm_holistic_handler.assert_called_once()
+
+        assert (
+            harness.charm.peer_data[f"migration_version_{database_integration}"]
+            == mocked_workload_service_version.return_value
+        ), "migration version should be set in peer data"
+
+
+class TestDatabaseChangedEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        database_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+    ) -> None:
+        harness.charm.database_requirer.on.endpoints_changed.emit(
+            harness.model.get_relation(DATABASE_INTEGRATION_NAME),
+        )
+
+        mocked_charm_holistic_handler.assert_called_once()
+
+
+class TestDatabaseBrokenEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        database_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+    ) -> None:
+        harness.charm.on[DATABASE_INTEGRATION_NAME].relation_broken.emit(
+            harness.model.get_relation(DATABASE_INTEGRATION_NAME),
+        )
+
+        mocked_charm_holistic_handler.assert_called_once()
+
+
+class TestOAuthIntegrationCreatedEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        mocked_public_ingress_data: PublicIngressData,
+        mocked_internal_ingress_data: InternalIngressData,
+        oauth_integration: int,
+    ) -> None:
+        with patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider:
+            harness.charm.on.oauth_relation_created.emit(
+                harness.model.get_relation(OAUTH_INTEGRATION_NAME),
+            )
+        expected_public_url = str(mocked_public_ingress_data.url)
+        expected_admin_url = str(mocked_internal_ingress_data.admin_endpoint)
+        mocked_provider.assert_called_once()
+        assert mocked_provider.call_args == call(
+            issuer_url=f"{expected_public_url}",
+            authorization_endpoint=f"{expected_public_url}/oauth2/auth",
+            token_endpoint=f"{expected_public_url}/oauth2/token",
+            introspection_endpoint=f"{expected_admin_url}/admin/oauth2/introspect",
+            userinfo_endpoint=f"{expected_public_url}/userinfo",
+            jwks_endpoint=f"{expected_public_url}/.well-known/jwks.json",
+            scope="openid profile email phone",
+            jwt_access_token=True,
+        )
+
+
+class TestOAuthClientCreatedEvent:
+    def test_when_hydra_service_not_ready(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_oauth_client_config: dict,
+        peer_integration: int,
+        oauth_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = False
+
+        with patch("charm.CommandLine.create_oauth_client") as mocked_cli:
+            harness.charm.oauth_provider.on.client_created.emit(
+                relation_id=oauth_integration, **mocked_oauth_client_config
+            )
+
+        mocked_cli.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus("Waiting for Hydra service")
+
+    def test_when_peer_integration_not_exists(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_oauth_client_config: dict,
+        oauth_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+
+        with patch("charm.CommandLine.create_oauth_client") as mocked_cli:
+            harness.charm.oauth_provider.on.client_created.emit(
+                relation_id=oauth_integration, **mocked_oauth_client_config
+            )
+
+        mocked_cli.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus(
+            f"Missing integration {PEER_INTEGRATION_NAME}"
+        )
+
+    def test_when_oauth_client_creation_failed(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_oauth_client_config: dict,
+        peer_integration: int,
+        oauth_integration: int,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+
+        with (
+            caplog.at_level("ERROR"),
+            patch(
+                "charm.CommandLine.create_oauth_client",
+                return_value=None,
+            ),
+            patch(
+                "charm.OAuthProvider.set_client_credentials_in_relation_data"
+            ) as mocked_provider,
+        ):
+            harness.charm.oauth_provider.on.client_created.emit(
+                relation_id=oauth_integration, **mocked_oauth_client_config
+            )
+
+        assert "Failed to create the OAuth client bound with the oauth integration" in caplog.text
+        assert not harness.charm.peer_data[
+            f"oauth_{oauth_integration}"
+        ], "peer data should NOT be created"
+        mocked_provider.assert_not_called()
+
+    def test_when_succeeds(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_oauth_client_config: dict,
+        peer_integration: int,
+        oauth_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+
+        with (
+            patch(
+                "charm.CommandLine.create_oauth_client",
+                return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
+            ),
+            patch(
+                "charm.OAuthProvider.set_client_credentials_in_relation_data"
+            ) as mocked_provider,
+        ):
+            harness.charm.oauth_provider.on.client_created.emit(
+                relation_id=oauth_integration, **mocked_oauth_client_config
+            )
+
+        assert harness.charm.peer_data[f"oauth_{oauth_integration}"] == {"client_id": "client_id"}
+        mocked_provider.assert_called_once_with(oauth_integration, "client_id", "client_secret")
+
+
+class TestOAuthClientChangedEvent:
+    def test_when_hydra_service_not_ready(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_oauth_client_config: dict,
+        oauth_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = False
+
+        with patch("charm.CommandLine.update_oauth_client") as mocked_cli:
+            harness.charm.oauth_provider.on.client_changed.emit(
+                relation_id=oauth_integration, client_id="client_id", **mocked_oauth_client_config
+            )
+
+        mocked_cli.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus("Waiting for Hydra service")
+
+    def test_when_oauth_client_update_failed(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_oauth_client_config: dict,
+        oauth_integration: int,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+
+        with (
+            caplog.at_level("ERROR"),
+            patch("charm.CommandLine.update_oauth_client", return_value=None) as mocked_cli,
+        ):
+            harness.charm.oauth_provider.on.client_changed.emit(
+                relation_id=oauth_integration, client_id="client_id", **mocked_oauth_client_config
+            )
+
+        mocked_cli.assert_called_once()
+        assert (
+            f"Failed to update the OAuth client bound with the oauth integration: {oauth_integration}"
+            in caplog.text
+        )
+
+
+class TestOAuthClientDeletedEvent:
+    def test_when_hydra_service_not_ready(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        peer_integration: int,
+        oauth_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = False
+
+        with patch(
+            "charm.CommandLine.delete_oauth_client", return_value="client_id"
+        ) as mocked_cli:
+            harness.charm.oauth_provider.on.client_deleted.emit(
+                relation_id=oauth_integration,
+            )
+
+        mocked_cli.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus("Waiting for Hydra service")
+
+    def test_when_peer_integration_not_exists(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        oauth_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+
+        with patch(
+            "charm.CommandLine.delete_oauth_client", return_value="client_id"
+        ) as mocked_cli:
+            harness.charm.oauth_provider.on.client_deleted.emit(
+                relation_id=oauth_integration,
+            )
+
+        mocked_cli.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus(
+            f"Missing integration {PEER_INTEGRATION_NAME}"
+        )
+
+    def test_when_peer_data_not_exists(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        peer_integration: int,
+        oauth_integration: int,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+
+        with (
+            caplog.at_level("ERROR"),
+            patch("charm.CommandLine.delete_oauth_client", return_value="client_id") as mocked_cli,
+        ):
+            harness.charm.oauth_provider.on.client_deleted.emit(
+                relation_id=oauth_integration,
+            )
+
+        mocked_cli.assert_not_called()
+        assert (
+            f"No OAuth client bound with the oauth integration: {oauth_integration}" in caplog.text
+        )
+
+    def test_when_oauth_client_deletion_failed(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        peer_integration: int,
+        oauth_integration: int,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+        harness.charm.peer_data[f"oauth_{oauth_integration}"] = {"client_id": "client_id"}
+
+        with (
+            caplog.at_level("ERROR"),
+            patch("charm.CommandLine.delete_oauth_client", return_value=None) as mocked_cli,
+        ):
+            harness.charm.oauth_provider.on.client_deleted.emit(
+                relation_id=oauth_integration,
+            )
+
+        mocked_cli.assert_called_once_with("client_id")
+        assert (
+            f"Failed to delete the OAuth client bound with the oauth integration: {oauth_integration}"
+            in caplog.text
+        )
+        assert harness.charm.peer_data[
+            f"oauth_{oauth_integration}"
+        ], "peer data should NOT be cleared"
+
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        peer_integration: int,
+        oauth_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+        harness.charm.peer_data[f"oauth_{oauth_integration}"] = {"client_id": "client_id"}
+
+        with patch(
+            "charm.CommandLine.delete_oauth_client", return_value="client_id"
+        ) as mocked_cli:
+            harness.charm.oauth_provider.on.client_deleted.emit(
+                relation_id=oauth_integration,
+            )
+
+        mocked_cli.assert_called_once_with("client_id")
+        assert not harness.charm.peer_data[
+            f"oauth_{oauth_integration}"
+        ], "peer data should be cleared"
+
+
+class TestHolisticHandler:
+    @pytest.fixture(autouse=True)
+    def mocked_database_integration(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.database_integration_exists", return_value=True)
+
+    @pytest.fixture(autouse=True)
+    def mocked_database_integration_data(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.DatabaseRequires.is_resource_created", return_value=True)
+
+    @pytest.fixture(autouse=True)
+    def mocked_public_ingress_ready(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.IngressPerAppRequirer.is_ready", return_value=True)
+
+    @pytest.fixture(autouse=True)
+    def mocked_secrets(self, mocker: MockerFixture, harness: Harness) -> MagicMock:
+        mocked = mocker.patch("charm.Secrets", autospec=True)
+        mocked.is_ready = True
+        harness.charm.secrets = mocked
+        return mocked
+
+    @pytest.fixture(autouse=True)
+    def migration_needed(self, mocker: MockerFixture, harness: Harness) -> None:
+        mocker.patch(
+            "charm.HydraCharm.migration_needed", new_callable=PropertyMock, return_value=False
+        )
+
+    def test_when_container_not_connected(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+    ) -> None:
+        harness.set_can_connect(WORKLOAD_CONTAINER, False)
+
+        harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus("Container is not connected yet")
+
+    def test_when_database_integration_missing(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+    ) -> None:
+        with patch("charm.database_integration_exists", return_value=False):
+            harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == BlockedStatus(
+            f"Missing integration {DATABASE_INTEGRATION_NAME}"
+        )
+
+    def test_when_public_ingress_not_ready(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+    ) -> None:
+        with patch("charm.IngressPerAppRequirer.is_ready", return_value=False):
+            harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == BlockedStatus(
+            f"Missing required relation with " f"{PUBLIC_INGRESS_INTEGRATION_NAME}"
+        )
+
+    def test_when_database_not_ready(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+    ) -> None:
+        with patch("charm.DatabaseRequires.is_resource_created", return_value=False):
+            harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus("Waiting for database creation")
+
+    def test_when_migration_is_needed(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+    ) -> None:
+        with patch(
+            "charm.HydraCharm.migration_needed", new_callable=PropertyMock, return_value=True
+        ):
+            harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus(
+            "Waiting for migration to run, try running the `run-migration` action"
+        )
+
+    def test_when_secrets_not_ready(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+        mocked_secrets: MagicMock,
+    ) -> None:
+        mocked_secrets.is_ready = False
+
+        harness.charm._holistic_handler(mocked_event)
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus("Waiting for secrets creation")
+
+    def test_when_pebble_plan_failed(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+        mocked_public_ingress_data: MagicMock,
+    ) -> None:
+        with (
+            patch("charm.ConfigFile.from_sources", return_value="config"),
+            patch("charm.PebbleService.plan", side_effect=PebbleServiceError),
+        ):
+            harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_called_once()
+        assert harness.charm.unit.status == BlockedStatus(
+            f"Failed to restart the service, please check the {WORKLOAD_CONTAINER} logs"
+        )
+
+    def test_when_succeeds(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+        mocked_public_ingress_data: MagicMock,
+    ) -> None:
+        with patch("charm.ConfigFile.from_sources", return_value="config"):
+            harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_called_once()
+        mocked_pebble_service.plan.assert_called_once()
+        assert harness.charm.unit.status == ActiveStatus()

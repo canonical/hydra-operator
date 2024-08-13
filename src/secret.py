@@ -33,6 +33,9 @@ class Secrets:
         return secret.get_content()
 
     def __setitem__(self, label: str, content: dict[str, str]) -> None:
+        if label not in self.LABELS:
+            raise ValueError(f"Invalid label: '{label}'. Valid labels are: {self.LABELS}.")
+
         self._model.app.add_secret(content, label=label)
 
     def values(self) -> ValuesView:

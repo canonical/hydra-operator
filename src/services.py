@@ -88,12 +88,6 @@ class WorkloadService:
         self._unit.open_port(protocol="tcp", port=ADMIN_PORT)
         self._unit.open_port(protocol="tcp", port=PUBLIC_PORT)
 
-    def prepare_dir(self, path: str | PurePath) -> None:
-        if self._container.isdir(path):
-            return
-
-        self._container.make_dir(path=path, make_parents=True)
-
 
 class PebbleService:
     """Pebble service abstraction running in a Juju unit."""

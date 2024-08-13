@@ -118,7 +118,11 @@ class CommandLine:
         Build Time: {time}
         """
         cmd = ["hydra", "version"]
-        stdout = self._run_cmd(cmd)
+        try:
+            stdout = self._run_cmd(cmd)
+        except Error as err:
+            logger.error("Failed to fetch the hydra version: %s", err)
+            return None
 
         matched = VERSION_REGEX.search(stdout)
         return matched.group("version") if matched else None
@@ -215,7 +219,6 @@ class CommandLine:
             logger.error("Failed to get the OAuth client: %s", err)
             if "Unable to locate the resource" in str(err):
                 logger.error("OAuth client not found: %s", client_id)
-
             return None
 
         return OAuthClient.model_validate_json(stdout)
