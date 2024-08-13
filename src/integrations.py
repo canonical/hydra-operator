@@ -16,6 +16,7 @@ from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer
 from jinja2 import Template
 from ops.model import Model
+from yarl import URL
 
 from configs import ServiceConfigs
 from constants import ADMIN_PORT, PEER_INTEGRATION_NAME, POSTGRESQL_DSN_TEMPLATE, PUBLIC_PORT
@@ -151,20 +152,20 @@ class LoginUIEndpointData:
 
 @dataclass(frozen=True, slots=True)
 class PublicIngressData:
-    url: str = ""
+    url: URL = URL()
 
     def to_service_configs(self) -> ServiceConfigs:
-        return {"public_url": self.url}
+        return {"public_url": str(self.url)}
 
     @classmethod
     def load(cls, requirer: IngressPerAppRequirer) -> "PublicIngressData":
-        return cls(url=requirer.url) if requirer.is_ready() else cls()  # type: ignore[arg-type]
+        return cls(url=URL(requirer.url)) if requirer.is_ready() else cls()  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True, slots=True)
 class InternalIngressData:
-    public_endpoint: str
-    admin_endpoint: str
+    public_endpoint: URL
+    admin_endpoint: URL
     config: dict = field(default_factory=dict)
 
     @classmethod
@@ -186,12 +187,12 @@ class InternalIngressData:
             )
         )
 
-        public_endpoint = (
+        public_endpoint = URL(
             external_endpoint
             if external_host
             else f"http://{app}.{model}.svc.cluster.local:{PUBLIC_PORT}"
         )
-        admin_endpoint = (
+        admin_endpoint = URL(
             external_endpoint
             if external_host
             else f"http://{app}.{model}.svc.cluster.local:{ADMIN_PORT}"

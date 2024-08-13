@@ -1,5 +1,6 @@
-pytest
-juju
-pytest-operator==0.36.0
-PyJWT==2.9.0
 -r requirements.txt
+httpx
+juju
+PyJWT==2.9.0
+pytest
+pytest-operator==0.36.0

@@ -1,5 +1,6 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
+
 from pathlib import PurePath
 from string import Template
 
@@ -33,3 +34,4 @@ PROMETHEUS_SCRAPE_INTEGRATION_NAME = "metrics-endpoint"
 LOKI_API_PUSH_INTEGRATION_NAME = "logging"
 GRAFANA_DASHBOARD_INTEGRATION_NAME = "grafana-dashboard"
 TEMPO_TRACING_INTEGRATION_NAME = "tracing"
+OAUTH_INTEGRATION_NAME = "oauth"
