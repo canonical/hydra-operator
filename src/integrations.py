@@ -61,6 +61,8 @@ class PeerData:
 
 @dataclass(frozen=True, slots=True)
 class DatabaseConfig:
+    """The data source from the database integration."""
+
     endpoint: str = ""
     database: str = ""
     username: str = ""
@@ -130,6 +132,8 @@ class TracingData:
 
 @dataclass(frozen=True, slots=True)
 class LoginUIEndpointData:
+    """The data source from the login-ui integration."""
+
     consent_url: str = ""
     device_verification_url: str = ""
     oidc_error_url: str = ""
@@ -152,6 +156,8 @@ class LoginUIEndpointData:
 
 @dataclass(frozen=True, slots=True)
 class PublicIngressData:
+    """The data source from the public-ingress integration."""
+
     url: URL = URL()
 
     def to_service_configs(self) -> ServiceConfigs:
@@ -164,6 +170,8 @@ class PublicIngressData:
 
 @dataclass(frozen=True, slots=True)
 class InternalIngressData:
+    """The data source from the internal-ingress integration."""
+
     public_endpoint: URL
     admin_endpoint: URL
     config: dict = field(default_factory=dict)

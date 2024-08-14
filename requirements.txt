@@ -1,7 +1,6 @@
 cosl
 dacite
 jinja2
-jsonschema
 ops>=2.0.0
 pydantic~=2.8.2
 yarl

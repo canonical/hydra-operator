@@ -15,6 +15,8 @@ from constants import (
 
 
 class Secrets:
+    """An abstraction of the charm secret management."""
+
     KEYS = (COOKIE_SECRET_KEY, SYSTEM_SECRET_KEY)
     LABELS = (COOKIE_SECRET_LABEL, SYSTEM_SECRET_LABEL)
 

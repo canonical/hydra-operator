@@ -13,6 +13,8 @@ ServiceConfigs: TypeAlias = Mapping[str, Any]
 
 
 class ServiceConfigSource(Protocol):
+    """An interface enforcing the contribution to workload service configs."""
+
     def to_service_configs(self) -> ServiceConfigs:
         pass
 
@@ -32,6 +34,8 @@ class CharmConfig:
 
 
 class ConfigFile:
+    """An abstraction of the workload service configurations."""
+
     @classmethod
     def from_sources(cls, *service_config_sources: ServiceConfigSource) -> str:
         with open("templates/hydra.yaml.j2", "r") as file:
