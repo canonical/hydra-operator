@@ -94,12 +94,14 @@ async def test_build_and_deploy(ops_test: OpsTest) -> None:
         application_name=TRAEFIK_PUBLIC_APP,
         channel="latest/edge",
         config={"external_hostname": PUBLIC_TRAEFIK_EXTERNAL_NAME},
+        trust=True,
     )
     await ops_test.model.deploy(
         TRAEFIK_CHARM,
         application_name=TRAEFIK_ADMIN_APP,
         channel="latest/edge",
         config={"external_hostname": "admin"},
+        trust=True,
     )
     await ops_test.model.wait_for_idle(
         apps=[TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
