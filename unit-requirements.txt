@@ -1,5 +1,6 @@
 -r requirements.txt
 coverage[toml]
 ipdb
+jsonschema
 pytest
 pytest-mock
