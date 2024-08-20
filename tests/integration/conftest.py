@@ -121,12 +121,17 @@ async def http_client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest_asyncio.fixture
 async def get_hydra_jwks(
     ops_test: OpsTest,
+    request: pytest.FixtureRequest,
     public_address: Callable,
+    admin_address: Callable,
     http_client: AsyncClient,
 ) -> Callable[[], Awaitable[Response]]:
+    address_func = admin_address if request.param == "admin" else public_address
+    scheme = "http" if request.param == "admin" else "https"
+
     async def wrapper() -> Response:
-        address = await public_address(ops_test)
-        url = f"https://{address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
+        address = await address_func(ops_test)
+        url = f"{scheme}://{address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
         return await http_client.get(url)
 
     return wrapper

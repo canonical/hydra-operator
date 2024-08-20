@@ -122,6 +122,7 @@ async def test_login_ui_endpoint_integration(
     assert all(login_ui_endpoint_integration_data.values())
 
 
+@pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)
 async def test_public_ingress_integration(
     ops_test: OpsTest,
     leader_public_ingress_integration_data: Optional[dict],
@@ -151,19 +152,24 @@ async def test_openid_configuration_endpoint(
     assert payload["jwks_uri"] == str(base_path / ".well-known/jwks.json")
 
 
-@pytest.mark.xfail
+@pytest.mark.parametrize("get_hydra_jwks", ["admin"], indirect=True)
 async def test_internal_ingress_integration(
     leader_internal_ingress_integration_data: Optional[dict],
     get_admin_clients: Response,
+    get_hydra_jwks: Callable[[], Awaitable[Response]],
 ) -> None:
     assert leader_internal_ingress_integration_data
     assert leader_internal_ingress_integration_data["external_host"] == ADMIN_INGRESS_DOMAIN
     assert leader_internal_ingress_integration_data["scheme"] == "http"
 
+    # examine the admin endpoint
     assert get_admin_clients.status_code == http.HTTPStatus.OK
 
+    # examine the public endpoint
+    resp = await get_hydra_jwks()
+    assert resp.status_code == http.HTTPStatus.OK
 
-# @pytest.mark.skip
+
 async def test_create_oauth_client_action(hydra_unit: Unit) -> None:
     action = await hydra_unit.run_action(
         "create-oauth-client",
@@ -310,6 +316,7 @@ async def test_delete_oauth_client(hydra_unit: Unit, oauth_clients: dict[str, st
     assert res.status == "failed"
 
 
+@pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)
 async def test_rotate_keys(
     get_hydra_jwks: Callable[[], Awaitable[Response]], hydra_unit: Unit
 ) -> None:
