@@ -10,8 +10,8 @@ WORKLOAD_CONTAINER = "hydra"
 WORKLOAD_SERVICE = "hydra"
 COOKIE_SECRET_KEY = "cookie"
 SYSTEM_SECRET_KEY = "system"
-COOKIE_SECRET_LABEL = "cookie-secret"
-SYSTEM_SECRET_LABEL = "system-secret"
+COOKIE_SECRET_LABEL = "cookiesecret"
+SYSTEM_SECRET_LABEL = "systemsecret"
 DEFAULT_OAUTH_SCOPES = ["openid", "profile", "email", "phone"]
 DEFAULT_RESPONSE_TYPES = ["code"]
 

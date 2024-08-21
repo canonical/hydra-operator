@@ -5,6 +5,7 @@
 import http
 import json
 import logging
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 import jwt
@@ -22,6 +23,7 @@ from conftest import (
     TRAEFIK_ADMIN_APP,
     TRAEFIK_CHARM,
     TRAEFIK_PUBLIC_APP,
+    integrate_dependencies,
     remove_integration,
 )
 from httpx import Response
@@ -30,23 +32,17 @@ from juju.unit import Unit
 from pytest_operator.plugin import OpsTest
 from yarl import URL
 
-from constants import (
-    DATABASE_INTEGRATION_NAME,
-    INTERNAL_INGRESS_INTEGRATION_NAME,
-    LOGIN_UI_INTEGRATION_NAME,
-    PUBLIC_INGRESS_INTEGRATION_NAME,
-)
+from constants import DATABASE_INTEGRATION_NAME, PUBLIC_INGRESS_INTEGRATION_NAME
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.mark.skip_if_deployed
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test: OpsTest) -> None:
-    charm_file = await ops_test.build_charm(".")
+async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
     await ops_test.model.deploy(
         application_name=HYDRA_APP,
-        entity_url=str(charm_file),
+        entity_url=str(local_charm),
         resources={"oci-image": HYDRA_IMAGE},
         series="jammy",
         trust=True,
@@ -87,16 +83,7 @@ async def test_build_and_deploy(ops_test: OpsTest) -> None:
     await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:ingress")
 
     # Integrate with dependencies
-    await ops_test.model.integrate(HYDRA_APP, DB_APP)
-    await ops_test.model.integrate(
-        f"{HYDRA_APP}:{LOGIN_UI_INTEGRATION_NAME}", f"{LOGIN_UI_APP}:{LOGIN_UI_INTEGRATION_NAME}"
-    )
-    await ops_test.model.integrate(
-        f"{HYDRA_APP}:{INTERNAL_INGRESS_INTEGRATION_NAME}", TRAEFIK_ADMIN_APP
-    )
-    await ops_test.model.integrate(
-        f"{HYDRA_APP}:{PUBLIC_INGRESS_INTEGRATION_NAME}", TRAEFIK_PUBLIC_APP
-    )
+    await integrate_dependencies(ops_test)
 
     await ops_test.model.wait_for_idle(
         apps=[HYDRA_APP, DB_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
@@ -380,4 +367,46 @@ async def test_scale_down(ops_test: OpsTest, hydra_application: Application) -> 
         status="active",
         timeout=5 * 60,
         wait_for_exact_units=target_unit_num,
+    )
+
+
+async def test_upgrade(
+    ops_test: OpsTest, hydra_application: Application, local_charm: Path
+) -> None:
+    # remove the current hydra application
+    await ops_test.model.remove_application(
+        app_name=HYDRA_APP,
+        block_until_done=True,
+        destroy_storage=True,
+    )
+
+    # deploy the latest hydra application from CharmHub
+    await ops_test.model.deploy(
+        application_name=HYDRA_APP,
+        entity_url="ch:hydra",
+        channel="edge",
+        series="jammy",
+        trust=True,
+    )
+
+    # integrate with dependencies
+    await integrate_dependencies(ops_test)
+
+    await ops_test.model.wait_for_idle(
+        apps=[HYDRA_APP, DB_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
+        raise_on_blocked=False,
+        status="active",
+        timeout=5 * 60,
+    )
+
+    # upgrade the charm
+    await hydra_application.refresh(
+        path=str(local_charm),
+        resources={"oci-image": HYDRA_IMAGE},
+    )
+
+    await ops_test.model.wait_for_idle(
+        apps=[HYDRA_APP],
+        status="active",
+        timeout=5 * 60,
     )

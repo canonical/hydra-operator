@@ -39,6 +39,19 @@ PUBLIC_INGRESS_DOMAIN = "public"
 ADMIN_INGRESS_DOMAIN = "admin"
 
 
+async def integrate_dependencies(ops_test: OpsTest) -> None:
+    await ops_test.model.integrate(HYDRA_APP, DB_APP)
+    await ops_test.model.integrate(
+        f"{HYDRA_APP}:{LOGIN_UI_INTEGRATION_NAME}", f"{LOGIN_UI_APP}:{LOGIN_UI_INTEGRATION_NAME}"
+    )
+    await ops_test.model.integrate(
+        f"{HYDRA_APP}:{INTERNAL_INGRESS_INTEGRATION_NAME}", TRAEFIK_ADMIN_APP
+    )
+    await ops_test.model.integrate(
+        f"{HYDRA_APP}:{PUBLIC_INGRESS_INTEGRATION_NAME}", TRAEFIK_PUBLIC_APP
+    )
+
+
 async def get_unit_data(ops_test: OpsTest, unit_name: str) -> dict:
     show_unit_cmd = (f"show-unit {unit_name}").split()
     _, stdout, _ = await ops_test.juju(*show_unit_cmd)
@@ -222,6 +235,11 @@ async def jwks_client(ops_test: OpsTest, public_address: Callable) -> PyJWKClien
         f"https://{address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json",
         ssl_context=ssl_ctx,
     )
+
+
+@pytest_asyncio.fixture(scope="module")
+async def local_charm(ops_test: OpsTest) -> Path:
+    return await ops_test.build_charm(".")
 
 
 @asynccontextmanager
