@@ -73,10 +73,6 @@ peers:
 
 config:
   options:
-    login_ui_url:
-      description: Kratos UI URL
-      type: string
-      default: "http://127.0.0.1:4455/"
     log_level:
       description: |
         The verbosity of logs produced by Hydra.
@@ -185,7 +181,7 @@ actions:
   rotate-key:
     description: Rotate the jwk used for signing tokens
     params:
-      alg:
+      algorithm:
         description: The algorithm that should be used
         type: string
         default: RS256
@@ -203,3 +199,6 @@ parts:
   charm:
     charm-binary-python-packages:
       - jsonschema
+    build-packages:
+      - rustc
+      - cargo
