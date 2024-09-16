@@ -9,7 +9,7 @@ from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
-from charms.tempo_k8s.v0.tracing import TracingEndpointRequirer
+from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer
 from ops.testing import Harness
@@ -144,7 +144,7 @@ class TestTracingData:
 
     def test_load_with_integration_ready(self, mocked_requirer: MagicMock) -> None:
         mocked_requirer.is_ready.return_value = True
-        mocked_requirer.otlp_http_endpoint.return_value = "http_endpoint"
+        mocked_requirer.get_endpoint.return_value = "http://http_endpoint"
 
         actual = TracingData.load(mocked_requirer)
         assert actual == TracingData(is_ready=True, http_endpoint="http_endpoint")
