@@ -28,7 +28,7 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 )
 from charms.loki_k8s.v0.loki_push_api import LogProxyConsumer, PromtailDigestError
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
-from charms.tempo_k8s.v0.tracing import TracingEndpointRequirer
+from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v2.ingress import (
     IngressPerAppReadyEvent,
     IngressPerAppRequirer,
@@ -174,8 +174,7 @@ class HydraCharm(CharmBase):
         )
 
         self.tracing_requirer = TracingEndpointRequirer(
-            self,
-            relation_name=TEMPO_TRACING_INTEGRATION_NAME,
+            self, relation_name=TEMPO_TRACING_INTEGRATION_NAME, protocols=["otlp_http"]
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
