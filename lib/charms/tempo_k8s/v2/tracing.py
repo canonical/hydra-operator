@@ -69,7 +69,6 @@ follows
 
 
 """  # noqa: W505
-
 import enum
 import json
 import logging
@@ -89,7 +88,13 @@ from typing import (
 )
 
 import pydantic
-from ops.charm import CharmBase, CharmEvents, RelationBrokenEvent, RelationEvent, RelationRole
+from ops.charm import (
+    CharmBase,
+    CharmEvents,
+    RelationBrokenEvent,
+    RelationEvent,
+    RelationRole,
+)
 from ops.framework import EventSource, Object
 from ops.model import ModelError, Relation
 from pydantic import BaseModel, Field
@@ -102,7 +107,7 @@ LIBAPI = 2
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 9
+LIBPATCH = 10
 
 PYDEPS = ["pydantic"]
 
@@ -832,7 +837,7 @@ class TracingEndpointRequirer(Object):
         """Is this endpoint ready?"""
         relation = relation or self._relation
         if not relation:
-            logger.debug(f"no relation on {self._relation_name!r}: tracing not ready")
+            logger.debug(f"no relation on {self._relation_name !r}: tracing not ready")
             return False
         if relation.data is None:
             logger.error(f"relation data is None for {relation}")
@@ -897,7 +902,16 @@ class TracingEndpointRequirer(Object):
     def get_endpoint(
         self, protocol: ReceiverProtocol, relation: Optional[Relation] = None
     ) -> Optional[str]:
-        """Receiver endpoint for the given protocol."""
+        """Receiver endpoint for the given protocol.
+
+        It could happen that this function gets called before the provider publishes the endpoints.
+        In such a scenario, if a non-leader unit calls this function, a permission denied exception will be raised due to
+        restricted access. To prevent this, this function needs to be guarded by the `is_ready` check.
+
+        Raises:
+        ProtocolNotRequestedError:
+            If the charm unit is the leader unit and attempts to obtain an endpoint for a protocol it did not request.
+        """
         endpoint = self._get_endpoint(relation or self._relation, protocol=protocol)
         if not endpoint:
             requested_protocols = set()
