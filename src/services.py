@@ -13,7 +13,6 @@ from constants import (
     ADMIN_PORT,
     CONFIG_FILE_NAME,
     HYDRA_SERVICE_COMMAND,
-    LOG_FILE,
     PUBLIC_PORT,
     WORKLOAD_CONTAINER,
     WORKLOAD_SERVICE,
@@ -30,11 +29,7 @@ PEBBLE_LAYER_DICT = {
         WORKLOAD_CONTAINER: {
             "override": "replace",
             "summary": "entrypoint of the hydra-operator image",
-            "command": '/bin/sh -c "{} {} 2>&1 | tee -a {}"'.format(
-                HYDRA_SERVICE_COMMAND,
-                f"--config {CONFIG_FILE_NAME}",
-                str(LOG_FILE),
-            ),
+            "command": f"{HYDRA_SERVICE_COMMAND} --config {CONFIG_FILE_NAME}",
             "startup": "disabled",
         }
     },
