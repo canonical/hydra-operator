@@ -10,7 +10,6 @@ from ops import ModelError
 from constants import (
     ADMIN_PORT,
     CONFIG_FILE_NAME,
-    LOG_DIR,
     PUBLIC_PORT,
     WORKLOAD_CONTAINER,
     WORKLOAD_SERVICE,
@@ -92,12 +91,6 @@ class TestPebbleService:
     @pytest.fixture
     def pebble_service(self, mocked_unit: MagicMock) -> PebbleService:
         return PebbleService(mocked_unit)
-
-    def test_prepare_dir(self, mocked_container: MagicMock, pebble_service: PebbleService) -> None:
-        with patch.object(mocked_container, "isdir", return_value=False):
-            pebble_service.prepare_dir(LOG_DIR)
-
-        mocked_container.make_dir.assert_called_once_with(path=LOG_DIR, make_parents=True)
 
     def test_push_config_file(
         self, mocked_container: MagicMock, pebble_service: PebbleService
