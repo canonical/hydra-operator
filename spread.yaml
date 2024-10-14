@@ -1,0 +1,144 @@
+project: hydra-charm-tests
+kill-timeout: 90m
+workers: 1
+
+environment:
+  JUJU_CHANNEL: 3.4/stable
+  CHARMCRAFT_CHANNEL: latest/stable
+  LXD_CHANNEL: latest/stable
+  MICROK8S_CHANNEL: 1.31-strict/stable
+  PROVIDER: microk8s
+
+  MICROK8S_ADDONS: hostpath-storage dns
+  METALLB_RANGE: 10.64.140.43-10.64.140.49
+
+  JUJU_BOOTSTRAP_OPTIONS: --model-default test-mode=true --model-default automatically-retry-hooks=false
+  JUJU_EXTRA_BOOTSTRAP_OPTIONS: ""
+  JUJU_BOOTSTRAP_CONSTRAINTS: ""
+
+  LANG: "C.UTF-8"
+  LANGUAGE: "en"
+
+  CI: "$(HOST: echo $CI)"
+  PROJECT_PATH: /root/proj
+  CRAFT_TEST_PATH: /root/proj/tests/spread/lib
+
+backends:
+  lxd:
+    type: adhoc
+    allocate: |
+      BASE="${BASE:-noble}"
+      VM_NAME="${VM_NAME:-ubuntu-${BASE}-${RANDOM}}"
+      DISK="${DISK:-20}"
+      CPU="${CPU:-4}"
+      MEM="${MEM:-8}"
+
+      lxc launch --vm \
+        "ubuntu:${BASE}" \
+        "${VM_NAME}" \
+        -c user.user-data="$(cat tests/spread/cloud-config.yaml)" \
+        -c limits.cpu="${CPU}" \
+        -c limits.memory="${MEM}GiB" \
+        -d root,size="${DISK}GiB"
+
+      # Wait for the spread user
+      while ! lxc exec "${VM_NAME}" -- id -u spread &>/dev/null; do sleep 0.5; done
+
+      # Set the instance address for spread
+      ADDRESS "$(lxc ls -f csv | grep "${VM_NAME}" | cut -d"," -f3 | cut -d" " -f1)"
+    discard: |
+      instance_name="$(lxc ls -f csv | grep $SPREAD_SYSTEM_ADDRESS | cut -f1 -d",")"
+      lxc delete -f $instance_name
+
+    systems:
+      - ubuntu-24.04:
+          username: spread
+          password: spread
+          workers: 1
+
+
+suites:
+  tests/spread/:
+    summary: Spread tests
+
+exclude:
+  - .coverage
+  - .git
+  - .github
+  - .pytest_cache
+  - .ruff_cache
+  - .tox
+  - .venv
+
+# this needs to be under /root because spread executes the test scripts
+# as root, which means that juju can only see files in root's
+# home directory due to snap confinement.
+path: /root/proj
+
+prepare: |
+  snap refresh --hold
+  if systemctl is-enabled unattended-upgrades.service; then
+    systemctl stop unattended-upgrades.service
+    systemctl mask unattended-upgrades.service
+  fi
+
+  # setup juju
+  snap install juju --classic --channel "$JUJU_CHANNEL"
+  mkdir -p "$HOME"/.local/share/juju
+
+  # setup microk8s
+  snap install microk8s --channel "$MICROK8S_CHANNEL"
+  snap refresh microk8s --channel "$MICROK8S_CHANNEL"
+  microk8s status --wait-ready
+
+  if [ ! -z "$MICROK8S_ADDONS" ]; then
+      microk8s enable $MICROK8S_ADDONS
+  fi
+
+  microk8s enable metallb:"$METALLB_RANGE"
+
+  microk8s kubectl wait --for=condition=available --timeout=5m -nkube-system deployment/coredns deployment/hostpath-provisioner
+  microk8s kubectl auth can-i create pods
+
+  # install tools
+  apt update
+  apt install -y tox
+  snap install charmcraft --classic --channel "$CHARMCRAFT_CHANNEL"
+  snap install jq
+  snap alias microk8s.kubectl kubectl
+  snap install yq
+  mkdir -p "$HOME"/.kube
+  microk8s config > ${HOME}/.kube/config
+
+  # bootstrap juju
+  agent_version="$(snap info juju | grep "$JUJU_CHANNEL" | tr "\n" " " | tr -s " " | cut -d " " -f4)"
+
+  export PATH=/snap/bin:$PROJECT_PATH/tests/spread/lib/tools:$PATH
+  export CONTROLLER_NAME="craft-test-$PROVIDER"
+  juju bootstrap --verbose "$PROVIDER" "$CONTROLLER_NAME" \
+    $JUJU_BOOTSTRAP_OPTIONS $JUJU_EXTRA_BOOTSTRAP_OPTIONS \
+    --bootstrap-constraints=$JUJU_BOOTSTRAP_CONSTRAINTS \
+    --agent-version="$agent_version"
+
+  juju add-model testing
+
+  if [[ -f "$PWD/hydra_ubuntu-22.04-amd64.charm" ]]; then
+    chown $(id -u):$(id -g) $PWD/hydra_ubuntu-22.04-amd64.charm
+  fi
+
+restore: |
+  if [[ -z "${CI:-}" ]]; then
+    rm -rf "$HOME"/.kube
+    rm -rf "$HOME"/.local/share/juju
+
+    snap remove --purge charmcraft
+    snap remove --purge jq
+    snap remove --purge juju
+    snap remove --purge kubectl
+    snap remove --purge microk8s
+    snap remove --purge yq
+
+    apt autoremove -y --purge
+    rm -Rf "$PROJECT_PATH"
+    mkdir -p "$PROJECT_PATH"
+  fi

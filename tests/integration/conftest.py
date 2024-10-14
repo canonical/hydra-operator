@@ -6,6 +6,7 @@ import re
 import ssl
 from contextlib import asynccontextmanager
 from pathlib import Path
+import subprocess
 from typing import AsyncGenerator, Awaitable, Callable, Optional
 
 import httpx
@@ -238,8 +239,20 @@ async def jwks_client(ops_test: OpsTest, public_address: Callable) -> PyJWKClien
 
 
 @pytest_asyncio.fixture(scope="module")
-async def local_charm(ops_test: OpsTest) -> Path:
-    return await ops_test.build_charm(".")
+async def local_charm(request) -> Path:
+    charm_file = request.config.getoption("--charm-path")
+    if charm_file:
+        return charm_file
+
+    subprocess.run(
+        ["/snap/bin/charmcraft", "pack", "--verbose"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    return next(Path.glob(Path("."), "*.charm")).absolute()
 
 
 @asynccontextmanager

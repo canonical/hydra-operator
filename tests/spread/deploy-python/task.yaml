@@ -1,0 +1,10 @@
+summary: Run basic deployment tests
+systems:
+  - ubuntu-24.04
+
+execute: |
+  pushd "$PROJECT_PATH"
+
+  lxd init --auto
+
+  tox -e integration --recreate
