@@ -53,9 +53,15 @@ jobs:
           echo "setting output of destination_channel=$destination_channel"
           echo "::set-output name=destination_channel::$destination_channel"
 
+      - name: Setup lxd
+        uses: canonical/setup-lxd@v0.1.2
+        with:
+          channel: latest/stable
+      
       - name: Upload charm to charmhub
         uses: canonical/charming-actions/upload-charm@934193396735701141a1decc3613818e412da606 # 2.6.3
         with:
           credentials: ${{ secrets.CHARMCRAFT_CREDENTIALS }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           channel: ${{ steps.parse-inputs.outputs.destination_channel }}
+          destructive-mode: false

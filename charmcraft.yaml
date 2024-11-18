@@ -187,13 +187,9 @@ actions:
         default: RS256
         enumerate: [RS256, RS512, ES256, ES512, EdDSA]
 
-bases:
-  - build-on:
-      - name: "ubuntu"
-        channel: "22.04"
-    run-on:
-      - name: "ubuntu"
-        channel: "22.04"
+base: ubuntu@22.04
+platforms:
+  amd64:
 
 parts:
   charm:
