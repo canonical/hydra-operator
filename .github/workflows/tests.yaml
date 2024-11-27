@@ -6,7 +6,7 @@ on:
 jobs:
   unit-test:
     name: Unit tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -19,7 +19,7 @@ jobs:
 
   integration-test-microk8s:
     name: Integration tests (microk8s)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     needs:
       - unit-test
     steps:
@@ -31,7 +31,8 @@ jobs:
         with:
           provider: microk8s
           channel: 1.28-strict/stable
-          juju-channel: 3.4
+          juju-channel: 3.4/stable
+          microk8s-addons: "dns hostpath-storage metallb::10.64.140.43-10.64.140.49"
 
       - name: Run integration tests
         # set a predictable model name so it can be consumed by charm-logdump-action

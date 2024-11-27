@@ -1,9 +1,9 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import asyncio
 import functools
 import re
-import ssl
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator, Awaitable, Callable, Optional
@@ -30,13 +30,17 @@ HYDRA_IMAGE = METADATA["resources"]["oci-image"]["upstream-source"]
 DB_APP = "postgresql-k8s"
 CA_APP = "self-signed-certificates"
 LOGIN_UI_APP = "identity-platform-login-ui-operator"
+PUBLIC_INGRESS_APP = "public-ingress"
+INTERNAL_INGRESS_APP = "internal-ingress"
 TRAEFIK_CHARM = "traefik-k8s"
-TRAEFIK_ADMIN_APP = "traefik-admin"
-TRAEFIK_PUBLIC_APP = "traefik-public"
+ISTIO_INGRESS_CHARM = "istio-ingress-k8s"
+ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
 CLIENT_SECRET = "secret"
 CLIENT_REDIRECT_URIS = ["https://example.com"]
 PUBLIC_INGRESS_DOMAIN = "public"
-ADMIN_INGRESS_DOMAIN = "admin"
+INTERNAL_INGRESS_DOMAIN = "internal"
+PUBLIC_LOAD_BALANCER = f"{PUBLIC_INGRESS_APP}-istio"
+INTERNAL_LOAD_BALANCER = f"{INTERNAL_INGRESS_APP}-lb"
 
 
 async def integrate_dependencies(ops_test: OpsTest) -> None:
@@ -45,10 +49,10 @@ async def integrate_dependencies(ops_test: OpsTest) -> None:
         f"{HYDRA_APP}:{LOGIN_UI_INTEGRATION_NAME}", f"{LOGIN_UI_APP}:{LOGIN_UI_INTEGRATION_NAME}"
     )
     await ops_test.model.integrate(
-        f"{HYDRA_APP}:{INTERNAL_INGRESS_INTEGRATION_NAME}", TRAEFIK_ADMIN_APP
+        f"{HYDRA_APP}:{INTERNAL_INGRESS_INTEGRATION_NAME}", INTERNAL_INGRESS_APP
     )
     await ops_test.model.integrate(
-        f"{HYDRA_APP}:{PUBLIC_INGRESS_INTEGRATION_NAME}", TRAEFIK_PUBLIC_APP
+        f"{HYDRA_APP}:{PUBLIC_INGRESS_INTEGRATION_NAME}", PUBLIC_INGRESS_APP
     )
 
 
@@ -110,19 +114,34 @@ async def leader_peer_integration_data(app_integration_data: Callable) -> Option
     return await app_integration_data(HYDRA_APP, HYDRA_APP)
 
 
-async def unit_address(ops_test: OpsTest, *, app_name: str, unit_num: int = 0) -> str:
-    status = await ops_test.model.get_status()
-    return status["applications"][app_name]["units"][f"{app_name}/{unit_num}"]["address"]
+async def get_k8s_service_address(namespace: str, service_name: str) -> str:
+    cmd = [
+        "kubectl",
+        "-n",
+        namespace,
+        "get",
+        f"service/{service_name}",
+        "-o=jsonpath={.status.loadBalancer.ingress[0].ip}",
+    ]
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await process.communicate()
+
+    return stdout.decode().strip() if not process.returncode else ""
 
 
 @pytest_asyncio.fixture
-async def public_address() -> Callable[[OpsTest, int], Awaitable[str]]:
-    return functools.partial(unit_address, app_name=TRAEFIK_PUBLIC_APP)
+async def public_ingress_address(ops_test: OpsTest) -> str:
+    return await get_k8s_service_address(ops_test.model_name, PUBLIC_LOAD_BALANCER)
 
 
 @pytest_asyncio.fixture
-async def admin_address() -> Callable[[OpsTest, int], Awaitable[str]]:
-    return functools.partial(unit_address, app_name=TRAEFIK_ADMIN_APP)
+async def internal_ingress_address(ops_test: OpsTest) -> str:
+    return await get_k8s_service_address(ops_test.model_name, INTERNAL_LOAD_BALANCER)
 
 
 @pytest_asyncio.fixture
@@ -135,47 +154,59 @@ async def http_client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def get_hydra_jwks(
     ops_test: OpsTest,
     request: pytest.FixtureRequest,
-    public_address: Callable,
-    admin_address: Callable,
+    public_ingress_address: str,
+    internal_ingress_address: str,
     http_client: AsyncClient,
 ) -> Callable[[], Awaitable[Response]]:
-    address_func = admin_address if request.param == "admin" else public_address
-    scheme = "http" if request.param == "admin" else "https"
+    scheme = "http" if request.param == "internal" else "https"
+    host = INTERNAL_INGRESS_DOMAIN if request.param == "internal" else PUBLIC_INGRESS_DOMAIN
+    address = internal_ingress_address if request.param == "internal" else public_ingress_address
+    url = f"{scheme}://{address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
 
     async def wrapper() -> Response:
-        address = await address_func(ops_test)
-        url = f"{scheme}://{address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
-        return await http_client.get(url)
+        return await http_client.get(
+            url, headers={"Host": host}, extensions={"sni_hostname": host}
+        )
 
     return wrapper
 
 
 @pytest_asyncio.fixture
 async def get_openid_configuration(
-    ops_test: OpsTest, public_address: Callable, http_client: AsyncClient
+    ops_test: OpsTest,
+    public_ingress_address: str,
+    http_client: AsyncClient,
 ) -> Response:
-    address = await public_address(ops_test)
-    url = f"https://{address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/openid-configuration"
-    return await http_client.get(url)
+    url = f"https://{public_ingress_address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/openid-configuration"
+    return await http_client.get(
+        url,
+        headers={"Host": PUBLIC_INGRESS_DOMAIN},
+        extensions={"sni_hostname": PUBLIC_INGRESS_DOMAIN},
+    )
 
 
 @pytest_asyncio.fixture
 async def get_admin_clients(
-    ops_test: OpsTest, admin_address: Callable, http_client: AsyncClient
+    ops_test: OpsTest,
+    internal_ingress_address: str,
+    http_client: AsyncClient,
 ) -> Response:
-    address = await admin_address(ops_test)
-    url = f"http://{address}/{ops_test.model_name}-{HYDRA_APP}/admin/clients"
-    return await http_client.get(url)
+    url = f"http://{internal_ingress_address}/{ops_test.model_name}-{HYDRA_APP}/admin/clients"
+    return await http_client.get(url, headers={"Host": INTERNAL_INGRESS_DOMAIN})
 
 
 @pytest_asyncio.fixture
 async def client_credential_request(
-    ops_test: OpsTest, public_address: Callable, http_client: AsyncClient
+    ops_test: OpsTest,
+    public_ingress_address: str,
+    http_client: AsyncClient,
 ) -> Callable[[str, str], Awaitable[Response]]:
     async def wrapper(client_id: str, client_secret: str) -> Response:
-        address = await public_address(ops_test)
-        url = f"https://{address}/{ops_test.model_name}-{HYDRA_APP}/oauth2/token"
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        url = f"https://{public_ingress_address}/{ops_test.model_name}-{HYDRA_APP}/oauth2/token"
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Host": PUBLIC_INGRESS_DOMAIN,
+        }
         return await http_client.post(
             url,
             headers=headers,
@@ -184,6 +215,7 @@ async def client_credential_request(
                 "grant_type": "client_credentials",
                 "scope": "openid profile",
             },
+            extensions={"sni_hostname": PUBLIC_INGRESS_DOMAIN},
         )
 
     return wrapper
@@ -225,15 +257,10 @@ async def oauth_clients(hydra_unit: Unit) -> dict[str, str]:
 
 
 @pytest_asyncio.fixture
-async def jwks_client(ops_test: OpsTest, public_address: Callable) -> PyJWKClient:
-    address = await public_address(ops_test)
-
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
+async def jwks_client(ops_test: OpsTest, internal_ingress_address: str) -> PyJWKClient:
     return PyJWKClient(
-        f"https://{address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json",
-        ssl_context=ssl_ctx,
+        f"http://{internal_ingress_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json",
+        headers={"Host": INTERNAL_INGRESS_DOMAIN},
     )
 
 

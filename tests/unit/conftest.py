@@ -97,7 +97,7 @@ def database_integration(harness: Harness) -> int:
 
 @pytest.fixture
 def public_ingress_integration(harness: Harness) -> int:
-    return harness.add_relation(PUBLIC_INGRESS_INTEGRATION_NAME, "traefik-public")
+    return harness.add_relation(PUBLIC_INGRESS_INTEGRATION_NAME, "public-ingress")
 
 
 @pytest.fixture
@@ -124,7 +124,7 @@ def database_integration_data(harness: Harness, database_integration: int) -> No
 def public_ingress_integration_data(harness: Harness, public_ingress_integration: int) -> None:
     harness.update_relation_data(
         public_ingress_integration,
-        "traefik-public",
+        "public-ingress",
         {
             "ingress": '{"url": "https://hydra.ory.com"}',
         },
