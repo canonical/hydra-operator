@@ -17,9 +17,16 @@ visit <https://www.ory.sh/docs/hydra/>.
 ## Usage
 
 ```shell
+# Deploy required charms
 juju deploy postgresql-k8s --channel edge --trust
+juju deploy istio-ingresss-k8s public-ingress --channel latest/edge --trust
+
+# Deploy hydra
 juju deploy hydra --trust
-juju integrate postgresql-k8s hydra
+
+# Integrate with required charms
+juju integrate hydra postgresql-k8s
+juju integrate hydra:public-ingress public-ingress
 ```
 
 You can follow the deployment status with `watch -c juju status --color`.
@@ -31,24 +38,19 @@ You can follow the deployment status with `watch -c juju status --color`.
 This charm requires an integration
 with [postgresql-k8s-operator](https://github.com/canonical/postgresql-k8s-operator).
 
-### Ingress
+### Public Ingress
 
-The Hydra Operator offers integration with
-the [traefik-k8s-operator](https://github.com/canonical/traefik-k8s-operator)
-for ingress. Hydra has two APIs which can be exposed through ingress, the public
-API and the admin API.
+This charm requires a `public-ingress` integration with
+the [istio-ingress-k8s](https://github.com/canonical/istio-ingress-k8s-operator)
+to expose the public API.
 
-If you have traefik deployed and configured in your hydra model, to provide
-ingress to the admin API run:
-
-```shell
-juju integrate traefik-admin hydra:admin-ingress
-```
-
-To provide ingress to the public API run:
+Make sure you've deployed
+the [istio-k8s](https://github.com/canonical/istio-k8s-operator) charm
+beforehand.
 
 ```shell
-juju integrate traefik-public hydra:public-ingress
+juju deploy istio-ingress-k8s public-ingress --channel latest/edge --trust
+juju integrate hydra:public-ingress public-ingress
 ```
 
 ### Kratos
