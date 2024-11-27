@@ -11,18 +11,20 @@ from typing import Awaitable, Callable, Optional
 import jwt
 import pytest
 from conftest import (
-    ADMIN_INGRESS_DOMAIN,
     CA_APP,
     CLIENT_REDIRECT_URIS,
     CLIENT_SECRET,
     DB_APP,
     HYDRA_APP,
     HYDRA_IMAGE,
+    INTERNAL_INGRESS_APP,
+    INTERNAL_INGRESS_DOMAIN,
+    ISTIO_CONTROL_PLANE_CHARM,
+    ISTIO_INGRESS_CHARM,
     LOGIN_UI_APP,
+    PUBLIC_INGRESS_APP,
     PUBLIC_INGRESS_DOMAIN,
-    TRAEFIK_ADMIN_APP,
     TRAEFIK_CHARM,
-    TRAEFIK_PUBLIC_APP,
     integrate_dependencies,
     remove_integration,
 )
@@ -40,6 +42,25 @@ logger = logging.getLogger(__name__)
 @pytest.mark.skip_if_deployed
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
+    await ops_test.track_model(
+        alias="istio-system",
+        model_name="istio-system",
+        destroy_storage=True,
+    )
+    istio_system = ops_test.models.get("istio-system")
+
+    await istio_system.model.deploy(
+        application_name=ISTIO_CONTROL_PLANE_CHARM,
+        entity_url=ISTIO_CONTROL_PLANE_CHARM,
+        channel="latest/edge",
+        trust=True,
+    )
+    await istio_system.model.wait_for_idle(
+        [ISTIO_CONTROL_PLANE_CHARM],
+        status="active",
+        timeout=5 * 60,
+    )
+
     await ops_test.model.deploy(
         application_name=HYDRA_APP,
         entity_url=str(local_charm),
@@ -56,17 +77,17 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
         trust=True,
     )
     await ops_test.model.deploy(
-        TRAEFIK_CHARM,
-        application_name=TRAEFIK_PUBLIC_APP,
+        ISTIO_INGRESS_CHARM,
+        application_name=PUBLIC_INGRESS_APP,
         channel="latest/edge",
         config={"external_hostname": PUBLIC_INGRESS_DOMAIN},
         trust=True,
     )
     await ops_test.model.deploy(
         TRAEFIK_CHARM,
-        application_name=TRAEFIK_ADMIN_APP,
+        application_name=INTERNAL_INGRESS_APP,
         channel="latest/edge",
-        config={"external_hostname": ADMIN_INGRESS_DOMAIN},
+        config={"external_hostname": INTERNAL_INGRESS_DOMAIN},
         trust=True,
     )
     await ops_test.model.deploy(
@@ -79,14 +100,14 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
         channel="latest/edge",
         trust=True,
     )
-    await ops_test.model.integrate(f"{TRAEFIK_PUBLIC_APP}:certificates", f"{CA_APP}:certificates")
-    await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:ingress")
+    await ops_test.model.integrate(f"{PUBLIC_INGRESS_APP}:certificates", f"{CA_APP}:certificates")
+    await ops_test.model.integrate(PUBLIC_INGRESS_APP, f"{LOGIN_UI_APP}:ingress")
 
     # Integrate with dependencies
     await integrate_dependencies(ops_test)
 
     await ops_test.model.wait_for_idle(
-        apps=[HYDRA_APP, DB_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
+        apps=[HYDRA_APP, DB_APP, PUBLIC_INGRESS_APP, INTERNAL_INGRESS_APP],
         raise_on_blocked=False,
         status="active",
         timeout=5 * 60,
@@ -139,14 +160,14 @@ async def test_openid_configuration_endpoint(
     assert payload["jwks_uri"] == str(base_path / ".well-known/jwks.json")
 
 
-@pytest.mark.parametrize("get_hydra_jwks", ["admin"], indirect=True)
+@pytest.mark.parametrize("get_hydra_jwks", ["internal"], indirect=True)
 async def test_internal_ingress_integration(
     leader_internal_ingress_integration_data: Optional[dict],
     get_admin_clients: Response,
     get_hydra_jwks: Callable[[], Awaitable[Response]],
 ) -> None:
     assert leader_internal_ingress_integration_data
-    assert leader_internal_ingress_integration_data["external_host"] == ADMIN_INGRESS_DOMAIN
+    assert leader_internal_ingress_integration_data["external_host"] == INTERNAL_INGRESS_DOMAIN
     assert leader_internal_ingress_integration_data["scheme"] == "http"
 
     # examine the admin endpoint
@@ -354,7 +375,7 @@ async def test_remove_database_integration(
 async def test_remove_public_ingress_integration(
     ops_test: OpsTest, hydra_application: Application
 ) -> None:
-    async with remove_integration(ops_test, TRAEFIK_PUBLIC_APP, PUBLIC_INGRESS_INTEGRATION_NAME):
+    async with remove_integration(ops_test, PUBLIC_INGRESS_APP, PUBLIC_INGRESS_INTEGRATION_NAME):
         assert hydra_application.status == "blocked"
 
 
@@ -393,7 +414,7 @@ async def test_upgrade(
     await integrate_dependencies(ops_test)
 
     await ops_test.model.wait_for_idle(
-        apps=[HYDRA_APP, DB_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
+        apps=[HYDRA_APP, DB_APP, PUBLIC_INGRESS_APP, INTERNAL_INGRESS_APP],
         raise_on_blocked=False,
         status="active",
         timeout=5 * 60,
