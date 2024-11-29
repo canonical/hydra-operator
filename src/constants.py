@@ -1,7 +1,6 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from pathlib import PurePath
 from string import Template
 
 # Charm constants
@@ -20,8 +19,6 @@ HYDRA_SERVICE_COMMAND = "hydra serve all"
 PUBLIC_PORT = 4444
 ADMIN_PORT = 4445
 CONFIG_FILE_NAME = "/etc/config/hydra.yaml"
-LOG_DIR = PurePath("/var/log")
-LOG_FILE = LOG_DIR / "hydra.log"
 
 # Integration constants
 DATABASE_INTEGRATION_NAME = "pg-database"

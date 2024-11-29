@@ -26,7 +26,7 @@ from charms.hydra.v0.oauth import (
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
-from charms.loki_k8s.v0.loki_push_api import LogProxyConsumer, PromtailDigestError
+from charms.loki_k8s.v1.loki_push_api import LogForwarder
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v2.ingress import (
@@ -61,8 +61,6 @@ from constants import (
     DEFAULT_OAUTH_SCOPES,
     GRAFANA_DASHBOARD_INTEGRATION_NAME,
     INTERNAL_INGRESS_INTEGRATION_NAME,
-    LOG_DIR,
-    LOG_FILE,
     LOGIN_UI_INTEGRATION_NAME,
     LOKI_API_PUSH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
@@ -161,12 +159,7 @@ class HydraCharm(CharmBase):
             ],
         )
 
-        self.loki_consumer = LogProxyConsumer(
-            self,
-            log_files=[str(LOG_FILE)],
-            relation_name=LOKI_API_PUSH_INTEGRATION_NAME,
-            container_name=WORKLOAD_CONTAINER,
-        )
+        self.loki_consumer = LogForwarder(self, relation_name=LOKI_API_PUSH_INTEGRATION_NAME)
 
         self._grafana_dashboards = GrafanaDashboardProvider(
             self,
@@ -242,12 +235,6 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.tracing_requirer.on.endpoint_changed, self._on_config_changed)
         self.framework.observe(self.tracing_requirer.on.endpoint_removed, self._on_config_changed)
 
-        # loki
-        self.framework.observe(
-            self.loki_consumer.on.promtail_digest_error,
-            self._promtail_error,
-        )
-
         # actions
         self.framework.observe(self.on.run_migration_action, self._on_run_migration)
         self.framework.observe(
@@ -290,7 +277,6 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Container is not connected yet")
             return
 
-        self._pebble_service.prepare_dir(LOG_DIR)
         self._workload_service.open_port()
 
         service_version = self._workload_service.version
@@ -476,9 +462,6 @@ class HydraCharm(CharmBase):
             str(internal_endpoints.admin_endpoint),
             str(internal_endpoints.public_endpoint),
         )
-
-    def _promtail_error(self, event: PromtailDigestError) -> None:
-        logger.error(event.message)
 
     def _holistic_handler(self, event: HookEvent) -> None:
         if not container_connectivity(self):

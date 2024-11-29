@@ -10,7 +10,6 @@ from ops import ModelError
 from constants import (
     ADMIN_PORT,
     CONFIG_FILE_NAME,
-    LOG_DIR,
     PUBLIC_PORT,
     WORKLOAD_CONTAINER,
     WORKLOAD_SERVICE,
@@ -95,9 +94,9 @@ class TestPebbleService:
 
     def test_prepare_dir(self, mocked_container: MagicMock, pebble_service: PebbleService) -> None:
         with patch.object(mocked_container, "isdir", return_value=False):
-            pebble_service.prepare_dir(LOG_DIR)
+            pebble_service.prepare_dir("/some/dir")
 
-        mocked_container.make_dir.assert_called_once_with(path=LOG_DIR, make_parents=True)
+        mocked_container.make_dir.assert_called_once_with(path="/some/dir", make_parents=True)
 
     def test_push_config_file(
         self, mocked_container: MagicMock, pebble_service: PebbleService

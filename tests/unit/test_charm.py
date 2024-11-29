@@ -34,7 +34,6 @@ class TestPebbleReadyEvent:
         harness.charm.on.hydra_pebble_ready.emit(container)
 
         assert isinstance(harness.model.unit.status, WaitingStatus)
-        mocked_pebble_service.prepare_dir.assert_not_called()
         mocked_workload_service.open_port.assert_not_called()
         mocked_charm_holistic_handler.assert_not_called()
 
@@ -48,7 +47,6 @@ class TestPebbleReadyEvent:
         container = harness.model.unit.get_container(WORKLOAD_CONTAINER)
         harness.charm.on.hydra_pebble_ready.emit(container)
 
-        mocked_pebble_service.prepare_dir.assert_called_once()
         mocked_charm_holistic_handler.assert_called_once()
         assert (
             mocked_workload_service_version.call_count > 1
