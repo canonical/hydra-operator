@@ -11,14 +11,14 @@ from typing import Awaitable, Callable, Optional
 import jwt
 import pytest
 from conftest import (
+    ADMIN_INGRESS_APP,
+    ADMIN_INGRESS_DOMAIN,
     CA_APP,
     CLIENT_REDIRECT_URIS,
     CLIENT_SECRET,
     DB_APP,
     HYDRA_APP,
     HYDRA_IMAGE,
-    INTERNAL_INGRESS_APP,
-    INTERNAL_INGRESS_DOMAIN,
     ISTIO_CONTROL_PLANE_CHARM,
     ISTIO_INGRESS_CHARM,
     LOGIN_UI_APP,
@@ -28,7 +28,7 @@ from conftest import (
     integrate_dependencies,
     remove_integration,
 )
-from httpx import Response
+from httpx import AsyncClient, Response
 from juju.application import Application
 from juju.unit import Unit
 from pytest_operator.plugin import OpsTest
@@ -85,9 +85,9 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
     )
     await ops_test.model.deploy(
         TRAEFIK_CHARM,
-        application_name=INTERNAL_INGRESS_APP,
+        application_name=ADMIN_INGRESS_APP,
         channel="latest/edge",
-        config={"external_hostname": INTERNAL_INGRESS_DOMAIN},
+        config={"external_hostname": ADMIN_INGRESS_DOMAIN},
         trust=True,
     )
     await ops_test.model.deploy(
@@ -107,7 +107,7 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
     await integrate_dependencies(ops_test)
 
     await ops_test.model.wait_for_idle(
-        apps=[HYDRA_APP, DB_APP, PUBLIC_INGRESS_APP, INTERNAL_INGRESS_APP],
+        apps=[HYDRA_APP, DB_APP, PUBLIC_INGRESS_APP, ADMIN_INGRESS_APP],
         raise_on_blocked=False,
         status="active",
         timeout=5 * 60,
@@ -130,11 +130,11 @@ async def test_login_ui_endpoint_integration(
     assert all(login_ui_endpoint_integration_data.values())
 
 
-@pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)
 async def test_public_ingress_integration(
     ops_test: OpsTest,
     leader_public_ingress_integration_data: Optional[dict],
-    get_hydra_jwks: Callable[[], Awaitable[Response]],
+    public_ingress_address: str,
+    http_client: AsyncClient,
 ) -> None:
     assert leader_public_ingress_integration_data
     assert leader_public_ingress_integration_data["ingress"]
@@ -142,8 +142,29 @@ async def test_public_ingress_integration(
     data = json.loads(leader_public_ingress_integration_data["ingress"])
     assert data["url"] == f"https://{PUBLIC_INGRESS_DOMAIN}/{ops_test.model_name}-{HYDRA_APP}"
 
-    resp = await get_hydra_jwks()
-    assert resp.status_code == http.HTTPStatus.OK
+    http_endpoint = (
+        f"http://{public_ingress_address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
+    )
+    resp = await http_client.get(
+        http_endpoint,
+        headers={"Host": PUBLIC_INGRESS_DOMAIN},
+    )
+    assert resp.status_code == http.HTTPStatus.MOVED_PERMANENTLY, (
+        f"Expected HTTP {http.HTTPStatus.MOVED_PERMANENTLY} for {http_endpoint}, got {resp.status_code}."
+    )
+
+    # Test HTTPS endpoint
+    https_endpoint = (
+        f"https://{public_ingress_address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
+    )
+    resp = await http_client.get(
+        https_endpoint,
+        headers={"Host": PUBLIC_INGRESS_DOMAIN},
+        extensions={"sni_hostname": PUBLIC_INGRESS_DOMAIN},
+    )
+    assert resp.status_code == http.HTTPStatus.OK, (
+        f"Expected HTTP {http.HTTPStatus.OK} for {https_endpoint}, got {resp.status_code}."
+    )
 
 
 async def test_openid_configuration_endpoint(
@@ -158,24 +179,6 @@ async def test_openid_configuration_endpoint(
     assert payload["token_endpoint"] == str(base_path / "oauth2/token")
     assert payload["userinfo_endpoint"] == str(base_path / "userinfo")
     assert payload["jwks_uri"] == str(base_path / ".well-known/jwks.json")
-
-
-@pytest.mark.parametrize("get_hydra_jwks", ["internal"], indirect=True)
-async def test_internal_ingress_integration(
-    leader_internal_ingress_integration_data: Optional[dict],
-    get_admin_clients: Response,
-    get_hydra_jwks: Callable[[], Awaitable[Response]],
-) -> None:
-    assert leader_internal_ingress_integration_data
-    assert leader_internal_ingress_integration_data["external_host"] == INTERNAL_INGRESS_DOMAIN
-    assert leader_internal_ingress_integration_data["scheme"] == "http"
-
-    # examine the admin endpoint
-    assert get_admin_clients.status_code == http.HTTPStatus.OK
-
-    # examine the public endpoint
-    resp = await get_hydra_jwks()
-    assert resp.status_code == http.HTTPStatus.OK
 
 
 async def test_create_oauth_client_action(hydra_unit: Unit) -> None:
@@ -414,7 +417,7 @@ async def test_upgrade(
     await integrate_dependencies(ops_test)
 
     await ops_test.model.wait_for_idle(
-        apps=[HYDRA_APP, DB_APP, PUBLIC_INGRESS_APP, INTERNAL_INGRESS_APP],
+        apps=[HYDRA_APP, DB_APP, PUBLIC_INGRESS_APP, ADMIN_INGRESS_APP],
         raise_on_blocked=False,
         status="active",
         timeout=5 * 60,

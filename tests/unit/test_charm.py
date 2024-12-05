@@ -10,14 +10,17 @@ from pytest_mock import MockerFixture
 
 from cli import OAuthClient
 from constants import (
+    ADMIN_PORT,
     DATABASE_INTEGRATION_NAME,
+    K8S_SERVICE_URL_TEMPLATE,
     OAUTH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PUBLIC_INGRESS_INTEGRATION_NAME,
+    PUBLIC_PORT,
     WORKLOAD_CONTAINER,
 )
 from exceptions import PebbleServiceError
-from integrations import InternalIngressData, PublicIngressData
+from integrations import PublicIngressData
 
 
 class TestPebbleReadyEvent:
@@ -49,9 +52,9 @@ class TestPebbleReadyEvent:
         harness.charm.on.hydra_pebble_ready.emit(container)
 
         mocked_charm_holistic_handler.assert_called_once()
-        assert (
-            mocked_workload_service_version.call_count > 1
-        ), "workload service version should be set"
+        assert mocked_workload_service_version.call_count > 1, (
+            "workload service version should be set"
+        )
         assert mocked_workload_service_version.call_args[0] == (
             mocked_workload_service_version.return_value,
         )
@@ -90,15 +93,22 @@ class TestConfigChangeEvent:
 class TestHydraEndpointsReadyEvent:
     def test_when_event_emitted(
         self,
-        harness: MagicMock,
-        mocked_internal_ingress_data: MagicMock,
+        harness: Harness,
     ) -> None:
         with patch("charm.HydraEndpointsProvider.send_endpoint_relation_data") as mocked:
             harness.charm.hydra_endpoints_provider.on.ready.emit()
 
         mocked.assert_called_once_with(
-            str(mocked_internal_ingress_data.admin_endpoint),
-            str(mocked_internal_ingress_data.public_endpoint),
+            K8S_SERVICE_URL_TEMPLATE.substitute(
+                app=harness.model.app.name,
+                model=harness.model.name,
+                port=ADMIN_PORT,
+            ),
+            K8S_SERVICE_URL_TEMPLATE.substitute(
+                app=harness.model.app.name,
+                model=harness.model.name,
+                port=PUBLIC_PORT,
+            ),
         )
 
 
@@ -109,7 +119,6 @@ class TestPublicIngressReadyEvent:
         public_ingress_integration: int,
         mocked_charm_holistic_handler: MagicMock,
         mocked_oauth_integration_created_handler: MagicMock,
-        mocked_hydra_endpoints_ready_handler: MagicMock,
     ) -> None:
         harness.charm.public_ingress.on.ready.emit(
             harness.model.get_relation("public-ingress"), "url"
@@ -117,7 +126,6 @@ class TestPublicIngressReadyEvent:
 
         mocked_charm_holistic_handler.assert_called_once()
         mocked_oauth_integration_created_handler.assert_called_once()
-        mocked_hydra_endpoints_ready_handler.assert_called_once()
 
 
 class TestPublicIngressRevokedEvent:
@@ -127,13 +135,11 @@ class TestPublicIngressRevokedEvent:
         public_ingress_integration: int,
         mocked_charm_holistic_handler: MagicMock,
         mocked_oauth_integration_created_handler: MagicMock,
-        mocked_hydra_endpoints_ready_handler: MagicMock,
     ) -> None:
         harness.charm.public_ingress.on.revoked.emit(harness.model.get_relation("public-ingress"))
 
         mocked_charm_holistic_handler.assert_called_once()
         mocked_oauth_integration_created_handler.assert_called_once()
-        mocked_hydra_endpoints_ready_handler.assert_called_once()
 
 
 class TestDatabaseCreatedEvent:
@@ -284,7 +290,6 @@ class TestOAuthIntegrationCreatedEvent:
         self,
         harness: Harness,
         mocked_public_ingress_data: PublicIngressData,
-        mocked_internal_ingress_data: InternalIngressData,
         oauth_integration: int,
     ) -> None:
         with patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider:
@@ -292,7 +297,11 @@ class TestOAuthIntegrationCreatedEvent:
                 harness.model.get_relation(OAUTH_INTEGRATION_NAME),
             )
         expected_public_url = str(mocked_public_ingress_data.url)
-        expected_admin_url = str(mocked_internal_ingress_data.admin_endpoint)
+        expected_admin_url = K8S_SERVICE_URL_TEMPLATE.substitute(
+            app=harness.charm.app.name,
+            model=harness.model.name,
+            port=ADMIN_PORT,
+        )
         mocked_provider.assert_called_once()
         assert mocked_provider.call_args == call(
             issuer_url=f"{expected_public_url}",
@@ -373,9 +382,9 @@ class TestOAuthClientCreatedEvent:
             )
 
         assert "Failed to create the OAuth client bound with the oauth integration" in caplog.text
-        assert not harness.charm.peer_data[
-            f"oauth_{oauth_integration}"
-        ], "peer data should NOT be created"
+        assert not harness.charm.peer_data[f"oauth_{oauth_integration}"], (
+            "peer data should NOT be created"
+        )
         mocked_provider.assert_not_called()
 
     def test_when_succeeds(
@@ -542,9 +551,9 @@ class TestOAuthClientDeletedEvent:
             f"Failed to delete the OAuth client bound with the oauth integration: {oauth_integration}"
             in caplog.text
         )
-        assert harness.charm.peer_data[
-            f"oauth_{oauth_integration}"
-        ], "peer data should NOT be cleared"
+        assert harness.charm.peer_data[f"oauth_{oauth_integration}"], (
+            "peer data should NOT be cleared"
+        )
 
     def test_when_event_emitted(
         self,
@@ -565,9 +574,9 @@ class TestOAuthClientDeletedEvent:
             )
 
         mocked_cli.assert_called_once_with("client_id")
-        assert not harness.charm.peer_data[
-            f"oauth_{oauth_integration}"
-        ], "peer data should be cleared"
+        assert not harness.charm.peer_data[f"oauth_{oauth_integration}"], (
+            "peer data should be cleared"
+        )
 
 
 class TestHolisticHandler:
@@ -637,7 +646,7 @@ class TestHolisticHandler:
         mocked_pebble_service.push_config_file.assert_not_called()
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == BlockedStatus(
-            f"Missing required relation with " f"{PUBLIC_INGRESS_INTEGRATION_NAME}"
+            f"Missing required relation with {PUBLIC_INGRESS_INTEGRATION_NAME}"
         )
 
     def test_when_database_not_ready(
