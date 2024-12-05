@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from dataclasses import asdict
-from unittest.mock import MagicMock, create_autospec, mock_open, patch
+from unittest.mock import MagicMock, create_autospec
 
 import pytest
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
@@ -11,14 +11,12 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 )
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
-from charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer
 from ops.testing import Harness
 from yarl import URL
 
-from constants import ADMIN_PORT, POSTGRESQL_DSN_TEMPLATE, PUBLIC_PORT
+from constants import POSTGRESQL_DSN_TEMPLATE
 from integrations import (
     DatabaseConfig,
-    InternalIngressData,
     LoginUIEndpointData,
     PeerData,
     PublicIngressData,
@@ -218,66 +216,3 @@ class TestPublicIngressData:
 
         actual = PublicIngressData.load(mocked_requirer)
         assert actual == PublicIngressData()
-
-
-class TestInternalIngressData:
-    @pytest.fixture
-    def mocked_requirer(self) -> MagicMock:
-        mocked = create_autospec(TraefikRouteRequirer)
-        mocked._charm = MagicMock()
-        mocked._charm.model.name = "model"
-        mocked._charm.app.name = "app"
-        mocked.scheme = "http"
-        return mocked
-
-    @pytest.fixture
-    def ingress_template(self) -> str:
-        return (
-            '{"model": "{{ model }}", '
-            '"app": "{{ app }}", '
-            '"public_port": {{ public_port }}, '
-            '"admin_port": {{ admin_port }}, '
-            '"external_host": "{{ external_host }}"}'
-        )
-
-    def test_load_with_external_host(
-        self, mocked_requirer: MagicMock, ingress_template: str
-    ) -> None:
-        mocked_requirer.external_host = "external.hydra.com"
-
-        with patch("builtins.open", mock_open(read_data=ingress_template)):
-            actual = InternalIngressData.load(mocked_requirer)
-
-        expected_ingress_config = {
-            "model": "model",
-            "app": "app",
-            "public_port": PUBLIC_PORT,
-            "admin_port": ADMIN_PORT,
-            "external_host": "external.hydra.com",
-        }
-        assert actual == InternalIngressData(
-            public_endpoint=URL("http://external.hydra.com/model-app"),
-            admin_endpoint=URL("http://external.hydra.com/model-app"),
-            config=expected_ingress_config,
-        )
-
-    def test_load_without_external_host(
-        self, mocked_requirer: MagicMock, ingress_template: str
-    ) -> None:
-        mocked_requirer.external_host = ""
-
-        with patch("builtins.open", mock_open(read_data=ingress_template)):
-            actual = InternalIngressData.load(mocked_requirer)
-
-        expected_ingress_config = {
-            "model": "model",
-            "app": "app",
-            "public_port": PUBLIC_PORT,
-            "admin_port": ADMIN_PORT,
-            "external_host": "",
-        }
-        assert actual == InternalIngressData(
-            public_endpoint=URL(f"http://app.model.svc.cluster.local:{PUBLIC_PORT}"),
-            admin_endpoint=URL(f"http://app.model.svc.cluster.local:{ADMIN_PORT}"),
-            config=expected_ingress_config,
-        )

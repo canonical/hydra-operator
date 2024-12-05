@@ -3,7 +3,7 @@
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, KeysView, Type, TypeAlias, Union
 from urllib.parse import urlparse
 
@@ -14,13 +14,11 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 )
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
-from charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer
-from jinja2 import Template
 from ops.model import Model
 from yarl import URL
 
 from configs import ServiceConfigs
-from constants import ADMIN_PORT, PEER_INTEGRATION_NAME, POSTGRESQL_DSN_TEMPLATE, PUBLIC_PORT
+from constants import PEER_INTEGRATION_NAME, POSTGRESQL_DSN_TEMPLATE
 from env_vars import EnvVars
 
 logger = logging.getLogger(__name__)
@@ -126,10 +124,11 @@ class TracingData:
             return cls()
 
         http_endpoint = urlparse(requirer.get_endpoint("otlp_http"))
+        url, scheme = http_endpoint.geturl(), http_endpoint.scheme
 
         return cls(
             is_ready=is_ready,
-            http_endpoint=http_endpoint.geturl().replace(f"{http_endpoint.scheme}://", "", 1),  # type: ignore[arg-type]
+            http_endpoint=url.replace(f"{scheme}://", "", 1),  # type: ignore[str-bytes-safe, arg-type]
         )
 
 
@@ -169,48 +168,3 @@ class PublicIngressData:
     @classmethod
     def load(cls, requirer: IngressPerAppRequirer) -> "PublicIngressData":
         return cls(url=URL(requirer.url)) if requirer.is_ready() else cls()  # type: ignore[arg-type]
-
-
-@dataclass(frozen=True, slots=True)
-class InternalIngressData:
-    """The data source from the internal-ingress integration."""
-
-    public_endpoint: URL
-    admin_endpoint: URL
-    config: dict = field(default_factory=dict)
-
-    @classmethod
-    def load(cls, requirer: TraefikRouteRequirer) -> "InternalIngressData":
-        model, app = requirer._charm.model.name, requirer._charm.app.name
-        external_host = requirer.external_host
-        external_endpoint = f"{requirer.scheme}://{external_host}/{model}-{app}"
-
-        with open("templates/ingress.json.j2", "r") as file:
-            template = Template(file.read())
-
-        ingress_config = json.loads(
-            template.render(
-                model=model,
-                app=app,
-                public_port=PUBLIC_PORT,
-                admin_port=ADMIN_PORT,
-                external_host=external_host,
-            )
-        )
-
-        public_endpoint = URL(
-            external_endpoint
-            if external_host
-            else f"http://{app}.{model}.svc.cluster.local:{PUBLIC_PORT}"
-        )
-        admin_endpoint = URL(
-            external_endpoint
-            if external_host
-            else f"http://{app}.{model}.svc.cluster.local:{ADMIN_PORT}"
-        )
-
-        return cls(
-            public_endpoint=public_endpoint,
-            admin_endpoint=admin_endpoint,
-            config=ingress_config,
-        )
