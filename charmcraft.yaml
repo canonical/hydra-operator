@@ -44,6 +44,11 @@ requires:
     limit: 1
     description: |
       Provides traces to COS Tempo instance
+  service-mesh:
+    limit: 1
+    interface: service_mesh
+  require-cmr-mesh:
+    interface: cross_model_mesh
 
 provides:
   hydra-endpoint-info:
@@ -60,6 +65,8 @@ provides:
     description: |
       Forwards the built-in grafana dashboard(s) for monitoring hydra.
     interface: grafana_dashboard
+  provide-cmr-mesh:
+    interface: cross_model_mesh
 
 peers:
   hydra:
