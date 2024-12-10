@@ -10,6 +10,7 @@ import logging
 from secrets import token_hex
 from typing import Any
 
+import ops
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
     DatabaseEndpointsChangedEvent,
@@ -26,6 +27,7 @@ from charms.hydra.v0.oauth import (
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
+from charms.istio_beacon_k8s.v0.service_mesh import ServiceMeshConsumer
 from charms.loki_k8s.v1.loki_push_api import LogForwarder
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
@@ -44,7 +46,6 @@ from ops.charm import (
     RelationEvent,
     WorkloadEvent,
 )
-from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
 from ops.pebble import Layer
 
@@ -160,7 +161,6 @@ class HydraCharm(CharmBase):
             ],
         )
 
-        # Loki logging relation
         self._log_forwarder = LogForwarder(self, relation_name=LOGGING_RELATION_NAME)
 
         self._grafana_dashboards = GrafanaDashboardProvider(
@@ -171,6 +171,8 @@ class HydraCharm(CharmBase):
         self.tracing_requirer = TracingEndpointRequirer(
             self, relation_name=TEMPO_TRACING_INTEGRATION_NAME, protocols=["otlp_http"]
         )
+
+        self.service_mesh = ServiceMeshConsumer(self)
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.on.leader_elected, self._on_leader_elected)
@@ -625,4 +627,4 @@ class HydraCharm(CharmBase):
 
 
 if __name__ == "__main__":
-    main(HydraCharm)
+    ops.main(HydraCharm)
