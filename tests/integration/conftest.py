@@ -12,14 +12,14 @@ import httpx
 import pytest
 import pytest_asyncio
 import yaml
-from httpx import AsyncClient, Response
+from httpx import AsyncClient, HTTPStatusError, RequestError, Response
 from juju.application import Application
 from juju.unit import Unit
-from jwt import PyJWKClient
+from jwt import PyJWKClient, PyJWKClientConnectionError
 from pytest_operator.plugin import OpsTest
 
 from constants import (
-    INTERNAL_INGRESS_INTEGRATION_NAME,
+    ADMIN_INGRESS_INTEGRATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     PUBLIC_INGRESS_INTEGRATION_NAME,
 )
@@ -31,16 +31,16 @@ DB_APP = "postgresql-k8s"
 CA_APP = "self-signed-certificates"
 LOGIN_UI_APP = "identity-platform-login-ui-operator"
 PUBLIC_INGRESS_APP = "public-ingress"
-INTERNAL_INGRESS_APP = "internal-ingress"
+ADMIN_INGRESS_APP = "admin-ingress"
 TRAEFIK_CHARM = "traefik-k8s"
 ISTIO_INGRESS_CHARM = "istio-ingress-k8s"
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
 CLIENT_SECRET = "secret"
 CLIENT_REDIRECT_URIS = ["https://example.com"]
 PUBLIC_INGRESS_DOMAIN = "public"
-INTERNAL_INGRESS_DOMAIN = "internal"
+ADMIN_INGRESS_DOMAIN = "admin"
 PUBLIC_LOAD_BALANCER = f"{PUBLIC_INGRESS_APP}-istio"
-INTERNAL_LOAD_BALANCER = f"{INTERNAL_INGRESS_APP}-lb"
+ADMIN_LOAD_BALANCER = f"{ADMIN_INGRESS_APP}-lb"
 
 
 async def integrate_dependencies(ops_test: OpsTest) -> None:
@@ -49,7 +49,7 @@ async def integrate_dependencies(ops_test: OpsTest) -> None:
         f"{HYDRA_APP}:{LOGIN_UI_INTEGRATION_NAME}", f"{LOGIN_UI_APP}:{LOGIN_UI_INTEGRATION_NAME}"
     )
     await ops_test.model.integrate(
-        f"{HYDRA_APP}:{INTERNAL_INGRESS_INTEGRATION_NAME}", INTERNAL_INGRESS_APP
+        f"{HYDRA_APP}:{ADMIN_INGRESS_INTEGRATION_NAME}", ADMIN_INGRESS_APP
     )
     await ops_test.model.integrate(
         f"{HYDRA_APP}:{PUBLIC_INGRESS_INTEGRATION_NAME}", PUBLIC_INGRESS_APP
@@ -103,13 +103,6 @@ async def leader_public_ingress_integration_data(app_integration_data: Callable)
 
 
 @pytest_asyncio.fixture
-async def leader_internal_ingress_integration_data(
-    app_integration_data: Callable,
-) -> Optional[dict]:
-    return await app_integration_data(HYDRA_APP, INTERNAL_INGRESS_INTEGRATION_NAME)
-
-
-@pytest_asyncio.fixture
 async def leader_peer_integration_data(app_integration_data: Callable) -> Optional[dict]:
     return await app_integration_data(HYDRA_APP, HYDRA_APP)
 
@@ -140,8 +133,8 @@ async def public_ingress_address(ops_test: OpsTest) -> str:
 
 
 @pytest_asyncio.fixture
-async def internal_ingress_address(ops_test: OpsTest) -> str:
-    return await get_k8s_service_address(ops_test.model_name, INTERNAL_LOAD_BALANCER)
+async def admin_ingress_address(ops_test: OpsTest) -> str:
+    return await get_k8s_service_address(ops_test.model_name, ADMIN_LOAD_BALANCER)
 
 
 @pytest_asyncio.fixture
@@ -155,17 +148,17 @@ async def get_hydra_jwks(
     ops_test: OpsTest,
     request: pytest.FixtureRequest,
     public_ingress_address: str,
-    internal_ingress_address: str,
     http_client: AsyncClient,
 ) -> Callable[[], Awaitable[Response]]:
-    scheme = "http" if request.param == "internal" else "https"
-    host = INTERNAL_INGRESS_DOMAIN if request.param == "internal" else PUBLIC_INGRESS_DOMAIN
-    address = internal_ingress_address if request.param == "internal" else public_ingress_address
-    url = f"{scheme}://{address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
+    url = (
+        f"https://{public_ingress_address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
+    )
 
     async def wrapper() -> Response:
         return await http_client.get(
-            url, headers={"Host": host}, extensions={"sni_hostname": host}
+            url,
+            headers={"Host": PUBLIC_INGRESS_DOMAIN},
+            extensions={"sni_hostname": PUBLIC_INGRESS_DOMAIN},
         )
 
     return wrapper
@@ -188,11 +181,11 @@ async def get_openid_configuration(
 @pytest_asyncio.fixture
 async def get_admin_clients(
     ops_test: OpsTest,
-    internal_ingress_address: str,
+    admin_ingress_address: str,
     http_client: AsyncClient,
 ) -> Response:
-    url = f"http://{internal_ingress_address}/{ops_test.model_name}-{HYDRA_APP}/admin/clients"
-    return await http_client.get(url, headers={"Host": INTERNAL_INGRESS_DOMAIN})
+    url = f"http://{admin_ingress_address}/{ops_test.model_name}-{HYDRA_APP}/admin/clients"
+    return await http_client.get(url, headers={"Host": ADMIN_INGRESS_DOMAIN})
 
 
 @pytest_asyncio.fixture
@@ -256,11 +249,37 @@ async def oauth_clients(hydra_unit: Unit) -> dict[str, str]:
     return (await action.wait()).results
 
 
+class CustomPyJWKClient(PyJWKClient):
+    def __init__(self, uri: str, hostname: str) -> None:
+        super().__init__(uri)
+        self._hostname = hostname
+
+    def fetch_data(self) -> dict:
+        jwk_set = None
+        try:
+            with httpx.Client(verify=False) as client:
+                response = client.get(
+                    self.uri,
+                    headers={"Host": self._hostname},
+                    extensions={"sni_hostname": self._hostname},
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                jwk_set = response.json()
+        except (HTTPStatusError, RequestError, TimeoutError) as e:
+            raise PyJWKClientConnectionError(f'Fail to fetch data from the url, err: "{e}"')
+        else:
+            return jwk_set
+        finally:
+            if self.jwk_set_cache is not None:
+                self.jwk_set_cache.put(jwk_set)
+
+
 @pytest_asyncio.fixture
-async def jwks_client(ops_test: OpsTest, internal_ingress_address: str) -> PyJWKClient:
-    return PyJWKClient(
-        f"http://{internal_ingress_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json",
-        headers={"Host": INTERNAL_INGRESS_DOMAIN},
+async def jwks_client(ops_test: OpsTest, public_ingress_address: str) -> PyJWKClient:
+    return CustomPyJWKClient(
+        uri=f"https://{public_ingress_address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json",
+        hostname=PUBLIC_INGRESS_DOMAIN,
     )
 
 

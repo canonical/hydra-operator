@@ -18,7 +18,7 @@ from constants import (
     PUBLIC_INGRESS_INTEGRATION_NAME,
     WORKLOAD_CONTAINER,
 )
-from integrations import InternalIngressData, PublicIngressData
+from integrations import PublicIngressData
 
 
 @pytest.fixture
@@ -81,11 +81,6 @@ def mocked_oauth_integration_created_handler(mocker: MockerFixture) -> MagicMock
 
 
 @pytest.fixture
-def mocked_hydra_endpoints_ready_handler(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch("charm.HydraCharm._on_hydra_endpoints_ready")
-
-
-@pytest.fixture
 def peer_integration(harness: Harness) -> int:
     return harness.add_relation(PEER_INTEGRATION_NAME, "hydra")
 
@@ -136,18 +131,6 @@ def mocked_public_ingress_data(mocker: MockerFixture) -> PublicIngressData:
     mocked = mocker.patch(
         "charm.PublicIngressData.load",
         return_value=PublicIngressData(url=URL("https://hydra.ory.com")),
-    )
-    return mocked.return_value
-
-
-@pytest.fixture
-def mocked_internal_ingress_data(mocker: MockerFixture) -> InternalIngressData:
-    mocked = mocker.patch(
-        "charm.InternalIngressData.load",
-        return_value=InternalIngressData(
-            public_endpoint=URL("http://public.hydra.com"),
-            admin_endpoint=URL("http://admin.hydra.com"),
-        ),
     )
     return mocked.return_value
 

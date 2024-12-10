@@ -4,6 +4,7 @@
 from string import Template
 
 # Charm constants
+K8S_SERVICE_URL_TEMPLATE = Template("http://$app.$model.svc.cluster.local:$port")
 POSTGRESQL_DSN_TEMPLATE = Template("postgres://$username:$password@$endpoint/$database")
 WORKLOAD_CONTAINER = "hydra"
 WORKLOAD_SERVICE = "hydra"
@@ -24,7 +25,6 @@ CONFIG_FILE_NAME = "/etc/config/hydra.yaml"
 DATABASE_INTEGRATION_NAME = "pg-database"
 PUBLIC_INGRESS_INTEGRATION_NAME = "public-ingress"
 ADMIN_INGRESS_INTEGRATION_NAME = "admin-ingress"
-INTERNAL_INGRESS_INTEGRATION_NAME = "internal-ingress"
 LOGIN_UI_INTEGRATION_NAME = "ui-endpoint-info"
 PEER_INTEGRATION_NAME = "hydra"
 PROMETHEUS_SCRAPE_INTEGRATION_NAME = "metrics-endpoint"

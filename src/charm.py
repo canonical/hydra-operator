@@ -34,7 +34,6 @@ from charms.traefik_k8s.v2.ingress import (
     IngressPerAppRequirer,
     IngressPerAppRevokedEvent,
 )
-from charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer
 from ops.charm import (
     ActionEvent,
     CharmBase,
@@ -43,7 +42,6 @@ from ops.charm import (
     LeaderElectedEvent,
     RelationBrokenEvent,
     RelationEvent,
-    RelationJoinedEvent,
     WorkloadEvent,
 )
 from ops.main import main
@@ -60,7 +58,7 @@ from constants import (
     DATABASE_INTEGRATION_NAME,
     DEFAULT_OAUTH_SCOPES,
     GRAFANA_DASHBOARD_INTEGRATION_NAME,
-    INTERNAL_INGRESS_INTEGRATION_NAME,
+    K8S_SERVICE_URL_TEMPLATE,
     LOGGING_RELATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
@@ -75,7 +73,6 @@ from constants import (
 from exceptions import MigrationError, PebbleServiceError
 from integrations import (
     DatabaseConfig,
-    InternalIngressData,
     LoginUIEndpointData,
     PeerData,
     PublicIngressData,
@@ -106,6 +103,17 @@ class HydraCharm(CharmBase):
         self._pebble_service = PebbleService(self.unit)
         self._cli = CommandLine(self._container)
 
+        self.admin_k8s_service_url = K8S_SERVICE_URL_TEMPLATE.substitute(
+            app=self.app.name,
+            model=self.model.name,
+            port=ADMIN_PORT,
+        )
+        self.public_k8s_service_url = K8S_SERVICE_URL_TEMPLATE.substitute(
+            app=self.app.name,
+            model=self.model.name,
+            port=PUBLIC_PORT,
+        )
+
         self.database_requirer = DatabaseRequires(
             self,
             relation_name=DATABASE_INTEGRATION_NAME,
@@ -126,13 +134,6 @@ class HydraCharm(CharmBase):
             port=PUBLIC_PORT,
             strip_prefix=True,
             redirect_https=False,
-        )
-
-        # ingress via raw traefik routing configuration
-        self.internal_ingress = TraefikRouteRequirer(
-            self,
-            self.model.get_relation(INTERNAL_INGRESS_INTEGRATION_NAME),
-            INTERNAL_INGRESS_INTEGRATION_NAME,
         )
 
         self.oauth_provider = OAuthProvider(self)
@@ -187,27 +188,9 @@ class HydraCharm(CharmBase):
             self._on_database_integration_broken,
         )
 
-        # admin ingress
-        self.framework.observe(self.admin_ingress.on.ready, self._on_admin_ingress_ready)
-        self.framework.observe(self.admin_ingress.on.revoked, self._on_ingress_revoked)
-
         # public ingress
         self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
         self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
-
-        # internal ingress
-        self.framework.observe(
-            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_joined,
-            self._on_internal_ingress_joined,
-        )
-        self.framework.observe(
-            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_changed,
-            self._on_internal_ingress_changed,
-        )
-        self.framework.observe(
-            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_broken,
-            self._on_internal_ingress_changed,
-        )
 
         # login-ui
         self.framework.observe(
@@ -297,28 +280,10 @@ class HydraCharm(CharmBase):
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
         self._holistic_handler(event)
         self._on_oauth_integration_created(event)
-        self._on_hydra_endpoints_ready(event)
-
-    def _on_admin_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
-        self._on_hydra_endpoints_ready(event)
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
         self._holistic_handler(event)
         self._on_oauth_integration_created(event)
-        self._on_hydra_endpoints_ready(event)
-
-    @leader_unit
-    def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
-        self.internal_ingress._relation = event.relation
-        self._on_internal_ingress_changed(event)
-
-    @leader_unit
-    def _on_internal_ingress_changed(self, event: RelationEvent) -> None:
-        if self.internal_ingress.is_ready():
-            internal_ingress_config = InternalIngressData.load(self.internal_ingress).config
-            self.internal_ingress.submit_to_traefik(internal_ingress_config)
-            self._on_hydra_endpoints_ready(event)
-            self._on_oauth_integration_created(event)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         if not container_connectivity(self):
@@ -371,14 +336,11 @@ class HydraCharm(CharmBase):
             logger.info("Public ingress URL is not available. Deferring the event.")
             return
 
-        internal_endpoints = InternalIngressData.load(self.internal_ingress)
         self.oauth_provider.set_provider_info_in_relation_data(
             issuer_url=str(public_url),
             authorization_endpoint=str(public_url / "oauth2/auth"),
             token_endpoint=str(public_url / "oauth2/token"),
-            introspection_endpoint=str(
-                internal_endpoints.admin_endpoint / "admin/oauth2/introspect"
-            ),
+            introspection_endpoint=f"{self.admin_k8s_service_url}/admin/oauth2/introspect",
             userinfo_endpoint=str(public_url / "userinfo"),
             jwks_endpoint=str(public_url / ".well-known/jwks.json"),
             scope=" ".join(DEFAULT_OAUTH_SCOPES),
@@ -458,10 +420,9 @@ class HydraCharm(CharmBase):
         self.peer_data.pop(f"oauth_{event.relation_id}")
 
     def _on_hydra_endpoints_ready(self, event: RelationEvent) -> None:
-        internal_endpoints = InternalIngressData.load(self.internal_ingress)
         self.hydra_endpoints_provider.send_endpoint_relation_data(
-            str(internal_endpoints.admin_endpoint),
-            str(internal_endpoints.public_endpoint),
+            self.admin_k8s_service_url,
+            self.public_k8s_service_url,
         )
 
     def _holistic_handler(self, event: HookEvent) -> None:
