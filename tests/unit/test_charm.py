@@ -405,6 +405,36 @@ class TestOAuthClientCreatedEvent:
         assert harness.charm.peer_data[f"oauth_{oauth_integration}"] == {"client_id": "client_id"}
         mocked_provider.assert_called_once_with(oauth_integration, "client_id", "client_secret")
 
+    def test_client_created_emitted_twice(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_oauth_client_config: dict,
+        peer_integration: int,
+        oauth_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+
+        with (
+            patch(
+                "charm.CommandLine.create_oauth_client",
+                return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
+            ),
+            patch(
+                "charm.OAuthProvider.set_client_credentials_in_relation_data"
+            ) as mocked_provider,
+        ):
+            harness.charm.oauth_provider.on.client_created.emit(
+                relation_id=oauth_integration, **mocked_oauth_client_config
+            )
+            harness.charm.oauth_provider.on.client_created.emit(
+                relation_id=oauth_integration, **mocked_oauth_client_config
+            )
+
+        assert harness.charm.peer_data[f"oauth_{oauth_integration}"] == {"client_id": "client_id"}
+        mocked_provider.assert_called_once()
+
 
 class TestOAuthClientChangedEvent:
     def test_when_hydra_service_not_ready(
