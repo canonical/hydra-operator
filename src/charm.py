@@ -397,6 +397,10 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
+        if self.peer_data[f"oauth_{event.relation_id}"]:
+            logger.info("Got client_created event, but client already exists. Ignoring event")
+            return
+
         target_oauth_client = OAuthClient(
             **event.snapshot(),
             **{"metadata": {"integration-id": str(event.relation_id)}},
