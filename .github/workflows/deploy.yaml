@@ -24,12 +24,12 @@ jobs:
   ci-test-deploy:
     uses: ./.github/workflows/_deploy.yaml
     with:
-      model: test-dev
+      model: test-stg
       revision: 336
       channel: latest/edge
     secrets:
-      CLIENT_ID: ${{ secrets.JIMM_DEV_CLIENT_ID }}
-      CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}
+      CLIENT_ID: ${{ secrets.JIMM_STG_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.JIMM_STG_CLIENT_SECRET }}
   dev-deploy:
     if: ${{ (inputs.model == 'dev') }}
     uses: ./.github/workflows/_deploy.yaml
