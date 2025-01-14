@@ -36,7 +36,7 @@ jobs:
         working-directory: ./deployment
         run: |
           terraform init
-          terraform import ${{ inputs.model}}:hydra
+          terraform import juju_application.application ${{ inputs.model}}:hydra
         env:
           TF_VAR_model: ${{ inputs.model }}
           TF_VAR_revision: ${{ inputs.revision }}
