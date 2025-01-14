@@ -43,10 +43,6 @@ variable "application_name" {
   type = string
 }
 
-variable "channel" {
-  type = string
-}
-
 variable "revision" {
   type = number
 }
@@ -72,7 +68,6 @@ resource "juju_application" "application" {
 
   charm {
     name    = var.charm.name
-    channel = var.channel
     base    = var.charm.base
     revision = var.revision
   }
