@@ -20,7 +20,7 @@ jobs:
   ci-test-deploy:
     uses: ./.github/workflows/_deploy.yaml
     with:
-      model: k8s-dev
+      model: test-dev
       revision: 336
       channel: latest/edge
     secrets:
