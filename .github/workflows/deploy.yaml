@@ -1,0 +1,36 @@
+# reusable workflow triggered manually
+name: deploy
+run-name: Deploy ${{ inputs.channel}}@${{ inputs.revision}} in ${{ inputs.model }}
+
+
+on:
+  workflow_dispatch:
+    inputs:
+        model:
+            required: true
+        revision:
+            required: true
+        channel:
+            required: true
+
+jobs:
+  dev-deploy:
+    if: ${{ (inputs.model == 'k8s-dev') }}
+    uses: ./.github/workflows/_deploy.yaml
+    with:
+      model: ${{ inputs.model }}
+      revision: ${{ inputs.revision }}
+      channel: ${{ inputs.channel }}
+    secrets:
+      CLIENT_ID: ${{ secrets.JIMM_DEV_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}
+  stg-deploy:
+    if: ${{ (inputs.model == 'k8s-stg') }}
+    uses: ./.github/workflows/_deploy.yaml
+    with:
+      model: ${{ inputs.model }}
+      revision: ${{ inputs.revision }}
+      channel: ${{ inputs.channel }}
+    secrets:
+      CLIENT_ID: ${{ secrets.JIMM_STG_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.JIMM_STG_CLIENT_SECRET }}
