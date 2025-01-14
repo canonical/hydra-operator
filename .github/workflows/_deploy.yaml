@@ -8,13 +8,13 @@ on:
             type: string
         revision:
             type: number
-        channel:
-            type: string
     secrets:
         CLIENT_ID:
             required: true
         CLIENT_SECRET:
             required: true
+        JIMM_URL:
+          required: true
 
 jobs:
   deploy:
@@ -30,17 +30,15 @@ jobs:
         run: |
           echo "TF_VAR_client_id=${{ secrets.CLIENT_ID }}" >> $GITHUB_ENV
           echo "TF_VAR_client_secret=${{ secrets.CLIENT_SECRET }}" >> $GITHUB_ENV
-          echo "TF_VAR_cloud=k8s-${{ inputs.model }}" >> $GITHUB_ENV
-          echo "TF_VAR_jimm_url=cd-jimm.stg.canonical.com:443" >> $GITHUB_ENV
-      - name: Import application into state
+          echo "TF_VAR_jimm_url=${{ secrets.JIMM_URL }}" >> $GITHUB_ENV
+      - name: Import application into state if present
         working-directory: ./deployment
         run: |
           terraform init
-          terraform import juju_application.application ${{ inputs.model}}:hydra
+          terraform import juju_application.application ${{ inputs.model}}:hydra || true
         env:
           TF_VAR_model: ${{ inputs.model }}
           TF_VAR_revision: ${{ inputs.revision }}
-          TF_VAR_channel: ${{ inputs.channel }}
           TF_VAR_application_name: "hydra"
       - name: Deploy
         working-directory: ./deployment
@@ -49,5 +47,4 @@ jobs:
         env:
           TF_VAR_model: ${{ inputs.model }}
           TF_VAR_revision: ${{ inputs.revision }}
-          TF_VAR_channel: ${{ inputs.channel }}
           TF_VAR_application_name: "hydra"
