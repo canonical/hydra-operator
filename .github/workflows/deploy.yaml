@@ -4,6 +4,9 @@ run-name: Deploy ${{ inputs.channel}}@${{ inputs.revision}} in ${{ inputs.model 
 
 
 on:
+  push:
+    branches:
+      - "IAM-1233"
   workflow_dispatch:
     inputs:
         model:
@@ -14,6 +17,15 @@ on:
             required: true
 
 jobs:
+  ci-test-deploy:
+    uses: ./.github/workflows/_deploy.yaml
+    with:
+      model: k8s-dev
+      revision: 336
+      channel: latest/edge
+    secrets:
+      CLIENT_ID: ${{ secrets.JIMM_DEV_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}  
   dev-deploy:
     if: ${{ (inputs.model == 'k8s-dev') }}
     uses: ./.github/workflows/_deploy.yaml
