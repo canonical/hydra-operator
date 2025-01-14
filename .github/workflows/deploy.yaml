@@ -16,6 +16,10 @@ on:
         channel:
             required: true
 
+concurrency:
+  group: ${{ inputs.channel }}-${{ inputs.model }}
+  cancel-in-progress: true
+
 jobs:
   ci-test-deploy:
     uses: ./.github/workflows/_deploy.yaml
@@ -25,9 +29,9 @@ jobs:
       channel: latest/edge
     secrets:
       CLIENT_ID: ${{ secrets.JIMM_DEV_CLIENT_ID }}
-      CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}  
+      CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}
   dev-deploy:
-    if: ${{ (inputs.model == 'k8s-dev') }}
+    if: ${{ (inputs.model == 'dev') }}
     uses: ./.github/workflows/_deploy.yaml
     with:
       model: ${{ inputs.model }}
@@ -37,7 +41,7 @@ jobs:
       CLIENT_ID: ${{ secrets.JIMM_DEV_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}
   stg-deploy:
-    if: ${{ (inputs.model == 'k8s-stg') }}
+    if: ${{ (inputs.model == 'stg') }}
     uses: ./.github/workflows/_deploy.yaml
     with:
       model: ${{ inputs.model }}
