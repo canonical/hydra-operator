@@ -30,6 +30,7 @@ jobs:
     secrets:
       CLIENT_ID: ${{ secrets.JIMM_STG_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.JIMM_STG_CLIENT_SECRET }}
+      JIMM_URL: ${{ secrets.JIMM_URL }}
   dev-deploy:
     if: ${{ (inputs.model == 'dev') }}
     uses: ./.github/workflows/_deploy.yaml
@@ -40,6 +41,7 @@ jobs:
     secrets:
       CLIENT_ID: ${{ secrets.JIMM_DEV_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}
+      JIMM_URL: ${{ secrets.JIMM_URL }}
   stg-deploy:
     if: ${{ (inputs.model == 'stg') }}
     uses: ./.github/workflows/_deploy.yaml
@@ -50,3 +52,4 @@ jobs:
     secrets:
       CLIENT_ID: ${{ secrets.JIMM_STG_CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.JIMM_STG_CLIENT_SECRET }}
+      JIMM_URL: ${{ secrets.JIMM_URL }}

@@ -15,6 +15,8 @@ on:
             required: true
         CLIENT_SECRET:
             required: true
+        JIMM_URL:
+          required: true    
 
 jobs:
   deploy:
@@ -31,7 +33,7 @@ jobs:
           echo "TF_VAR_client_id=${{ secrets.CLIENT_ID }}" >> $GITHUB_ENV
           echo "TF_VAR_client_secret=${{ secrets.CLIENT_SECRET }}" >> $GITHUB_ENV
           echo "TF_VAR_cloud=k8s-${{ inputs.model }}" >> $GITHUB_ENV
-          echo "TF_VAR_jimm_url=cd-jimm.stg.canonical.com:443" >> $GITHUB_ENV
+          echo "TF_VAR_jimm_url=${{ secrets.JIMM_URL }}" >> $GITHUB_ENV
       - name: Import application into state
         working-directory: ./deployment
         run: |
