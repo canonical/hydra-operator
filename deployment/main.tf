@@ -7,10 +7,6 @@ terraform {
     }
 }
 
-variable "cloud" {
-  type        = string
-}
-
 variable "client_id" {
   type        = string
   sensitive = true
