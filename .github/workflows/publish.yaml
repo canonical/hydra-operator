@@ -87,7 +87,7 @@ jobs:
     outputs:
       revision: ${{ steps.set-revision.outputs.revision }}
     runs-on: ubuntu-24.04
-    if: ${{ inputs.source_branch == 'main' }}
+    if: ${{ inputs.source_branch == 'IAM-1233' }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
