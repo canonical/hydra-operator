@@ -14,7 +14,7 @@ on:
         CLIENT_SECRET:
             required: true
         JIMM_URL:
-          required: true    
+          required: true
 
 jobs:
   deploy:
@@ -35,7 +35,7 @@ jobs:
         working-directory: ./deployment
         run: |
           terraform init
-          terraform import juju_application.application ${{ inputs.model}}:hydra || true 
+          terraform import juju_application.application ${{ inputs.model}}:hydra || true
         env:
           TF_VAR_model: ${{ inputs.model }}
           TF_VAR_revision: ${{ inputs.revision }}

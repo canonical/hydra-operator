@@ -21,9 +21,9 @@ on:
       JIMM_STG_CLIENT_ID:
         required: true
       JIMM_STG_CLIENT_SECRET:
-          required: true          
+          required: true
       JIMM_URL:
-        required: true            
+        required: true
 
   workflow_dispatch:
     inputs:
@@ -36,7 +36,7 @@ on:
         description: Github branch from this repo to publish.  If blank, will use the default branch
         required: false
         default: ''
-        type: string
+        type: string    
 
 jobs:
   publish-charm:
@@ -73,11 +73,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           channel: ${{ steps.parse-inputs.outputs.destination_channel }}
 
-  deploy:
+  revision:
     concurrency:
       group: ${{ inputs.source_branch }}-${{ needs.publish-charm.outputs.channel }}
       cancel-in-progress: true
     needs: publish-charm
+    outputs:
+      revision: ${{ steps.set-revision.outputs.revision }}
     runs-on: ubuntu-24.04
     if: ${{ inputs.source_branch == 'main' }}
     steps:
@@ -90,30 +92,46 @@ jobs:
         id: set-revision
         run: |
           sudo snap install charmcraft --classic
-          revision=$(charmcraft status $CHARM_NAME --format json | jq '.[] | select(.track == "$TRACK") | .mappings[0].releases[] | select(.channel == "${{ jobs.publish-charm.channel }}") | .revision')
+          revision=$(charmcraft status $CHARM_NAME --format json | jq '.[] | select(.track == "$TRACK") | .mappings[0].releases[] | select(.channel == "${{ needs.publish-charm.outputs.channel }}") | .revision')
           echo "setting output of revision=$revision"
-          echo "::set-output name=revision::$revision"          
+          echo "::set-output name=revision::$revision"
         env:
           CHARMCRAFT_CREDENTIALS: ${{ secrets.CHARMCRAFT_CREDENTIALS }}
           CHARM_NAME: hydra
-          TRACK: latest # only cater for latest track for now
-      - name: Deploy to Dev
-        if: ${{ (needs.publish-charm.outputs.channel == 'latest/edge') }}
-        uses: ./.github/workflows/_deploy.yaml
-        with:
-          model: dev-iam
-          revision: ${{ steps.set-revision.outputs.revision }}
-        secrets:
-          CLIENT_ID: ${{ secrets.JIMM_DEV_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}
-          JIMM_URL: ${{ secrets.JIMM_URL }}        
-      - name: Deploy to Dev
-        if: ${{ (needs.publish-charm.outputs.channel == 'latest/stable') }}
-        uses: ./.github/workflows/_deploy.yaml
-        with:
-          model: stg-iam
-          revision: ${{ steps.set-revision.outputs.revision }}
-        secrets:
-          CLIENT_ID: ${{ secrets.JIMM_STG_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.JIMM_STG_CLIENT_SECRET }}
-          JIMM_URL: ${{ secrets.JIMM_URL }}                  
+          # only cater for latest track for now
+          TRACK: latest
+
+  dev-deploy:
+    concurrency:
+      group: ${{ inputs.source_branch }}-${{ needs.publish-charm.outputs.channel }}
+      cancel-in-progress: true
+    needs:
+      - publish-charm 
+      - revision
+    if: ${{ (needs.publish-charm.outputs.channel == 'latest/edge') }}
+    uses: ./.github/workflows/_deploy.yaml
+    secrets:
+        CLIENT_ID: ${{ secrets.JIMM_DEV_CLIENT_ID }}
+        CLIENT_SECRET: ${{ secrets.JIMM_DEV_CLIENT_SECRET }}
+        JIMM_URL: ${{ secrets.JIMM_URL }}
+    with:
+        model: "dev-iam"
+        revision: ${{ needs.revision.outputs.revision }}
+  
+  stg-deploy:
+    concurrency:
+      group: ${{ inputs.source_branch }}-${{ needs.publish-charm.outputs.channel }}
+      cancel-in-progress: true
+    needs:
+      - publish-charm 
+      - revision
+    if: ${{ (needs.publish-charm.outputs.channel == 'latest/stable') }}
+    uses: ./.github/workflows/_deploy.yaml
+    secrets:
+        CLIENT_ID: ${{ secrets.JIMM_STG_CLIENT_ID }}
+        CLIENT_SECRET: ${{ secrets.JIMM_STG_CLIENT_SECRET }}
+        JIMM_URL: ${{ secrets.JIMM_URL }}
+    with:
+        model: "stg-iam"
+        revision: ${{ needs.revision.outputs.revision }}      
+
