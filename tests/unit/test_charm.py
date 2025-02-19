@@ -655,7 +655,7 @@ class TestHolisticHandler:
             f"Missing integration {DATABASE_INTEGRATION_NAME}"
         )
 
-    def test_when_public_ingress_not_ready(
+    def test_when_no_public_ingress_integration(
         self,
         harness: Harness,
         mocked_event: MagicMock,
@@ -670,10 +670,25 @@ class TestHolisticHandler:
             f"Missing required relation with " f"{PUBLIC_INGRESS_INTEGRATION_NAME}"
         )
 
+    def test_when_public_ingress_not_ready(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+        public_ingress_integration: MagicMock,
+    ) -> None:
+        with patch("charm.IngressPerAppRequirer.is_ready", return_value=False):
+            harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus("Waiting for ingress to be ready")
+
     def test_when_database_not_ready(
         self,
         harness: Harness,
         mocked_event: MagicMock,
+        public_ingress_integration_data: MagicMock,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch("charm.DatabaseRequires.is_resource_created", return_value=False):
@@ -687,6 +702,7 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
+        public_ingress_integration_data: MagicMock,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch(
@@ -704,6 +720,7 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
+        public_ingress_integration_data: MagicMock,
         mocked_pebble_service: MagicMock,
         mocked_secrets: MagicMock,
     ) -> None:
@@ -718,8 +735,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
+        public_ingress_integration_data: MagicMock,
         mocked_pebble_service: MagicMock,
-        mocked_public_ingress_data: MagicMock,
     ) -> None:
         with (
             patch("charm.ConfigFile.from_sources", return_value="config"),
@@ -736,8 +753,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
+        public_ingress_integration_data: MagicMock,
         mocked_pebble_service: MagicMock,
-        mocked_public_ingress_data: MagicMock,
     ) -> None:
         with patch("charm.ConfigFile.from_sources", return_value="config"):
             harness.charm._holistic_handler(mocked_event)
