@@ -6,7 +6,12 @@ from typing import Any, Callable, Optional, TypeVar
 
 from ops.charm import CharmBase
 
-from constants import DATABASE_INTEGRATION_NAME, PEER_INTEGRATION_NAME, WORKLOAD_CONTAINER
+from constants import (
+    DATABASE_INTEGRATION_NAME,
+    PEER_INTEGRATION_NAME,
+    PUBLIC_INGRESS_INTEGRATION_NAME,
+    WORKLOAD_CONTAINER,
+)
 
 CharmEventHandler = TypeVar("CharmEventHandler", bound=Callable[..., Any])
 Condition = Callable[[CharmBase], bool]
@@ -36,6 +41,7 @@ def integration_existence(integration_name: str) -> Condition:
 
 peer_integration_exists = integration_existence(PEER_INTEGRATION_NAME)
 database_integration_exists = integration_existence(DATABASE_INTEGRATION_NAME)
+public_ingress_integration_exists = integration_existence(PUBLIC_INGRESS_INTEGRATION_NAME)
 
 
 def container_connectivity(charm: CharmBase) -> bool:

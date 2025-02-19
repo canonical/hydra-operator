@@ -88,6 +88,7 @@ from utils import (
     database_integration_exists,
     leader_unit,
     peer_integration_exists,
+    public_ingress_integration_exists,
 )
 
 logger = logging.getLogger(__name__)
@@ -480,10 +481,14 @@ class HydraCharm(CharmBase):
             self.unit.status = BlockedStatus(f"Missing integration {DATABASE_INTEGRATION_NAME}")
             return
 
-        if not self.public_ingress.is_ready():
+        if not public_ingress_integration_exists(self):
             self.unit.status = BlockedStatus(
                 f"Missing required relation with {PUBLIC_INGRESS_INTEGRATION_NAME}"
             )
+            return
+
+        if not self.public_ingress.is_ready():
+            self.unit.status = WaitingStatus("Waiting for ingress to be ready")
             return
 
         if not self.database_requirer.is_resource_created():
