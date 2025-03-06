@@ -45,14 +45,14 @@ from ops.framework import EventBase, EventSource, Object, ObjectEvents
 from ops.model import TooManyRelatedAppsError
 
 # The unique Charmhub library identifier, never change it
-LIBID = "460ab09e6b874d1c891b67f83586c9a7"
+LIBID = "f59057701b5840849d3cea756af404c6"
 
 # Increment this major API version when introducing breaking changes
 LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 5
+LIBPATCH = 1
 
 RELATION_NAME = "ui-endpoint-info"
 INTERFACE_NAME = "login_ui_endpoints"
@@ -65,6 +65,9 @@ RELATION_KEYS = [
     "oidc_error_url",
     "device_verification_url",
     "post_device_done_url",
+    "recovery_url",
+    "settings_url",
+    "webauthn_settings_url",
 ]
 
 
@@ -114,6 +117,9 @@ class LoginUIEndpointsProvider(Object):
                 "oidc_error_url": f"{endpoint}/ui/oidc_error",
                 "device_verification_url": f"{endpoint}/ui/device_code",
                 "post_device_done_url": f"{endpoint}/ui/device_complete",
+                "recovery_url": f"{endpoint}/ui/reset_email",
+                "settings_url": f"{endpoint}/ui/reset_password",
+                "webauthn_settings_url": f"{endpoint}/ui/setup_passkey",
             }
         for relation in relations:
             relation.data[self._charm.app].update(endpoint_databag)
