@@ -1,29 +1,5 @@
 # Changelog
 
-## [1.1.1](https://github.com/canonical/hydra-operator/compare/v1.1.0...v1.1.1) (2025-04-01)
-
-
-### Bug Fixes
-
-* address CVEs ([6075941](https://github.com/canonical/hydra-operator/commit/6075941d6581ae42b9251ef44bf1097fc36960b7)), closes [#297](https://github.com/canonical/hydra-operator/issues/297)
-
-## [1.1.0](https://github.com/canonical/hydra-operator/compare/v1.0.0...v1.1.0) (2025-03-24)
-
-
-### Features
-
-* add terraform module ([531ded2](https://github.com/canonical/hydra-operator/commit/531ded2679ca38bc3c18755feb21beb6d0003e59))
-* add the terraform module for the charm ([d69a806](https://github.com/canonical/hydra-operator/commit/d69a80662ae069732c3198b06d91b8cd037d94af))
-
-
-### Bug Fixes
-
-* add reconcile-oauth-clients action ([0789efc](https://github.com/canonical/hydra-operator/commit/0789efc545516732c62c5ae4ae5f8ae685ba78b1))
-* do not remove client on relation_broken ([4f16be0](https://github.com/canonical/hydra-operator/commit/4f16be0e45e61adcae5268b93a3473360aee468f)), closes [#268](https://github.com/canonical/hydra-operator/issues/268)
-* fix the lint ([e0e34a9](https://github.com/canonical/hydra-operator/commit/e0e34a964565d1ee6441e50e457eed5d613c0b1b))
-* fix the lint ci and traefik charm in integration test ([7f21c54](https://github.com/canonical/hydra-operator/commit/7f21c54e1c08e629ad438bec6a685f345c8b8c0b))
-* provide optional flag in charmcraft.yaml ([358e91f](https://github.com/canonical/hydra-operator/commit/358e91f7cab8f8a033e217662d1abe0408854e08))
-
 ## 1.0.0 (2025-03-07)
 
 
@@ -75,9 +51,7 @@
 * fixed log queries in dashboard ([c8261d3](https://github.com/canonical/hydra-operator/commit/c8261d3beac673ce761d975d70d6e68fed591f62))
 * fixed loki alert rule ([1c883f5](https://github.com/canonical/hydra-operator/commit/1c883f59b1af1cfef4eecaa28c74c80c7f1dbef4))
 * fixed loki alert rule ([f4a39bf](https://github.com/canonical/hydra-operator/commit/f4a39bf584554942f328ea5d7009fa1761e1db01))
-* go to WaitingStatus if ingress not ready ([2ef7bbc](https://github.com/canonical/hydra-operator/commit/2ef7bbc6de10ede855418d2e6204c9e78f64aedf)), closes [#145](https://github.com/canonical/hydra-operator/issues/145)
 * handle database relation departed ([1c7305b](https://github.com/canonical/hydra-operator/commit/1c7305b746813a386b899de42e745e194b195946)), closes [#137](https://github.com/canonical/hydra-operator/issues/137)
-* handle event being emitted multiple times ([e5b9bcf](https://github.com/canonical/hydra-operator/commit/e5b9bcf8ff538cf7a0d62eab76036121811f41f0))
 * **loki-rule:** improve error handling in json parsing ([fc41e1c](https://github.com/canonical/hydra-operator/commit/fc41e1cfd26aebeb33792100dc866689b1093490))
 * **loki-rule:** improve error handling in json parsing ([648d656](https://github.com/canonical/hydra-operator/commit/648d65693f9fd6ec52408008eaf7d457ca58f960))
 * make "dev" flag configurable ([f9a0fd8](https://github.com/canonical/hydra-operator/commit/f9a0fd86914c84f4c06f56d57e194451e9a8ca6b)), closes [#130](https://github.com/canonical/hydra-operator/issues/130)
