@@ -154,6 +154,9 @@ def test_client_changed_event_emitted_when_client_config_changed(harness: Harnes
     )
 
 
+@pytest.mark.xfail(
+    reason="We no longer remove clients on relation removal, see https://github.com/canonical/hydra-operator/issues/268"
+)
 def test_client_deleted_event_emitted_when_relation_removed(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "requirer")
     harness.add_relation_unit(relation_id, "requirer/0")
@@ -173,6 +176,9 @@ def test_client_deleted_event_emitted_when_relation_removed(harness: Harness) ->
     assert any(isinstance(e, ClientDeletedEvent) for e in harness.charm.events)
 
 
+@pytest.mark.xfail(
+    reason="We no longer remove clients on relation removal, see https://github.com/canonical/hydra-operator/issues/268"
+)
 def test_secret_removed_when_relation_removed(harness: Harness) -> None:
     relation_id = harness.add_relation("oauth", "requirer")
     harness.add_relation_unit(relation_id, "requirer/0")

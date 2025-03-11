@@ -254,6 +254,9 @@ def test_event_emitted_when_invalid_client_config(harness_invalid_config: Harnes
     )
 
 
+@pytest.mark.xfail(
+    reason="We no longer remove clients on relation removal, see https://github.com/canonical/hydra-operator/issues/268"
+)
 def test_event_deferred_on_relation_broken_when_relation_data_available(
     harness: Harness,
     provider_info: Dict,

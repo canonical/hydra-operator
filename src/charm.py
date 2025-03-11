@@ -17,12 +17,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
 )
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
-from charms.hydra.v0.oauth import (
-    ClientChangedEvent,
-    ClientCreatedEvent,
-    ClientDeletedEvent,
-    OAuthProvider,
-)
+from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
@@ -63,6 +58,7 @@ from constants import (
     INTERNAL_INGRESS_INTEGRATION_NAME,
     LOGGING_RELATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
+    OAUTH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PROMETHEUS_SCRAPE_INTEGRATION_NAME,
     PUBLIC_INGRESS_INTEGRATION_NAME,
@@ -72,7 +68,12 @@ from constants import (
     TEMPO_TRACING_INTEGRATION_NAME,
     WORKLOAD_CONTAINER,
 )
-from exceptions import MigrationError, PebbleServiceError
+from exceptions import (
+    ClientDoesNotExistError,
+    CommandExecError,
+    MigrationError,
+    PebbleServiceError,
+)
 from integrations import (
     DatabaseConfig,
     InternalIngressData,
@@ -173,6 +174,7 @@ class HydraCharm(CharmBase):
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.update_status, self._holistic_handler)
         self.framework.observe(self.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
 
@@ -436,32 +438,6 @@ class HydraCharm(CharmBase):
             )
             event.defer()
 
-    @leader_unit
-    def _on_oauth_client_deleted(self, event: ClientDeletedEvent) -> None:
-        if not self._workload_service.is_running:
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            event.defer()
-            return
-
-        if not peer_integration_exists(self):
-            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
-            event.defer()
-            return
-
-        if not (client := self.peer_data[f"oauth_{event.relation_id}"]):
-            logger.error("No OAuth client bound with the oauth integration: %d", event.relation_id)
-            return
-
-        if not self._cli.delete_oauth_client(client["client_id"]):  # type: ignore
-            logger.error(
-                "Failed to delete the OAuth client bound with the oauth integration: %d",
-                event.relation_id,
-            )
-            event.defer()
-            return
-
-        self.peer_data.pop(f"oauth_{event.relation_id}")
-
     def _on_hydra_endpoints_ready(self, event: RelationEvent) -> None:
         internal_endpoints = InternalIngressData.load(self.internal_ingress)
         self.hydra_endpoints_provider.send_endpoint_relation_data(
@@ -476,6 +452,11 @@ class HydraCharm(CharmBase):
             return
 
         self.unit.status = MaintenanceStatus("Configuring resources")
+
+        if not peer_integration_exists(self):
+            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
+            event.defer()
+            return
 
         if not database_integration_exists(self):
             self.unit.status = BlockedStatus(f"Missing integration {DATABASE_INTEGRATION_NAME}")
@@ -525,6 +506,7 @@ class HydraCharm(CharmBase):
             )
             return
 
+        self._clean_up_oauth_relation_clients()
         self.unit.status = ActiveStatus()
 
     def _on_run_migration(self, event: ActionEvent) -> None:
@@ -670,6 +652,38 @@ class HydraCharm(CharmBase):
 
         event.log("Successfully rotated the JWK")
         event.set_results({"new-key-id": jwk_id})
+
+    @leader_unit
+    def _clean_up_oauth_relation_clients(self) -> int:
+        to_delete = []
+        for k in self.peer_data.keys():
+            if not k.startswith("oauth_"):
+                continue
+
+            rel_id = k[len("oauth_") :]
+            rel = self.model.get_relation(OAUTH_INTEGRATION_NAME, relation_id=int(rel_id))
+            if rel.active:
+                continue
+
+            client = self.peer_data[k]
+
+            try:
+                self._cli.delete_oauth_client(client["client_id"])
+            except CommandExecError:
+                logger.error(
+                    f"Failed to delete the OAuth client bound with the oauth integration: {rel_id}"
+                )
+                continue
+            except ClientDoesNotExistError:
+                pass
+
+            self.oauth_provider.remove_secret(rel)
+            to_delete.append(k)
+
+        for r in to_delete:
+            self.peer_data.pop(r)
+
+        return len(to_delete)
 
 
 if __name__ == "__main__":

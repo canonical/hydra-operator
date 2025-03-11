@@ -16,7 +16,7 @@ from constants import (
     PUBLIC_INGRESS_INTEGRATION_NAME,
     WORKLOAD_CONTAINER,
 )
-from exceptions import PebbleServiceError
+from exceptions import CommandExecError, PebbleServiceError
 from integrations import InternalIngressData, PublicIngressData
 
 
@@ -481,31 +481,33 @@ class TestOAuthClientChangedEvent:
         )
 
 
+@pytest.mark.xfail(
+    reason="We no longer remove clients on relation removal, see https://github.com/canonical/hydra-operator/issues/268"
+)
 class TestOAuthClientDeletedEvent:
-    def test_when_hydra_service_not_ready(
-        self,
-        harness: Harness,
-        mocked_workload_service: MagicMock,
-        peer_integration: int,
-        oauth_integration: int,
-    ) -> None:
-        harness.set_leader(True)
-        mocked_workload_service.is_running = False
+    @pytest.fixture(autouse=True)
+    def mocked_database_integration(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.database_integration_exists", return_value=True)
 
-        with patch(
-            "charm.CommandLine.delete_oauth_client", return_value="client_id"
-        ) as mocked_cli:
-            harness.charm.oauth_provider.on.client_deleted.emit(
-                relation_id=oauth_integration,
-            )
+    @pytest.fixture(autouse=True)
+    def mocked_database_integration_data(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.DatabaseRequires.is_resource_created", return_value=True)
 
-        mocked_cli.assert_not_called()
-        assert harness.charm.unit.status == WaitingStatus("Waiting for Hydra service")
+    @pytest.fixture(autouse=True)
+    def mocked_public_ingress_ready(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.IngressPerAppRequirer.is_ready", return_value=True)
+
+    @pytest.fixture(autouse=True)
+    def migration_needed(self, mocker: MockerFixture, harness: Harness) -> None:
+        mocker.patch(
+            "charm.HydraCharm.migration_needed", new_callable=PropertyMock, return_value=False
+        )
 
     def test_when_peer_integration_not_exists(
         self,
         harness: Harness,
         mocked_workload_service: MagicMock,
+        public_ingress_integration_data: PublicIngressData,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
@@ -523,34 +525,11 @@ class TestOAuthClientDeletedEvent:
             f"Missing integration {PEER_INTEGRATION_NAME}"
         )
 
-    def test_when_peer_data_not_exists(
-        self,
-        harness: Harness,
-        mocked_workload_service: MagicMock,
-        peer_integration: int,
-        oauth_integration: int,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        harness.set_leader(True)
-        mocked_workload_service.is_running = True
-
-        with (
-            caplog.at_level("ERROR"),
-            patch("charm.CommandLine.delete_oauth_client", return_value="client_id") as mocked_cli,
-        ):
-            harness.charm.oauth_provider.on.client_deleted.emit(
-                relation_id=oauth_integration,
-            )
-
-        mocked_cli.assert_not_called()
-        assert (
-            f"No OAuth client bound with the oauth integration: {oauth_integration}" in caplog.text
-        )
-
     def test_when_oauth_client_deletion_failed(
         self,
         harness: Harness,
         mocked_workload_service: MagicMock,
+        public_ingress_integration_data: PublicIngressData,
         peer_integration: int,
         oauth_integration: int,
         caplog: pytest.LogCaptureFixture,
@@ -558,10 +537,13 @@ class TestOAuthClientDeletedEvent:
         harness.set_leader(True)
         mocked_workload_service.is_running = True
         harness.charm.peer_data[f"oauth_{oauth_integration}"] = {"client_id": "client_id"}
+        harness.model.get_relation(OAUTH_INTEGRATION_NAME, oauth_integration).active = False
 
         with (
             caplog.at_level("ERROR"),
-            patch("charm.CommandLine.delete_oauth_client", return_value=None) as mocked_cli,
+            patch(
+                "charm.CommandLine.delete_oauth_client", side_effect=CommandExecError
+            ) as mocked_cli,
         ):
             harness.charm.oauth_provider.on.client_deleted.emit(
                 relation_id=oauth_integration,
@@ -580,12 +562,14 @@ class TestOAuthClientDeletedEvent:
         self,
         harness: Harness,
         mocked_workload_service: MagicMock,
+        public_ingress_integration_data: PublicIngressData,
         peer_integration: int,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
         mocked_workload_service.is_running = True
         harness.charm.peer_data[f"oauth_{oauth_integration}"] = {"client_id": "client_id"}
+        harness.model.get_relation(OAUTH_INTEGRATION_NAME, oauth_integration).active = False
 
         with patch(
             "charm.CommandLine.delete_oauth_client", return_value="client_id"
@@ -644,6 +628,7 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
+        peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch("charm.database_integration_exists", return_value=False):
@@ -659,6 +644,7 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
+        peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch("charm.IngressPerAppRequirer.is_ready", return_value=False):
@@ -675,6 +661,7 @@ class TestHolisticHandler:
         harness: Harness,
         mocked_event: MagicMock,
         mocked_pebble_service: MagicMock,
+        peer_integration: int,
         public_ingress_integration: MagicMock,
     ) -> None:
         with patch("charm.IngressPerAppRequirer.is_ready", return_value=False):
@@ -689,6 +676,7 @@ class TestHolisticHandler:
         harness: Harness,
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
+        peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch("charm.DatabaseRequires.is_resource_created", return_value=False):
@@ -703,6 +691,7 @@ class TestHolisticHandler:
         harness: Harness,
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
+        peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch(
@@ -721,6 +710,7 @@ class TestHolisticHandler:
         harness: Harness,
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
+        peer_integration: int,
         mocked_pebble_service: MagicMock,
         mocked_secrets: MagicMock,
     ) -> None:
@@ -736,6 +726,7 @@ class TestHolisticHandler:
         harness: Harness,
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
+        peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with (
@@ -754,6 +745,7 @@ class TestHolisticHandler:
         harness: Harness,
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
+        peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch("charm.ConfigFile.from_sources", return_value="config"):
