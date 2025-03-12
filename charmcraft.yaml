@@ -187,9 +187,8 @@ actions:
         default: RS256
         enumerate: [RS256, RS512, ES256, ES512, EdDSA]
 
-base: ubuntu@22.04
 platforms:
-  amd64:
+  ubuntu@22.04:amd64:
 
 parts:
   charm:
