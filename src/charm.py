@@ -231,9 +231,9 @@ class HydraCharm(CharmBase):
         self.framework.observe(
             self.oauth_provider.on.client_changed, self._on_oauth_client_changed
         )
-        self.framework.observe(
-            self.oauth_provider.on.client_deleted, self._on_oauth_client_deleted
-        )
+        # self.framework.observe(
+        #     self.oauth_provider.on.client_deleted, self._on_oauth_client_deleted
+        # )
 
         # tracing
         self.framework.observe(self.tracing_requirer.on.endpoint_changed, self._on_config_changed)
@@ -261,6 +261,9 @@ class HydraCharm(CharmBase):
             self._on_revoke_oauth_client_access_tokens_action,
         )
         self.framework.observe(self.on.rotate_key_action, self._on_rotate_key_action)
+        self.framework.observe(
+            self.on.reconcile_oauth_clients_action, self._reconcile_oauth_clients_action
+        )
 
     @property
     def _pebble_layer(self) -> Layer:
@@ -653,6 +656,19 @@ class HydraCharm(CharmBase):
         event.log("Successfully rotated the JWK")
         event.set_results({"new-key-id": jwk_id})
 
+    def _reconcile_oauth_clients_action(self, event: ActionEvent) -> None:
+        if not self.unit.is_leader():
+            event.fail("You need to run this action from the leader unit")
+            return
+
+        if not self._workload_service.is_running:
+            event.fail("Service is not ready. Please re-run the action when the charm is active")
+            return
+
+        deleted = self._clean_up_oauth_relation_clients()
+
+        event.log(f"Successfully deleted {deleted} clients")
+
     @leader_unit
     def _clean_up_oauth_relation_clients(self) -> int:
         to_delete = []
@@ -671,9 +687,9 @@ class HydraCharm(CharmBase):
                 self._cli.delete_oauth_client(client["client_id"])
             except CommandExecError:
                 logger.error(
-                    f"Failed to delete the OAuth client bound with the oauth integration: {rel_id}"
+                    f"Failed to delete the OAuth client bound with the oauth integration: {rel_id}."
+                    "Please run the 'reconcile-oauth-clients' action."
                 )
-                continue
             except ClientDoesNotExistError:
                 pass
 
