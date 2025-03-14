@@ -1,6 +1,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -585,3 +586,84 @@ class TestRotateKeyAction:
         mocked_cli.assert_called_once_with(algorithm="RS256")
         assert "Successfully rotated the JWK" in output.logs
         assert output.results == {"new-key-id": "key_id"}
+
+
+class TestReconcileOauthClientsAction:
+    @pytest.fixture
+    def mocked_cli(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch(
+            "charm.CommandLine.delete_oauth_client",
+            return_value="client_id",
+        )
+
+    def test_when_not_leader(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_cli: MagicMock,
+    ) -> None:
+        mocked_workload_service.is_running = False
+
+        try:
+            harness.run_action("reconcile-oauth-clients")
+        except ActionFailed as err:
+            assert "You need to run this action from the leader unit" in err.message
+
+        mocked_cli.assert_not_called()
+
+    def test_when_hydra_service_not_ready(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_cli: MagicMock,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = False
+
+        try:
+            harness.run_action("reconcile-oauth-clients")
+        except ActionFailed as err:
+            assert (
+                "Service is not ready. Please re-run the action when the charm is active"
+                in err.message
+            )
+
+        mocked_cli.assert_not_called()
+
+    def test_when_commandline_failed(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+
+        with patch("charm.CommandLine.create_jwk", return_value=None):
+            try:
+                harness.run_action("reconcile-oauth-clients")
+            except ActionFailed as err:
+                assert "Failed to rotate the JWK. Please check the juju logs" in err.message
+
+    def test_when_action_succeeds(
+        self,
+        harness: Harness,
+        mocked_workload_service: MagicMock,
+        mocked_cli: MagicMock,
+        peer_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        mocked_workload_service.is_running = True
+        harness.update_relation_data(
+            peer_integration,
+            "hydra",
+            {
+                "oauth_1": json.dumps({"client_id": "client_id"}),
+                "oauth_2": json.dumps({"client_id": "client_id"}),
+                "oauth_3": json.dumps({"client_id": "client_id"}),
+            },
+        )
+
+        output = harness.run_action("reconcile-oauth-clients")
+
+        assert mocked_cli.call_count == 3
+        assert "Successfully deleted 3 clients" in output.logs

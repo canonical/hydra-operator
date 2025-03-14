@@ -10,5 +10,13 @@ class PebbleServiceError(CharmError):
     """Error for pebble related operations."""
 
 
+class CommandExecError(CharmError):
+    """Error for pebble exec related operations."""
+
+
+class ClientDoesNotExistError(CharmError):
+    """Error for when a client does not exist."""
+
+
 class MigrationError(CharmError):
     """Error for migration plan."""

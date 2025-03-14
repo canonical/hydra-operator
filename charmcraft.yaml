@@ -186,6 +186,8 @@ actions:
         type: string
         default: RS256
         enumerate: [RS256, RS512, ES256, ES512, EdDSA]
+  reconcile-oauth-clients:
+    description: Clean up clients that were created by the oauth relation
 
 base: ubuntu@22.04
 platforms:

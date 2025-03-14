@@ -12,7 +12,7 @@ from ops.pebble import Error, ExecError
 from pydantic import AliasChoices, BaseModel, Field, field_serializer, field_validator
 
 from constants import ADMIN_PORT, CONFIG_FILE_NAME, DEFAULT_OAUTH_SCOPES, DEFAULT_RESPONSE_TYPES
-from exceptions import MigrationError
+from exceptions import ClientDoesNotExistError, CommandExecError, MigrationError
 
 logger = logging.getLogger(__name__)
 
@@ -292,9 +292,11 @@ class CommandLine:
 
         try:
             stdout = self._run_cmd(cmd)
-        except Error as err:
+        except ExecError as err:
             logger.error("Failed to delete an OAuth client: %s", err)
-            return None
+            if "Unable to locate the resource" in err.stderr:
+                raise ClientDoesNotExistError()
+            raise CommandExecError() from err
 
         return json.loads(stdout)  # client id
 
