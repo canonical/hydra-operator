@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/canonical/hydra-operator/compare/v1.0.0...v1.0.1) (2025-03-14)
+
+
+### Bug Fixes
+
+* add reconcile-oauth-clients action ([0789efc](https://github.com/canonical/hydra-operator/commit/0789efc545516732c62c5ae4ae5f8ae685ba78b1))
+* do not remove client on relation_broken ([4f16be0](https://github.com/canonical/hydra-operator/commit/4f16be0e45e61adcae5268b93a3473360aee468f)), closes [#268](https://github.com/canonical/hydra-operator/issues/268)
+
 ## 1.0.0 (2025-03-07)
 
 
