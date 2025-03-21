@@ -30,23 +30,30 @@ requires:
   pg-database:
     interface: postgresql_client
     limit: 1
+    optional: false
   public-ingress:
     interface: ingress
+    optional: false
   admin-ingress:
     interface: ingress
+    optional: true
   ui-endpoint-info:
     interface: login_ui_endpoints
     limit: 1
+    optional: true
   logging:
     interface: loki_push_api
+    optional: true
   tracing:
     interface: tracing
     limit: 1
+    optional: true
     description: |
       Provides traces to COS Tempo instance
   internal-ingress:
     interface: traefik_route
     limit: 1
+    optional: true
     description: |
       Ingress used for cross-cluster communication where network topology is more complex
       than just one k8s cluster
