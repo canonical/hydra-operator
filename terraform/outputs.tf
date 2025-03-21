@@ -30,6 +30,6 @@ output "provides" {
 }
 
 output "oauth_offer_url" {
-  description = "The charm offer url"
+  description = "The oauth offer url"
   value       = juju_offer.oauth_offer.url
 }
