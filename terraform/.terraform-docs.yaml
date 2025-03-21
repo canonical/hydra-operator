@@ -1,0 +1,12 @@
+formatter: markdown table
+
+header-from: main.tf
+
+content: |-
+  {{ .Providers }}
+  {{ .Requirements }}
+  {{ .Inputs }}
+  {{ .Outputs }}
+
+sort:
+  enabled: false
