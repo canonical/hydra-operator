@@ -1,12 +1,9 @@
 /**
- * # Terraform Module for Hydra Charmed Operator
+ * # Terraform Module for Hydra Operator
  *
  * This is a Terraform module facilitating the deployment of the hydra charm
  * using the Juju Terraform provider.
  */
-
-# Copyright 2025 Canonical Ltd.
-# See LICENSE file for licensing details.
 
 resource "juju_application" "hydra" {
   name        = var.app_name
