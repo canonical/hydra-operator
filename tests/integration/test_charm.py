@@ -58,14 +58,14 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
     await ops_test.model.deploy(
         TRAEFIK_CHARM,
         application_name=TRAEFIK_PUBLIC_APP,
-        channel="latest/edge",
+        channel="latest/stable",
         config={"external_hostname": PUBLIC_INGRESS_DOMAIN},
         trust=True,
     )
     await ops_test.model.deploy(
         TRAEFIK_CHARM,
         application_name=TRAEFIK_ADMIN_APP,
-        channel="latest/edge",
+        channel="latest/stable",
         config={"external_hostname": ADMIN_INGRESS_DOMAIN},
         trust=True,
     )
