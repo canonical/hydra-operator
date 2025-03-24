@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.0](https://github.com/canonical/hydra-operator/compare/v1.0.0...v1.1.0) (2025-03-24)
+
+
+### Features
+
+* add terraform module ([531ded2](https://github.com/canonical/hydra-operator/commit/531ded2679ca38bc3c18755feb21beb6d0003e59))
+* add the terraform module for the charm ([d69a806](https://github.com/canonical/hydra-operator/commit/d69a80662ae069732c3198b06d91b8cd037d94af))
+
+
+### Bug Fixes
+
+* add reconcile-oauth-clients action ([0789efc](https://github.com/canonical/hydra-operator/commit/0789efc545516732c62c5ae4ae5f8ae685ba78b1))
+* do not remove client on relation_broken ([4f16be0](https://github.com/canonical/hydra-operator/commit/4f16be0e45e61adcae5268b93a3473360aee468f)), closes [#268](https://github.com/canonical/hydra-operator/issues/268)
+* fix the lint ([e0e34a9](https://github.com/canonical/hydra-operator/commit/e0e34a964565d1ee6441e50e457eed5d613c0b1b))
+* fix the lint ci and traefik charm in integration test ([7f21c54](https://github.com/canonical/hydra-operator/commit/7f21c54e1c08e629ad438bec6a685f345c8b8c0b))
+* provide optional flag in charmcraft.yaml ([358e91f](https://github.com/canonical/hydra-operator/commit/358e91f7cab8f8a033e217662d1abe0408854e08))
+
 ## 1.0.0 (2025-03-07)
 
 
