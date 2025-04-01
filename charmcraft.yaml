@@ -196,9 +196,8 @@ actions:
   reconcile-oauth-clients:
     description: Clean up clients that were created by the oauth relation
 
-base: ubuntu@22.04
 platforms:
-  amd64:
+  ubuntu@22.04:amd64:
 
 parts:
   charm:
