@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/canonical/hydra-operator/compare/v1.1.0...v1.1.1) (2025-04-01)
+
+
+### Bug Fixes
+
+* address CVEs ([6075941](https://github.com/canonical/hydra-operator/commit/6075941d6581ae42b9251ef44bf1097fc36960b7)), closes [#297](https://github.com/canonical/hydra-operator/issues/297)
+
 ## [1.1.0](https://github.com/canonical/hydra-operator/compare/v1.0.0...v1.1.0) (2025-03-24)
 
 
