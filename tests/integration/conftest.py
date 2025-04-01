@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import functools
+import os
 import re
 import ssl
 from contextlib import asynccontextmanager
@@ -239,7 +240,12 @@ async def jwks_client(ops_test: OpsTest, public_address: Callable) -> PyJWKClien
 
 @pytest_asyncio.fixture(scope="module")
 async def local_charm(ops_test: OpsTest) -> Path:
-    return await ops_test.build_charm(".")
+    # in GitHub CI, charms are built with charmcraftcache and uploaded to $CHARM_PATH
+    charm = os.getenv("CHARM_PATH")
+    if not charm:
+        # fall back to build locally - required when run outside of GitHub CI
+        charm = await ops_test.build_charm(".")
+    return charm
 
 
 @asynccontextmanager
