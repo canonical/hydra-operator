@@ -19,7 +19,7 @@ on:
 jobs:
   tests:
     name: CI
-    uses: canonical/identity-team/.github/workflows/charm-pull-request.yaml@v1.7.6
+    uses: canonical/identity-team/.github/workflows/charm-pull-request.yaml@c67b116aaf71ab05858f0ea58fa10f1782f970ea # v1.7.6
     with:
       container-name: "hydra"
       use-charmcraftcache: true
