@@ -50,8 +50,9 @@ class TestCommandLine:
         run_cmd.assert_called_once_with(expected_cmd, timeout=60, environment=None)
 
     def test_migrate_failed(self, command_line: CommandLine) -> None:
-        with patch.object(command_line, "_run_cmd", side_effect=Error), pytest.raises(
-            MigrationError
+        with (
+            patch.object(command_line, "_run_cmd", side_effect=Error),
+            pytest.raises(MigrationError),
         ):
             command_line.migrate()
 

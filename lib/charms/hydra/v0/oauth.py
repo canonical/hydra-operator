@@ -284,7 +284,7 @@ class ClientConfig:
         for grant_type in self.grant_types:
             if grant_type not in ALLOWED_GRANT_TYPES:
                 raise ClientConfigError(
-                    f"Invalid grant_type {grant_type}, must be one " f"of {ALLOWED_GRANT_TYPES}"
+                    f"Invalid grant_type {grant_type}, must be one of {ALLOWED_GRANT_TYPES}"
                 )
 
         # Validate client authentication methods

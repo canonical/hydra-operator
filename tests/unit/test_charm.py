@@ -49,9 +49,9 @@ class TestPebbleReadyEvent:
         harness.charm.on.hydra_pebble_ready.emit(container)
 
         mocked_charm_holistic_handler.assert_called_once()
-        assert (
-            mocked_workload_service_version.call_count > 1
-        ), "workload service version should be set"
+        assert mocked_workload_service_version.call_count > 1, (
+            "workload service version should be set"
+        )
         assert mocked_workload_service_version.call_args[0] == (
             mocked_workload_service_version.return_value,
         )
@@ -373,9 +373,9 @@ class TestOAuthClientCreatedEvent:
             )
 
         assert "Failed to create the OAuth client bound with the oauth integration" in caplog.text
-        assert not harness.charm.peer_data[
-            f"oauth_{oauth_integration}"
-        ], "peer data should NOT be created"
+        assert not harness.charm.peer_data[f"oauth_{oauth_integration}"], (
+            "peer data should NOT be created"
+        )
         mocked_provider.assert_not_called()
 
     def test_when_succeeds(
@@ -554,9 +554,9 @@ class TestOAuthClientDeletedEvent:
             f"Failed to delete the OAuth client bound with the oauth integration: {oauth_integration}"
             in caplog.text
         )
-        assert harness.charm.peer_data[
-            f"oauth_{oauth_integration}"
-        ], "peer data should NOT be cleared"
+        assert harness.charm.peer_data[f"oauth_{oauth_integration}"], (
+            "peer data should NOT be cleared"
+        )
 
     def test_when_event_emitted(
         self,
@@ -579,9 +579,9 @@ class TestOAuthClientDeletedEvent:
             )
 
         mocked_cli.assert_called_once_with("client_id")
-        assert not harness.charm.peer_data[
-            f"oauth_{oauth_integration}"
-        ], "peer data should be cleared"
+        assert not harness.charm.peer_data[f"oauth_{oauth_integration}"], (
+            "peer data should be cleared"
+        )
 
 
 class TestHolisticHandler:
@@ -653,7 +653,7 @@ class TestHolisticHandler:
         mocked_pebble_service.push_config_file.assert_not_called()
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == BlockedStatus(
-            f"Missing required relation with " f"{PUBLIC_INGRESS_INTEGRATION_NAME}"
+            f"Missing required relation with {PUBLIC_INGRESS_INTEGRATION_NAME}"
         )
 
     def test_when_public_ingress_not_ready(
