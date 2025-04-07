@@ -122,9 +122,10 @@ class TestPebbleService:
         mocked_container: MagicMock,
         pebble_service: PebbleService,
     ) -> None:
-        with patch.object(
-            mocked_container, "restart", side_effect=Exception
-        ) as restart, pytest.raises(PebbleServiceError):
+        with (
+            patch.object(mocked_container, "restart", side_effect=Exception) as restart,
+            pytest.raises(PebbleServiceError),
+        ):
             pebble_service.plan(mocked_layer)
 
         mocked_container.add_layer.assert_called_once_with(
