@@ -3,6 +3,7 @@ run-name: CI for ${{ github.sha }} on ${{ github.ref_name }}
 
 on:
    workflow_dispatch:
+   workflow_call:
    push:
      branches:
      - "main"
