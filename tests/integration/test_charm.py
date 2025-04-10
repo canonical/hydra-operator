@@ -2,6 +2,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import asyncio
 import http
 import json
 import logging
@@ -85,11 +86,20 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
     # Integrate with dependencies
     await integrate_dependencies(ops_test)
 
-    await ops_test.model.wait_for_idle(
-        apps=[HYDRA_APP, DB_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
-        raise_on_blocked=False,
-        status="active",
-        timeout=5 * 60,
+    await asyncio.gather(
+        ops_test.model.wait_for_idle(
+            apps=[DB_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
+            raise_on_blocked=False,
+            raise_on_error=False,
+            status="active",
+            timeout=5 * 60,
+        ),
+        ops_test.model.wait_for_idle(
+            apps=[HYDRA_APP],
+            raise_on_blocked=False,
+            status="active",
+            timeout=5 * 60,
+        ),
     )
 
 
