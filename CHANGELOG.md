@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/canonical/hydra-operator/compare/v1.1.1...v1.1.2) (2025-04-10)
+
+
+### Bug Fixes
+
+* update charm libs ([85f17a0](https://github.com/canonical/hydra-operator/commit/85f17a0a93a1b80679e6afbfa23fe983999916b9))
+
 ## [1.1.1](https://github.com/canonical/hydra-operator/compare/v1.1.0...v1.1.1) (2025-04-01)
 
 
