@@ -154,7 +154,7 @@ class LoginUIEndpointData:
             logger.error("Failed to fetch the login ui endpoints: %s", exc)
             return cls()
 
-        return dacite.from_dict(data_class=LoginUIEndpointData, data=login_ui_endpoints)
+        return dacite.from_dict(data_class=LoginUIEndpointData, data=login_ui_endpoints) if login_ui_endpoints else cls()
 
 
 @dataclass(frozen=True, slots=True)
