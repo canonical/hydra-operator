@@ -13,6 +13,7 @@ from yarl import URL
 from charm import HydraCharm
 from constants import (
     DATABASE_INTEGRATION_NAME,
+    LOGIN_UI_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PUBLIC_INGRESS_INTEGRATION_NAME,
@@ -101,6 +102,11 @@ def public_ingress_integration(harness: Harness) -> int:
 
 
 @pytest.fixture
+def login_ui_integration(harness: Harness) -> int:
+    return harness.add_relation(LOGIN_UI_INTEGRATION_NAME, "login-ui")
+
+
+@pytest.fixture
 def oauth_integration(harness: Harness) -> int:
     return harness.add_relation(OAUTH_INTEGRATION_NAME, "requirer")
 
@@ -127,6 +133,26 @@ def public_ingress_integration_data(harness: Harness, public_ingress_integration
         "traefik-public",
         {
             "ingress": '{"url": "https://hydra.ory.com"}',
+        },
+    )
+
+
+@pytest.fixture
+def login_ui_integration_data(harness: Harness, login_ui_integration: int) -> None:
+    harness.update_relation_data(
+        login_ui_integration,
+        "login-ui",
+        {
+            "consent_url": "https://login-ui.example.com/consent",
+            "error_url": "https://login-ui.example.com/error",
+            "login_url": "https://login-ui.example.com/login",
+            "oidc_error_url": "https://login-ui.example.com/oidc_error",
+            "device_verification_url": "https://login-ui.example.com/device_verification",
+            "post_device_done_url": "https://login-ui.example.com/post_device_done",
+            "recovery_url": "https://login-ui.example.com/recovery",
+            "registration_url": "https://login-ui.example.com/registration",
+            "settings_url": "https://login-ui.example.com/settings",
+            "webauthn_settings_url": "https://login-ui.example.com/webauthn_settings",
         },
     )
 

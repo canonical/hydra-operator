@@ -662,6 +662,7 @@ class TestHolisticHandler:
         mocked_event: MagicMock,
         mocked_pebble_service: MagicMock,
         peer_integration: int,
+        login_ui_integration: int,
         public_ingress_integration: MagicMock,
     ) -> None:
         with patch("charm.IngressPerAppRequirer.is_ready", return_value=False):
@@ -677,6 +678,7 @@ class TestHolisticHandler:
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
         peer_integration: int,
+        login_ui_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch("charm.DatabaseRequires.is_resource_created", return_value=False):
@@ -692,6 +694,7 @@ class TestHolisticHandler:
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
         peer_integration: int,
+        login_ui_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch(
@@ -711,6 +714,7 @@ class TestHolisticHandler:
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
         peer_integration: int,
+        login_ui_integration: int,
         mocked_pebble_service: MagicMock,
         mocked_secrets: MagicMock,
     ) -> None:
@@ -727,6 +731,7 @@ class TestHolisticHandler:
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
         peer_integration: int,
+        login_ui_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with (
@@ -746,6 +751,7 @@ class TestHolisticHandler:
         mocked_event: MagicMock,
         public_ingress_integration_data: MagicMock,
         peer_integration: int,
+        login_ui_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         with patch("charm.ConfigFile.from_sources", return_value="config"):
