@@ -143,6 +143,9 @@ class LoginUIEndpointData:
     login_url: str = ""
     post_device_done_url: str = ""
 
+    def is_ready(self) -> bool:
+        return all(v for _, v in self.to_service_configs().items())
+
     def to_service_configs(self) -> ServiceConfigs:
         return asdict(self)
 
@@ -154,7 +157,11 @@ class LoginUIEndpointData:
             logger.error("Failed to fetch the login ui endpoints: %s", exc)
             return cls()
 
-        return dacite.from_dict(data_class=LoginUIEndpointData, data=login_ui_endpoints) if login_ui_endpoints else cls()
+        return (
+            dacite.from_dict(data_class=LoginUIEndpointData, data=login_ui_endpoints)
+            if login_ui_endpoints
+            else cls()
+        )
 
 
 @dataclass(frozen=True, slots=True)
