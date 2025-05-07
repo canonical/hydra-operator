@@ -90,6 +90,7 @@ from utils import (
     leader_unit,
     peer_integration_exists,
     public_ingress_integration_exists,
+    login_ui_integration_exists,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,6 +216,10 @@ class HydraCharm(CharmBase):
         # login-ui
         self.framework.observe(
             self.on[LOGIN_UI_INTEGRATION_NAME].relation_changed,
+            self._holistic_handler,
+        )
+        self.framework.observe(
+            self.on[LOGIN_UI_INTEGRATION_NAME].relation_broken,
             self._holistic_handler,
         )
 
@@ -468,6 +473,12 @@ class HydraCharm(CharmBase):
         if not public_ingress_integration_exists(self):
             self.unit.status = BlockedStatus(
                 f"Missing required relation with {PUBLIC_INGRESS_INTEGRATION_NAME}"
+            )
+            return
+
+        if not login_ui_integration_exists(self):
+            self.unit.status = BlockedStatus(
+                f"Missing required relation with {LOGIN_UI_INTEGRATION_NAME}"
             )
             return
 
