@@ -22,6 +22,20 @@ from constants import (
 from integrations import InternalIngressData, PublicIngressData
 
 
+@pytest.fixture(autouse=True)
+def mocked_k8s_resource_patch(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher",
+        autospec=True,
+    )
+    mocker.patch.multiple(
+        "charm.KubernetesComputeResourcesPatch",
+        _namespace="testing",
+        _patch=lambda *a, **kw: True,
+        is_ready=lambda *a, **kw: True,
+    )
+
+
 @pytest.fixture
 def mocked_container() -> MagicMock:
     return create_autospec(Container)
@@ -40,7 +54,7 @@ def mocked_event() -> MagicMock:
 
 
 @pytest.fixture
-def harness() -> Generator[Harness, None, None]:
+def harness(mocked_k8s_resource_patch: None) -> Generator[Harness, None, None]:
     harness = Harness(HydraCharm)
     harness.set_model_name("testing")
     harness.set_can_connect(WORKLOAD_CONTAINER, True)
