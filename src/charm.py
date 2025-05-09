@@ -22,6 +22,12 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
 from charms.loki_k8s.v1.loki_push_api import LogForwarder
+from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
+    K8sResourcePatchFailedEvent,
+    KubernetesComputeResourcesPatch,
+    ResourceRequirements,
+    adjust_resource_requirements,
+)
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
@@ -162,6 +168,12 @@ class HydraCharm(CharmBase):
             ],
         )
 
+        self.resources_patch = KubernetesComputeResourcesPatch(
+            self,
+            WORKLOAD_CONTAINER,
+            resource_reqs_func=self._resource_reqs_from_config,
+        )
+
         # Loki logging relation
         self._log_forwarder = LogForwarder(self, relation_name=LOGGING_RELATION_NAME)
 
@@ -243,6 +255,11 @@ class HydraCharm(CharmBase):
         # tracing
         self.framework.observe(self.tracing_requirer.on.endpoint_changed, self._on_config_changed)
         self.framework.observe(self.tracing_requirer.on.endpoint_removed, self._on_config_changed)
+
+        # resource patching
+        self.framework.observe(
+            self.resources_patch.on.patch_failed, self._on_resource_patch_failed
+        )
 
         # actions
         self.framework.observe(self.on.run_migration_action, self._on_run_migration)
@@ -330,6 +347,11 @@ class HydraCharm(CharmBase):
             self.internal_ingress.submit_to_traefik(internal_ingress_config)
             self._on_hydra_endpoints_ready(event)
             self._on_oauth_integration_created(event)
+
+    def _resource_reqs_from_config(self) -> ResourceRequirements:
+        limits = {"cpu": self.model.config.get("cpu"), "memory": self.model.config.get("memory")}
+        requests = {"cpu": "100m", "mem": "200Mi"}
+        return adjust_resource_requirements(limits, requests, adhere_to_requests=True)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
         if not container_connectivity(self):
@@ -452,6 +474,10 @@ class HydraCharm(CharmBase):
             str(internal_endpoints.admin_endpoint),
             str(internal_endpoints.public_endpoint),
         )
+
+    def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
+        logger.error(f"Failed to patch resource constraints: {event.message}")
+        self.unit.status = BlockedStatus(event.message)
 
     def _holistic_handler(self, event: HookEvent) -> None:  # noqa: C901
         if not container_connectivity(self):
