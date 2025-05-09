@@ -662,6 +662,7 @@ class TestHolisticHandler:
         mocked_event: MagicMock,
         mocked_pebble_service: MagicMock,
         peer_integration: int,
+        login_ui_integration: int,
         public_ingress_integration: MagicMock,
     ) -> None:
         with patch("charm.IngressPerAppRequirer.is_ready", return_value=False):
@@ -675,7 +676,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: MagicMock,
+        public_ingress_integration_data: None,
+        login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
@@ -690,7 +692,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: MagicMock,
+        public_ingress_integration_data: None,
+        login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
@@ -709,7 +712,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: MagicMock,
+        public_ingress_integration_data: None,
+        login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
         mocked_secrets: MagicMock,
@@ -721,11 +725,28 @@ class TestHolisticHandler:
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus("Waiting for secrets creation")
 
+    def test_when_login_ui_not_ready(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        public_ingress_integration_data: None,
+        peer_integration: int,
+        mocked_pebble_service: MagicMock,
+        mocked_secrets: MagicMock,
+        login_ui_integration: int,
+    ) -> None:
+        harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == WaitingStatus("Waiting for login UI to be ready")
+
     def test_when_pebble_plan_failed(
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: MagicMock,
+        public_ingress_integration_data: None,
+        login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
@@ -744,7 +765,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: MagicMock,
+        public_ingress_integration_data: None,
+        login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:

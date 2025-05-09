@@ -33,7 +33,11 @@ from juju.unit import Unit
 from pytest_operator.plugin import OpsTest
 from yarl import URL
 
-from constants import DATABASE_INTEGRATION_NAME, PUBLIC_INGRESS_INTEGRATION_NAME
+from constants import (
+    DATABASE_INTEGRATION_NAME,
+    LOGIN_UI_INTEGRATION_NAME,
+    PUBLIC_INGRESS_INTEGRATION_NAME,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -365,6 +369,13 @@ async def test_remove_public_ingress_integration(
     ops_test: OpsTest, hydra_application: Application
 ) -> None:
     async with remove_integration(ops_test, TRAEFIK_PUBLIC_APP, PUBLIC_INGRESS_INTEGRATION_NAME):
+        assert hydra_application.status == "blocked"
+
+
+async def test_remove_login_ui_integration(
+    ops_test: OpsTest, hydra_application: Application
+) -> None:
+    async with remove_integration(ops_test, LOGIN_UI_APP, LOGIN_UI_INTEGRATION_NAME):
         assert hydra_application.status == "blocked"
 
 

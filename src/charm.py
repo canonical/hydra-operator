@@ -88,6 +88,7 @@ from utils import (
     container_connectivity,
     database_integration_exists,
     leader_unit,
+    login_ui_integration_exists,
     peer_integration_exists,
     public_ingress_integration_exists,
 )
@@ -215,6 +216,10 @@ class HydraCharm(CharmBase):
         # login-ui
         self.framework.observe(
             self.on[LOGIN_UI_INTEGRATION_NAME].relation_changed,
+            self._holistic_handler,
+        )
+        self.framework.observe(
+            self.on[LOGIN_UI_INTEGRATION_NAME].relation_broken,
             self._holistic_handler,
         )
 
@@ -448,7 +453,7 @@ class HydraCharm(CharmBase):
             str(internal_endpoints.public_endpoint),
         )
 
-    def _holistic_handler(self, event: HookEvent) -> None:
+    def _holistic_handler(self, event: HookEvent) -> None:  # noqa: C901
         if not container_connectivity(self):
             event.defer()
             self.unit.status = WaitingStatus("Container is not connected yet")
@@ -471,8 +476,18 @@ class HydraCharm(CharmBase):
             )
             return
 
+        if not login_ui_integration_exists(self):
+            self.unit.status = BlockedStatus(
+                f"Missing required relation with {LOGIN_UI_INTEGRATION_NAME}"
+            )
+            return
+
         if not self.public_ingress.is_ready():
             self.unit.status = WaitingStatus("Waiting for ingress to be ready")
+            return
+
+        if not LoginUIEndpointData.load(self.login_ui_requirer).is_ready():
+            self.unit.status = WaitingStatus("Waiting for login UI to be ready")
             return
 
         if not self.database_requirer.is_resource_created():
