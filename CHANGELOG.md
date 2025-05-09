@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.4](https://github.com/canonical/hydra-operator/compare/v1.1.3...v1.1.4) (2025-05-09)
+
+
+### Bug Fixes
+
+* fix constraint ([6a74fed](https://github.com/canonical/hydra-operator/commit/6a74fed3fb49e791d0270d762502d8f9c31267f6))
+
 ## [1.1.3](https://github.com/canonical/hydra-operator/compare/v1.1.2...v1.1.3) (2025-05-09)
 
 
