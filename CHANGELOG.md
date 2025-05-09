@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.3](https://github.com/canonical/hydra-operator/compare/v1.1.2...v1.1.3) (2025-05-09)
+
+
+### Bug Fixes
+
+* add pod constraints ([f0b011c](https://github.com/canonical/hydra-operator/commit/f0b011c9243774a4c2baf9805e7fe0a727fd85a7))
+* block charm if not integrated with ui ([f3726e4](https://github.com/canonical/hydra-operator/commit/f3726e44b4a47cb32bb8c09eb3b0f85d10ebe7d3))
+* wait for login ui integration to be ready ([763c825](https://github.com/canonical/hydra-operator/commit/763c8254875d722731bb0d99e091d67b5ce3ac5b))
+
 ## [1.1.2](https://github.com/canonical/hydra-operator/compare/v1.1.1...v1.1.2) (2025-05-02)
 
 
