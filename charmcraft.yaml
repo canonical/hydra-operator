@@ -40,7 +40,7 @@ requires:
   ui-endpoint-info:
     interface: login_ui_endpoints
     limit: 1
-    optional: true
+    optional: false
   logging:
     interface: loki_push_api
     optional: true
