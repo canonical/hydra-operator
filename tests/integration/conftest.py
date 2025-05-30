@@ -40,6 +40,16 @@ PUBLIC_INGRESS_DOMAIN = "public"
 ADMIN_INGRESS_DOMAIN = "admin"
 
 
+def pytest_addoption(parser):
+    """Parse additional pytest options.
+
+    Args:
+        parser: Pytest parser.
+    """
+    parser.addoption("--charm-file", action="store")
+    parser.addoption("--kube-config", action="store", default="~/.kube/config")
+
+
 async def integrate_dependencies(ops_test: OpsTest) -> None:
     await ops_test.model.integrate(HYDRA_APP, DB_APP)
     await ops_test.model.integrate(
@@ -239,12 +249,13 @@ async def jwks_client(ops_test: OpsTest, public_address: Callable) -> PyJWKClien
 
 
 @pytest_asyncio.fixture(scope="module")
-async def local_charm(ops_test: OpsTest) -> Path:
-    # in GitHub CI, charms are built with charmcraftcache and uploaded to $CHARM_PATH
-    charm = os.getenv("CHARM_PATH")
+async def local_charm(ops_test: OpsTest, pytestconfig: pytest.Config) -> Path:
+    # in GitHub CI with microk8s, charms are built with charmcraftcache and uploaded to $CHARM_PATH
+    charm = pytestconfig.getoption("--charm-file") or os.getenv("CHARM_PATH")
     if not charm:
         # fall back to build locally - required when run outside of GitHub CI
         charm = await ops_test.build_charm(".")
+
     return charm
 
 
