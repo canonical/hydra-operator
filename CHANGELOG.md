@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.5](https://github.com/canonical/hydra-operator/compare/v1.1.4...v1.1.5) (2025-06-17)
+
+
+### Bug Fixes
+
+* fix tests ([db5c0ff](https://github.com/canonical/hydra-operator/commit/db5c0ff0ca6db95789890f9a7dd51479fd8fb8a3))
+* mark ui relation as mandatory ([b3b82bd](https://github.com/canonical/hydra-operator/commit/b3b82bd0d9c3bbca87294b60b864a06b2e1b81a8))
+
 ## [1.1.4](https://github.com/canonical/hydra-operator/compare/v1.1.3...v1.1.4) (2025-05-09)
 
 
