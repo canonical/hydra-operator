@@ -6,6 +6,12 @@ from unittest.mock import MagicMock, create_autospec, mock_open, patch
 
 import pytest
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.hydra.v0.hydra_token_hook import (
+    AuthConfig,
+    HydraHookRequirer,
+    ProviderData,
+    _AuthConfig,
+)
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
@@ -18,6 +24,7 @@ from yarl import URL
 from constants import ADMIN_PORT, POSTGRESQL_DSN_TEMPLATE, PUBLIC_PORT
 from integrations import (
     DatabaseConfig,
+    HydraHookData,
     InternalIngressData,
     LoginUIEndpointData,
     PeerData,
@@ -218,6 +225,87 @@ class TestPublicIngressData:
 
         actual = PublicIngressData.load(mocked_requirer)
         assert actual == PublicIngressData()
+
+
+class TestHydraHookData:
+    @pytest.fixture
+    def mocked_data(self) -> ProviderData:
+        return ProviderData(
+            url="https://path/to/hook",
+            auth=AuthConfig(
+                type="api_key",
+                config=_AuthConfig(
+                    name="Authorization",
+                    value="token",
+                    in_="header",
+                ),
+            ),
+        )
+
+    @pytest.fixture
+    def mocked_requirer(self, mocked_data: ProviderData) -> MagicMock:
+        s = create_autospec(HydraHookRequirer)
+        s.consume_relation_data.return_value = mocked_data
+        return s
+
+    def test_to_service_configs(self, mocked_data: ProviderData) -> None:
+        data = HydraHookData(
+            is_ready=True,
+            url=mocked_data.url,
+            auth_type=mocked_data.auth.type,
+            auth_name=mocked_data.auth.config.name,
+            auth_value=mocked_data.auth.config.value,
+            auth_in=mocked_data.auth.config.in_,
+        )
+        assert data.to_service_configs() == {
+            "token_hook_url": mocked_data.url,
+            "token_hook_auth_type": mocked_data.auth.type,
+            "token_hook_auth_name": mocked_data.auth.config.name,
+            "token_hook_auth_value": mocked_data.auth.config.value,
+            "token_hook_auth_in": mocked_data.auth.config.in_,
+        }
+
+    def test_to_service_configs_without_auth(self, mocked_data: ProviderData) -> None:
+        data = HydraHookData(
+            is_ready=True,
+            url=mocked_data.url,
+        )
+        assert data.to_service_configs() == {
+            "token_hook_url": mocked_data.url,
+        }
+
+    def test_load_when_integration_ready(
+        self, mocked_requirer: MagicMock, mocked_data: ProviderData
+    ) -> None:
+        mocked_requirer.ready.return_value = True
+
+        actual = HydraHookData.load(mocked_requirer)
+        assert actual == HydraHookData(
+            is_ready=True,
+            url=mocked_data.url,
+            auth_type=mocked_data.auth.type.value,
+            auth_name=mocked_data.auth.config.name,
+            auth_value=mocked_data.auth.config.value,
+            auth_in=mocked_data.auth.config.in_,
+        )
+
+    def test_load_when_integration_ready_without_auth(
+        self, mocked_requirer: MagicMock, mocked_data: ProviderData
+    ) -> None:
+        mocked_requirer.ready.return_value = True
+        mocked_data.auth = None
+
+        actual = HydraHookData.load(mocked_requirer)
+        assert actual == HydraHookData(
+            is_ready=True,
+            url=mocked_data.url,
+        )
+
+    def test_load_when_integration_not_ready(self, mocked_requirer: MagicMock) -> None:
+        mocked_requirer.ready.return_value = False
+
+        actual = HydraHookData.load(mocked_requirer)
+        assert actual == HydraHookData()
 
 
 class TestInternalIngressData:
