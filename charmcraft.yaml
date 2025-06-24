@@ -57,6 +57,9 @@ requires:
     description: |
       Ingress used for cross-cluster communication where network topology is more complex
       than just one k8s cluster
+  hydra-token-hook:
+    interface: hydra_token_hook
+    optional: true
 
 provides:
   hydra-endpoint-info:
