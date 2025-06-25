@@ -29,6 +29,25 @@ class TestCharmConfig:
 
         assert actual == expected
 
+    @pytest.mark.parametrize(
+        "config, expected",
+        [
+            (
+                {"dev": True},
+                {"DEV": "true"},
+            ),
+            (
+                {"dev": False},
+                {"DEV": "false"},
+            ),
+        ],
+    )
+    def test_to_env_vars(self, harness: Harness, config: dict, expected: dict) -> None:
+        harness.update_config(config)
+        actual = CharmConfig(harness.charm.config).to_env_vars()
+
+        assert actual == expected
+
 
 class TestConfigFile:
     @pytest.fixture

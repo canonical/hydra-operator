@@ -140,7 +140,7 @@ class TestPebbleService:
         another_data_source = MagicMock(spec=EnvVarConvertible)
         another_data_source.to_env_vars.return_value = {"key2": "value2"}
 
-        expected = {
+        expected_env_vars = {
             **DEFAULT_CONTAINER_ENV,
             "key1": "value1",
             "key2": "value2",
@@ -148,4 +148,5 @@ class TestPebbleService:
 
         layer = pebble_service.render_pebble_layer(data_source, another_data_source)
 
-        assert layer.to_dict()["services"][WORKLOAD_SERVICE]["environment"] == expected
+        layer_dict = layer.to_dict()
+        assert layer_dict["services"][WORKLOAD_SERVICE]["environment"] == expected_env_vars
