@@ -8,6 +8,7 @@ from jinja2 import Template
 from ops import ConfigData
 
 from constants import DEFAULT_OAUTH_SCOPES
+from env_vars import EnvVars
 
 ServiceConfigs: TypeAlias = Mapping[str, Any]
 
@@ -33,6 +34,11 @@ class CharmConfig:
             "dev_mode": self._config["dev"],
             "log_level": self._config["log_level"],
             "access_token_strategy": "jwt" if self._config["jwt_access_tokens"] else "opaque",
+        }
+
+    def to_env_vars(self) -> EnvVars:
+        return {
+            "DEV": "true" if self._config["dev"] else "false",
         }
 
 

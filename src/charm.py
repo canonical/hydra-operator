@@ -290,7 +290,10 @@ class HydraCharm(CharmBase):
     @property
     def _pebble_layer(self) -> Layer:
         tracing_data = TracingData.load(self.tracing_requirer)
-        return self._pebble_service.render_pebble_layer(tracing_data)
+        return self._pebble_service.render_pebble_layer(
+            self.charm_config,
+            tracing_data,
+        )
 
     @property
     def migration_needed(self) -> bool:
