@@ -610,6 +610,16 @@ class TestHolisticHandler:
             "charm.HydraCharm.migration_needed", new_callable=PropertyMock, return_value=False
         )
 
+    @pytest.fixture
+    def non_dev_mode(self, mocker: MockerFixture) -> None:
+        mocker.patch("charm.HydraCharm.dev_mode", new_callable=PropertyMock, return_value=False)
+
+    @pytest.fixture
+    def non_secured_ingress(self, mocker: MockerFixture) -> None:
+        mocker.patch(
+            "charm.PublicIngressData.secured", new_callable=PropertyMock, return_value=False
+        )
+
     def test_when_container_not_connected(
         self,
         harness: Harness,
@@ -671,6 +681,26 @@ class TestHolisticHandler:
         mocked_pebble_service.push_config_file.assert_not_called()
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus("Waiting for ingress to be ready")
+
+    def test_when_public_ingress_not_secured(
+        self,
+        harness: Harness,
+        mocked_event: MagicMock,
+        mocked_pebble_service: MagicMock,
+        non_dev_mode: None,
+        non_secured_ingress: None,
+        peer_integration: int,
+        login_ui_integration_data: None,
+        public_ingress_integration_data: None,
+    ) -> None:
+        harness.charm._holistic_handler(mocked_event)
+
+        mocked_pebble_service.push_config_file.assert_not_called()
+        mocked_pebble_service.plan.assert_not_called()
+        assert harness.charm.unit.status == BlockedStatus(
+            "Requires a secure (HTTPS) public ingress. "
+            "Either enable HTTPS on public ingress or set 'dev' config to true for local development."
+        )
 
     def test_when_database_not_ready(
         self,

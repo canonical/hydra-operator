@@ -25,6 +25,9 @@ class CharmConfig:
     def __init__(self, config: ConfigData) -> None:
         self._config = config
 
+    def __getitem__(self, key: str) -> Any:
+        return self._config.get(key)
+
     def to_service_configs(self) -> ServiceConfigs:
         return {
             "dev_mode": self._config["dev"],
