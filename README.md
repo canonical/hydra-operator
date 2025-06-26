@@ -17,9 +17,17 @@ visit <https://www.ory.sh/docs/hydra/>.
 ## Usage
 
 ```shell
-juju deploy postgresql-k8s --channel edge --trust
+juju deploy postgresql-k8s --channel 14/stable --trust
+juju deploy self-signed-certificates --channel latest/stable --trust
+juju deploy identity-platform-login-ui-operator --channel latest/edge --trust
+juju deploy traefik-k8s --channel latest/stable --trust
+
 juju deploy hydra --trust
+
 juju integrate postgresql-k8s hydra
+juju integrate identity-platform-login-ui-operator hydra
+juju integrate traefik-k8s:certificates self-signed-certificates:certificates
+juju integrate traefik-k8s hydra:public-ingress
 ```
 
 You can follow the deployment status with `watch -c juju status --color`.
@@ -50,6 +58,9 @@ To provide ingress to the public API run:
 ```shell
 juju integrate traefik-public hydra:public-ingress
 ```
+
+Note that the public ingress needs to be secured with HTTPS if the charm
+config `dev` is not `true`.
 
 ### Kratos
 
