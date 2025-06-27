@@ -170,6 +170,7 @@ class HydraHookData:
     """The data source from the hydra integration."""
 
     is_ready: bool = False
+    auth_enabled: bool = False
     url: str = ""
     auth_type: Optional[str] = None
     auth_name: Optional[str] = None
@@ -183,9 +184,9 @@ class HydraHookData:
         r = {
             "token_hook_url": self.url,
         }
-        if self.auth_type:
+        if self.auth_enabled:
             r.update({
-                "token_hook_auth_type": self.auth_type,
+                "token_hook_auth_type": "api_key",
                 "token_hook_auth_name": self.auth_name,
                 "token_hook_auth_value": self.auth_value,
                 "token_hook_auth_in": self.auth_in,
@@ -202,12 +203,13 @@ class HydraHookData:
         c = cls(
             is_ready=is_ready,
             url=data.url,
+            auth_enabled=data.auth_enabled,
         )
-        if data.auth:
-            c.auth_type = data.auth.type.value
-            c.auth_name = data.auth.config.name
-            c.auth_value = data.auth.config.value
-            c.auth_in = data.auth.config.in_
+        if c.auth_enabled:
+            c.auth_type = "api_key"
+            c.auth_name = data.auth_config_name
+            c.auth_value = data.auth_config_value
+            c.auth_in = data.auth_config_in
         return c
 
 

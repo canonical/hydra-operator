@@ -1,17 +1,14 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import json
 from typing import Any, Generator, List
 
 import pytest
 from charms.hydra.v0.hydra_token_hook import (
-    AuthConfig,
     HydraHookProvider,
     ProviderData,
     ReadyEvent,
     UnavailableEvent,
-    _AuthConfig,
 )
 from ops.charm import CharmBase
 from ops.framework import EventBase
@@ -26,14 +23,10 @@ provides:
 
 data = ProviderData(
     url="https://path/to/hook",
-    auth=AuthConfig(
-        type="api_key",
-        config=_AuthConfig(
-            name="Authorization",
-            value="token",
-            in_="header",
-        ),
-    ),
+    auth_type="api_key",
+    auth_config_name="Authorization",
+    auth_config_value="token",
+    auth_config_in="header",
 )
 
 
@@ -71,13 +64,12 @@ def test_provider_info_in_relation_databag(harness: Harness) -> None:
 
     assert relation_data["url"] == "https://path/to/hook"
 
-    auth = json.loads(relation_data["auth"])
-    auth["config"] = json.loads(auth["config"])
-
     assert isinstance(harness.charm.events[0], ReadyEvent)
-    assert auth == {
-        "type": "api_key",
-        "config": {"name": "Authorization", "value": "token", "in_": "header"},
+    assert relation_data == {
+        "url": "https://path/to/hook",
+        "auth_config_name": "Authorization",
+        "auth_config_value": "token",
+        "auth_config_in": "header",
     }
 
 
