@@ -173,6 +173,10 @@ class PublicIngressData:
     def to_service_configs(self) -> ServiceConfigs:
         return {"public_url": str(self.url)}
 
+    @property
+    def secured(self) -> bool:
+        return self.url.scheme == "https"
+
     @classmethod
     def load(cls, requirer: IngressPerAppRequirer) -> "PublicIngressData":
         return cls(url=URL(requirer.url)) if requirer.is_ready() else cls()  # type: ignore[arg-type]

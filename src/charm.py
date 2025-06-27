@@ -290,7 +290,10 @@ class HydraCharm(CharmBase):
     @property
     def _pebble_layer(self) -> Layer:
         tracing_data = TracingData.load(self.tracing_requirer)
-        return self._pebble_service.render_pebble_layer(tracing_data)
+        return self._pebble_service.render_pebble_layer(
+            self.charm_config,
+            tracing_data,
+        )
 
     @property
     def migration_needed(self) -> bool:
@@ -299,6 +302,10 @@ class HydraCharm(CharmBase):
 
         database_config = DatabaseConfig.load(self.database_requirer)
         return self.peer_data[database_config.migration_version] != self._workload_service.version
+
+    @property
+    def dev_mode(self) -> bool:
+        return self.charm_config["dev"]
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         if not container_connectivity(self):
@@ -512,6 +519,14 @@ class HydraCharm(CharmBase):
             self.unit.status = WaitingStatus("Waiting for ingress to be ready")
             return
 
+        public_ingress = PublicIngressData.load(self.public_ingress)
+        if not self.dev_mode and not public_ingress.secured:
+            self.unit.status = BlockedStatus(
+                "Requires a secure (HTTPS) public ingress. "
+                "Either enable HTTPS on public ingress or set 'dev' config to true for local development."
+            )
+            return
+
         if not LoginUIEndpointData.load(self.login_ui_requirer).is_ready():
             self.unit.status = WaitingStatus("Waiting for login UI to be ready")
             return
@@ -537,7 +552,7 @@ class HydraCharm(CharmBase):
                 self.charm_config,
                 DatabaseConfig.load(self.database_requirer),
                 LoginUIEndpointData.load(self.login_ui_requirer),
-                PublicIngressData.load(self.public_ingress),
+                public_ingress,
             )
         )
 
