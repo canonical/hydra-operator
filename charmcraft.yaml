@@ -63,16 +63,20 @@ provides:
     interface: hydra_endpoints
     description: |
       Provides API endpoints to a related application
+    optional: true
   oauth:
     interface: oauth
+    optional: true
   metrics-endpoint:
     interface: prometheus_scrape
     description: |
       Provides application metrics to COS Prometheus instance
+    optional: true
   grafana-dashboard:
     description: |
       Forwards the built-in grafana dashboard(s) for monitoring hydra.
     interface: grafana_dashboard
+    optional: true
 
 peers:
   hydra:
