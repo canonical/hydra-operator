@@ -12,7 +12,8 @@ config.
 
 import enum
 import logging
-from typing import Annotated, Any, List, Optional, TypeVar, Union, get_args
+from functools import cached_property
+from typing import List, Optional
 
 from ops import (
     CharmBase,
@@ -25,14 +26,11 @@ from ops import (
     RelationCreatedEvent,
     RelationEvent,
 )
-from pydantic import BaseModel as _BaseModel
 from pydantic import (
-    BeforeValidator,
+    BaseModel,
+    ConfigDict,
     Field,
-    PlainSerializer,
-    ValidationInfo,
 )
-from pydantic_core import from_json
 
 LIBID = "b2e5e865f0bc43638f1e4a0a63e899a9"
 LIBAPI = 0
@@ -45,72 +43,34 @@ INTERFACE_NAME = "hydra_token_hook"
 logger = logging.getLogger(__name__)
 
 
-class BaseModel(_BaseModel):
-    def __init__(self, **data: Any) -> None:
-        # We override the init function to add a reference to self in the context
-        # so that "deserialize_model" can use it.
-        self.__pydantic_validator__.validate_python(
-            data,
-            self_instance=self,
-            context={"self": self},
-        )
-
-
-def deserialize_model(v: Union[BaseModel, str], info: ValidationInfo) -> BaseModel:
-    if isinstance(v, BaseModel):
-        return v
-
-    return info.context["self"].model_fields[info.field_name].annotation(**from_json(v))
-
-
-def deserialize_optional_model(
-    v: Union[BaseModel, str], info: ValidationInfo
-) -> Optional[BaseModel]:
-    if v == "":
-        return None
-
-    if isinstance(v, BaseModel):
-        return v
-
-    t = info.context["self"].model_fields[info.field_name].annotation
-    for annotation in get_args(t):
-        if annotation is not type(None):
-            return annotation(**from_json(v))
-
-
-SerializableModel = Annotated[
-    TypeVar("BaseModelType", bound=BaseModel),
-    PlainSerializer(lambda v: v.model_dump_json(), return_type=str),
-    BeforeValidator(deserialize_model),
-]
-
-
-OptionalSerializableModel = Annotated[
-    Optional[TypeVar("BaseModelType", bound=BaseModel)],
-    PlainSerializer(lambda v: v.model_dump_json() if v else "", return_type=str),
-    BeforeValidator(deserialize_optional_model),
-]
-
-
-class AuthType(enum.Enum):
-    api_key = "api_key"
+class AuthIn(enum.Enum):
+    header = "header"
     cookie = "cookie"
 
 
-class _AuthConfig(BaseModel):
-    name: str = "Authorization"
-    value: str
-    in_: str = Field(default="header", alias="in")
-
-
-class AuthConfig(BaseModel):
-    type: AuthType = AuthType.api_key
-    config: SerializableModel[_AuthConfig]
-
-
 class ProviderData(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
     url: str
-    auth: OptionalSerializableModel[AuthConfig] = None
+    auth_config_value: Optional[str] = None
+    auth_config_name: Optional[str] = Field(
+        default_factory=lambda data: "Authorization" if data["auth_config_value"] else None
+    )
+    auth_config_in: Optional[AuthIn] = Field(
+        default_factory=lambda data: AuthIn.header if data["auth_config_value"] else None,
+        validate_default=True,
+    )
+
+    @cached_property
+    def auth_enabled(self) -> bool:
+        return all(
+            f
+            for f in [
+                self.auth_config_name,
+                self.auth_config_value,
+                self.auth_config_in,
+            ]
+        )
 
 
 class ReadyEvent(RelationEvent):
@@ -230,5 +190,7 @@ class HydraHookRequirer(Object):
                 else False
             )
 
-        relation = next((relation for relation in self.relations if relation.id == relation_id), None)
+        relation = next(
+            (relation for relation in self.relations if relation.id == relation_id), None
+        )
         return self._ready(relation) if relation else False

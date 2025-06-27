@@ -6,12 +6,10 @@ from typing import Any, Dict, Generator, List
 
 import pytest
 from charms.hydra.v0.hydra_token_hook import (
-    AuthConfig,
     HydraHookRequirer,
     ProviderData,
     ReadyEvent,
     UnavailableEvent,
-    _AuthConfig,
 )
 from ops.charm import CharmBase
 from ops.framework import EventBase
@@ -42,14 +40,10 @@ class HydraTokenHookRequirerCharm(CharmBase):
 def provider_data() -> ProviderData:
     return ProviderData(
         url="https://path/to/hook",
-        auth=AuthConfig(
-            type="api_key",
-            config=_AuthConfig(
-                name="Authorization",
-                value="token",
-                in_="header",
-            ),
-        ),
+        auth_type="api_key",
+        auth_config_name="Authorization",
+        auth_config_value="token",
+        auth_config_in="header",
     )
 
 
@@ -81,8 +75,8 @@ def test_data_in_relation_bag(harness: Harness, provider_data: ProviderData) -> 
     assert relation_data == provider_data
 
 
-def test_data_in_relation_bag_with_no_auth(harness: Harness, provider_data: ProviderData) -> None:
-    provider_data.auth = None
+def test_data_in_relation_bag_with_no_auth(harness: Harness) -> None:
+    provider_data = ProviderData(url="https://path/to/hook")
 
     relation_id = harness.add_relation("hydra-token-hook", "provider")
     harness.add_relation_unit(relation_id, "provider/0")

@@ -7,10 +7,8 @@ from unittest.mock import MagicMock, create_autospec, mock_open, patch
 import pytest
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.hydra.v0.hydra_token_hook import (
-    AuthConfig,
     HydraHookRequirer,
     ProviderData,
-    _AuthConfig,
 )
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
@@ -232,14 +230,9 @@ class TestHydraHookData:
     def mocked_data(self) -> ProviderData:
         return ProviderData(
             url="https://path/to/hook",
-            auth=AuthConfig(
-                type="api_key",
-                config=_AuthConfig(
-                    name="Authorization",
-                    value="token",
-                    in_="header",
-                ),
-            ),
+            auth_config_name="Authorization",
+            auth_config_value="token",
+            auth_config_in="header",
         )
 
     @pytest.fixture
@@ -251,23 +244,24 @@ class TestHydraHookData:
     def test_to_service_configs(self, mocked_data: ProviderData) -> None:
         data = HydraHookData(
             is_ready=True,
+            auth_enabled=True,
             url=mocked_data.url,
-            auth_type=mocked_data.auth.type,
-            auth_name=mocked_data.auth.config.name,
-            auth_value=mocked_data.auth.config.value,
-            auth_in=mocked_data.auth.config.in_,
+            auth_name=mocked_data.auth_config_name,
+            auth_value=mocked_data.auth_config_value,
+            auth_in=mocked_data.auth_config_in,
         )
         assert data.to_service_configs() == {
             "token_hook_url": mocked_data.url,
-            "token_hook_auth_type": mocked_data.auth.type,
-            "token_hook_auth_name": mocked_data.auth.config.name,
-            "token_hook_auth_value": mocked_data.auth.config.value,
-            "token_hook_auth_in": mocked_data.auth.config.in_,
+            "token_hook_auth_type": "api_key",
+            "token_hook_auth_name": mocked_data.auth_config_name,
+            "token_hook_auth_value": mocked_data.auth_config_value,
+            "token_hook_auth_in": mocked_data.auth_config_in,
         }
 
     def test_to_service_configs_without_auth(self, mocked_data: ProviderData) -> None:
         data = HydraHookData(
             is_ready=True,
+            auth_enabled=False,
             url=mocked_data.url,
         )
         assert data.to_service_configs() == {
@@ -282,23 +276,26 @@ class TestHydraHookData:
         actual = HydraHookData.load(mocked_requirer)
         assert actual == HydraHookData(
             is_ready=True,
+            auth_enabled=True,
             url=mocked_data.url,
-            auth_type=mocked_data.auth.type.value,
-            auth_name=mocked_data.auth.config.name,
-            auth_value=mocked_data.auth.config.value,
-            auth_in=mocked_data.auth.config.in_,
+            auth_type="api_key",
+            auth_name=mocked_data.auth_config_name,
+            auth_value=mocked_data.auth_config_value,
+            auth_in=mocked_data.auth_config_in,
         )
 
     def test_load_when_integration_ready_without_auth(
-        self, mocked_requirer: MagicMock, mocked_data: ProviderData
+        self,
+        mocked_requirer: MagicMock,
     ) -> None:
         mocked_requirer.ready.return_value = True
-        mocked_data.auth = None
+        data = ProviderData(url="https://path/to/hook")
+        mocked_requirer.consume_relation_data.return_value = data
 
         actual = HydraHookData.load(mocked_requirer)
         assert actual == HydraHookData(
             is_ready=True,
-            url=mocked_data.url,
+            url=data.url,
         )
 
     def test_load_when_integration_not_ready(self, mocked_requirer: MagicMock) -> None:
