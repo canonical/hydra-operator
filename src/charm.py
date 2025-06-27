@@ -17,6 +17,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
 )
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
+from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
 from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
@@ -61,6 +62,7 @@ from constants import (
     DATABASE_INTEGRATION_NAME,
     DEFAULT_OAUTH_SCOPES,
     GRAFANA_DASHBOARD_INTEGRATION_NAME,
+    HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
     INTERNAL_INGRESS_INTEGRATION_NAME,
     LOGGING_RELATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
@@ -82,6 +84,7 @@ from exceptions import (
 )
 from integrations import (
     DatabaseConfig,
+    HydraHookData,
     InternalIngressData,
     LoginUIEndpointData,
     PeerData,
@@ -114,6 +117,11 @@ class HydraCharm(CharmBase):
         self._workload_service = WorkloadService(self.unit)
         self._pebble_service = PebbleService(self.unit)
         self._cli = CommandLine(self._container)
+
+        self.token_hook = HydraHookRequirer(
+            self,
+            relation_name=HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
+        )
 
         self.database_requirer = DatabaseRequires(
             self,
@@ -190,6 +198,10 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.on.update_status, self._holistic_handler)
         self.framework.observe(self.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+
+        # hooks
+        self.framework.observe(self.token_hook.on.ready, self._holistic_handler)
+        self.framework.observe(self.token_hook.on.unavailable, self._holistic_handler)
 
         # database
         self.framework.observe(
@@ -553,6 +565,7 @@ class HydraCharm(CharmBase):
                 DatabaseConfig.load(self.database_requirer),
                 LoginUIEndpointData.load(self.login_ui_requirer),
                 public_ingress,
+                HydraHookData.load(self.token_hook),
             )
         )
 

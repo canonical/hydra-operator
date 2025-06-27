@@ -4,11 +4,12 @@
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from typing import Any, KeysView, Type, TypeAlias, Union
+from typing import Any, KeysView, Optional, Type, TypeAlias, Union
 from urllib.parse import urlparse
 
 import dacite
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
@@ -162,6 +163,54 @@ class LoginUIEndpointData:
             if login_ui_endpoints
             else cls()
         )
+
+
+@dataclass(slots=True)
+class HydraHookData:
+    """The data source from the hydra integration."""
+
+    is_ready: bool = False
+    auth_enabled: bool = False
+    url: str = ""
+    auth_type: Optional[str] = None
+    auth_name: Optional[str] = None
+    auth_value: Optional[str] = None
+    auth_in: Optional[str] = None
+
+    def to_service_configs(self) -> ServiceConfigs:
+        if not self.is_ready:
+            return {}
+
+        r = {
+            "token_hook_url": self.url,
+        }
+        if self.auth_enabled:
+            r.update({
+                "token_hook_auth_type": "api_key",
+                "token_hook_auth_name": self.auth_name,
+                "token_hook_auth_value": self.auth_value,
+                "token_hook_auth_in": self.auth_in,
+            })
+        return r
+
+    @classmethod
+    def load(cls, requirer: HydraHookRequirer) -> "HydraHookData":
+        if not (is_ready := requirer.ready()):
+            return cls()
+
+        data = requirer.consume_relation_data()
+
+        c = cls(
+            is_ready=is_ready,
+            url=data.url,
+            auth_enabled=data.auth_enabled,
+        )
+        if c.auth_enabled:
+            c.auth_type = "api_key"
+            c.auth_name = data.auth_config_name
+            c.auth_value = data.auth_config_value
+            c.auth_in = data.auth_config_in
+        return c
 
 
 @dataclass(frozen=True, slots=True)

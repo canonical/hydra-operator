@@ -26,6 +26,21 @@ serve:
       allowed_origins:
         - "*"
 
+oauth2:
+  expose_internal_errors: false
+  {%- if token_hook_url %}
+  token_hook:
+    url: {{ token_hook_url }}
+    {%- if token_hook_auth_type %}
+    auth:
+        type: {{ token_hook_auth_type }}
+        config:
+            name: {{ token_hook_auth_name }}
+            value: {{ token_hook_auth_value }}
+            in: {{ token_hook_auth_in }}
+    {%- endif %}
+  {%- endif %}
+
 strategies:
   access_token: {{ access_token_strategy | d("opaque", true) }}
   jwt:

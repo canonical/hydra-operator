@@ -21,6 +21,7 @@ ADMIN_PORT = 4445
 CONFIG_FILE_NAME = "/etc/config/hydra.yaml"
 
 # Integration constants
+HYDRA_TOKEN_HOOK_INTEGRATION_NAME = "hydra-token-hook"
 DATABASE_INTEGRATION_NAME = "pg-database"
 PUBLIC_INGRESS_INTEGRATION_NAME = "public-ingress"
 ADMIN_INGRESS_INTEGRATION_NAME = "admin-ingress"

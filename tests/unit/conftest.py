@@ -13,6 +13,7 @@ from yarl import URL
 from charm import HydraCharm
 from constants import (
     DATABASE_INTEGRATION_NAME,
+    HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
@@ -108,6 +109,11 @@ def peer_integration(harness: Harness) -> int:
 @pytest.fixture
 def database_integration(harness: Harness) -> int:
     return harness.add_relation(DATABASE_INTEGRATION_NAME, "postgresql-k8s")
+
+
+@pytest.fixture
+def token_hook_integration(harness: Harness) -> int:
+    return harness.add_relation(HYDRA_TOKEN_HOOK_INTEGRATION_NAME, "hook-provider")
 
 
 @pytest.fixture

@@ -11,6 +11,7 @@ from pytest_mock import MockerFixture
 from cli import OAuthClient
 from constants import (
     DATABASE_INTEGRATION_NAME,
+    HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PUBLIC_INGRESS_INTEGRATION_NAME,
@@ -274,6 +275,34 @@ class TestDatabaseBrokenEvent:
     ) -> None:
         harness.charm.on[DATABASE_INTEGRATION_NAME].relation_broken.emit(
             harness.model.get_relation(DATABASE_INTEGRATION_NAME),
+        )
+
+        mocked_charm_holistic_handler.assert_called_once()
+
+
+class TestTokenHookReadyEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        token_hook_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+    ) -> None:
+        harness.charm.token_hook.on.ready.emit(
+            harness.model.get_relation(HYDRA_TOKEN_HOOK_INTEGRATION_NAME),
+        )
+
+        mocked_charm_holistic_handler.assert_called_once()
+
+
+class TestTokenHookUnavailableEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        token_hook_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+    ) -> None:
+        harness.charm.token_hook.on.unavailable.emit(
+            harness.model.get_relation(HYDRA_TOKEN_HOOK_INTEGRATION_NAME),
         )
 
         mocked_charm_holistic_handler.assert_called_once()
