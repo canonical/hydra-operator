@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.5](https://github.com/canonical/hydra-operator/compare/v1.1.4...v1.1.5) (2025-06-30)
+
+
+### Bug Fixes
+
+* add token hook integration ([8807ab4](https://github.com/canonical/hydra-operator/commit/8807ab42313781fe72d5e5e4ab602ed06e209a3c))
+* block the charm when public ingress is not secured in non-dev mode ([d2df5c1](https://github.com/canonical/hydra-operator/commit/d2df5c1ec0dd358caa05238d0fb948c1f975a0ba))
+* fix tests ([db5c0ff](https://github.com/canonical/hydra-operator/commit/db5c0ff0ca6db95789890f9a7dd51479fd8fb8a3))
+* fix the issue that disregards the dev mode when dev config is set to true ([4a0ee32](https://github.com/canonical/hydra-operator/commit/4a0ee32026212bc229539dcc49e64455f59ce2d1))
+* mark ui relation as mandatory ([b3b82bd](https://github.com/canonical/hydra-operator/commit/b3b82bd0d9c3bbca87294b60b864a06b2e1b81a8))
+
 ## [1.1.4](https://github.com/canonical/hydra-operator/compare/v1.1.3...v1.1.4) (2025-05-09)
 
 
