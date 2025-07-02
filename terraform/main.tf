@@ -25,5 +25,5 @@ resource "juju_offer" "oauth_offer" {
   name             = "oauth-offer"
   model            = var.model_name
   application_name = juju_application.hydra.name
-  endpoint         = "oauth"
+  endpoints         = ["oauth"]
 }
