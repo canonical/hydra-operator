@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.6](https://github.com/canonical/hydra-operator/compare/v1.1.5...v1.1.6) (2025-07-02)
+
+
+### Bug Fixes
+
+* update to juju 0.20 and switch to use endpoints ([7bf6da8](https://github.com/canonical/hydra-operator/commit/7bf6da837b46486ebec50b25457ae69b1a253a23))
+* update to use juju 0.20 ([107cb5b](https://github.com/canonical/hydra-operator/commit/107cb5bed828617b88d7783c9637eaf6e31c1764))
+
 ## [1.1.5](https://github.com/canonical/hydra-operator/compare/v1.1.4...v1.1.5) (2025-06-30)
 
 
