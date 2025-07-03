@@ -102,13 +102,31 @@ class TestPebbleService:
         )
 
     @patch("ops.pebble.Layer")
-    def test_plan(
+    def test_plan_when_config_did_no_change(
         self,
         mocked_layer: MagicMock,
         mocked_container: MagicMock,
+        mocked_config_manager: MagicMock,
         pebble_service: PebbleService,
     ) -> None:
-        pebble_service.plan(mocked_layer)
+        mocked_config_manager.config_changed = False
+        pebble_service.plan(mocked_layer, mocked_config_manager)
+
+        mocked_container.add_layer.assert_called_once_with(
+            WORKLOAD_CONTAINER, mocked_layer, combine=True
+        )
+        mocked_container.replan.assert_called_once()
+
+    @patch("ops.pebble.Layer")
+    def test_plan_when_config_changed(
+        self,
+        mocked_layer: MagicMock,
+        mocked_container: MagicMock,
+        mocked_config_manager: MagicMock,
+        pebble_service: PebbleService,
+    ) -> None:
+        mocked_config_manager.config_changed = True
+        pebble_service.plan(mocked_layer, mocked_config_manager)
 
         mocked_container.add_layer.assert_called_once_with(
             WORKLOAD_CONTAINER, mocked_layer, combine=True
@@ -120,13 +138,15 @@ class TestPebbleService:
         self,
         mocked_layer: MagicMock,
         mocked_container: MagicMock,
+        mocked_config_manager: MagicMock,
         pebble_service: PebbleService,
     ) -> None:
+        mocked_config_manager.config_changed = True
         with (
             patch.object(mocked_container, "restart", side_effect=Exception) as restart,
             pytest.raises(PebbleServiceError),
         ):
-            pebble_service.plan(mocked_layer)
+            pebble_service.plan(mocked_layer, mocked_config_manager)
 
         mocked_container.add_layer.assert_called_once_with(
             WORKLOAD_CONTAINER, mocked_layer, combine=True

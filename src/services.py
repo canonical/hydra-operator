@@ -4,11 +4,13 @@
 import logging
 from collections import ChainMap
 from pathlib import PurePath
+from typing import TextIO
 
 from ops.model import Container, ModelError, Unit
 from ops.pebble import Layer, LayerDict
 
 from cli import CommandLine
+from configs import ConfigFileManager
 from constants import (
     ADMIN_PORT,
     CONFIG_FILE_NAME,
@@ -101,11 +103,22 @@ class PebbleService:
     def push_config_file(self, content: str) -> None:
         self._container.push(CONFIG_FILE_NAME, content, make_dirs=True)
 
-    def plan(self, layer: Layer) -> None:
+    def pull_config_file(self) -> TextIO:
+        return self._container.pull(CONFIG_FILE_NAME)
+
+    def _restart_service(self, config_manager: ConfigFileManager) -> None:
+        if config_manager.config_changed:
+            self._container.restart(WORKLOAD_CONTAINER)
+        elif not self._container.get_service(WORKLOAD_CONTAINER).is_running():
+            self._container.start(WORKLOAD_CONTAINER)
+        else:
+            self._container.replan()
+
+    def plan(self, layer: Layer, config_manager: ConfigFileManager) -> None:
         self._container.add_layer(WORKLOAD_CONTAINER, layer, combine=True)
 
         try:
-            self._container.restart(WORKLOAD_CONTAINER)
+            self._restart_service(config_manager)
         except Exception as e:
             raise PebbleServiceError(f"Pebble failed to restart the workload service. Error: {e}")
 
