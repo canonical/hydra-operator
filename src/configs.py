@@ -1,14 +1,19 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import typing
 from collections import ChainMap
 from typing import Any, Mapping, Protocol, TypeAlias
 
+import ops
 from jinja2 import Template
 from ops import ConfigData
 
 from constants import DEFAULT_OAUTH_SCOPES
 from env_vars import EnvVars
+
+if typing.TYPE_CHECKING:
+    from services import PebbleService
 
 ServiceConfigs: TypeAlias = Mapping[str, Any]
 
@@ -57,3 +62,21 @@ class ConfigFile:
         rendered = template.render(configs)
 
         return rendered
+
+
+class ConfigFileManager:
+    def __init__(self):
+        self.config_changed = False
+
+    def update_config(self, pebble: "PebbleService", config: str) -> None:
+        config_file = None
+        try:
+            config_file = pebble.pull_config_file().read()
+        except ops.pebble.PathError:
+            pass
+
+        if config == config_file:
+            return
+
+        pebble.push_config_file(config)
+        self.config_changed = True

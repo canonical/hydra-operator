@@ -11,6 +11,7 @@ from pytest_mock import MockerFixture
 from yarl import URL
 
 from charm import HydraCharm
+from configs import ConfigFileManager
 from constants import (
     DATABASE_INTEGRATION_NAME,
     HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
@@ -40,6 +41,11 @@ def mocked_k8s_resource_patch(mocker: MockerFixture) -> None:
 @pytest.fixture
 def mocked_container() -> MagicMock:
     return create_autospec(Container)
+
+
+@pytest.fixture
+def mocked_config_manager() -> MagicMock:
+    return create_autospec(ConfigFileManager)
 
 
 @pytest.fixture
