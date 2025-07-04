@@ -37,6 +37,7 @@ from charms.traefik_k8s.v2.ingress import (
     IngressPerAppRequirer,
     IngressPerAppRevokedEvent,
 )
+from ops import StoredState
 from ops.charm import (
     ActionEvent,
     CharmBase,
@@ -53,7 +54,7 @@ from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingSta
 from ops.pebble import Layer
 
 from cli import CommandLine, OAuthClient
-from configs import CharmConfig, ConfigFile
+from configs import CharmConfig, ConfigFile, ConfigFileManager
 from constants import (
     ADMIN_INGRESS_INTEGRATION_NAME,
     ADMIN_PORT,
@@ -106,6 +107,8 @@ logger = logging.getLogger(__name__)
 
 
 class HydraCharm(CharmBase):
+    _stored = StoredState()
+
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
 
@@ -117,6 +120,7 @@ class HydraCharm(CharmBase):
         self._workload_service = WorkloadService(self.unit)
         self._pebble_service = PebbleService(self.unit)
         self._cli = CommandLine(self._container)
+        self._config_manager = ConfigFileManager(self._stored, self._pebble_service)
 
         self.token_hook = HydraHookRequirer(
             self,
@@ -558,7 +562,7 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        self._pebble_service.push_config_file(
+        self._config_manager.update_config(
             ConfigFile.from_sources(
                 self.secrets,
                 self.charm_config,
@@ -566,13 +570,13 @@ class HydraCharm(CharmBase):
                 LoginUIEndpointData.load(self.login_ui_requirer),
                 public_ingress,
                 HydraHookData.load(self.token_hook),
-            )
+            ),
         )
 
         try:
-            self._pebble_service.plan(self._pebble_layer)
-        except PebbleServiceError:
-            logger.error("Failed to start the service, please check the container logs")
+            self._pebble_service.plan(self._pebble_layer, self._config_manager)
+        except PebbleServiceError as e:
+            logger.error(f"Failed to start the service, please check the container logs: {e}")
             self.unit.status = BlockedStatus(
                 f"Failed to restart the service, please check the {WORKLOAD_CONTAINER} logs"
             )
