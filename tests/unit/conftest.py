@@ -89,6 +89,7 @@ def mocked_workload_service_version(mocker: MockerFixture) -> MagicMock:
 def mocked_pebble_service(mocker: MockerFixture, harness: Harness) -> MagicMock:
     mocked = mocker.patch("charm.PebbleService", autospec=True)
     harness.charm._pebble_service = mocked
+    harness.charm._config_manager.pebble = mocked
     return mocked
 
 
