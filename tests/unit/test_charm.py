@@ -615,6 +615,10 @@ class TestOAuthClientDeletedEvent:
 
 class TestHolisticHandler:
     @pytest.fixture(autouse=True)
+    def mocked_config_manager(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.ConfigFileManager._config_changed", return_value=True)
+
+    @pytest.fixture(autouse=True)
     def mocked_database_integration(self, mocker: MockerFixture) -> MagicMock:
         return mocker.patch("charm.database_integration_exists", return_value=True)
 
