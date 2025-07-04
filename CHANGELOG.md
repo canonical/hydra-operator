@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.7](https://github.com/canonical/hydra-operator/compare/v1.1.6...v1.1.7) (2025-07-04)
+
+
+### Bug Fixes
+
+* use proper charm name ([7044ff3](https://github.com/canonical/hydra-operator/commit/7044ff3dd6e23a4034fab806b11691c5b098d7b3))
+
 ## [1.1.6](https://github.com/canonical/hydra-operator/compare/v1.1.5...v1.1.6) (2025-07-02)
 
 
