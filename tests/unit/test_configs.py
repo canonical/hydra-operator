@@ -1,9 +1,9 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
-from io import StringIO
 from unittest.mock import MagicMock, create_autospec, mock_open, patch
 
 import pytest
+from ops import BoundStoredState
 from ops.testing import Harness
 
 from configs import CharmConfig, ConfigFile, ConfigFileManager, ServiceConfigSource
@@ -78,17 +78,27 @@ class TestConfigManager:
     def pebble(self) -> MagicMock:
         return create_autospec(PebbleService)
 
-    def test_update_config_without_previous_config(self, pebble: MagicMock, config: str) -> None:
-        c = ConfigFileManager()
+    @pytest.fixture
+    def stored_state(self) -> MagicMock:
+        s = create_autospec(BoundStoredState)
+        s.config_hash = None
+        return s
 
-        c.update_config(pebble, config)
+    def test_update_config_without_previous_config(
+        self, stored_state: MagicMock, pebble: MagicMock, config: str
+    ) -> None:
+        c = ConfigFileManager(stored_state, pebble)
+
+        c.update_config(config)
 
         assert c.config_changed is True
 
-    def test_update_config_unchanged(self, pebble: MagicMock, config: str) -> None:
-        pebble.pull_config_file.return_value = StringIO(config)
-        c = ConfigFileManager()
+    def test_update_config_unchanged(
+        self, stored_state: MagicMock, pebble: MagicMock, config: str
+    ) -> None:
+        c = ConfigFileManager(stored_state, pebble)
+        stored_state.config_hash = c.hash(config)
 
-        c.update_config(pebble, config)
+        c.update_config(config)
 
         assert c.config_changed is False

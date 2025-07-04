@@ -1,13 +1,13 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import hashlib
 import typing
 from collections import ChainMap
-from typing import Any, Mapping, Protocol, TypeAlias
+from typing import Any, Mapping, Optional, Protocol, TypeAlias
 
-import ops
 from jinja2 import Template
-from ops import ConfigData
+from ops import ConfigData, StoredState
 
 from constants import DEFAULT_OAUTH_SCOPES
 from env_vars import EnvVars
@@ -65,18 +65,29 @@ class ConfigFile:
 
 
 class ConfigFileManager:
-    def __init__(self):
+    def __init__(self, stored_state: StoredState, pebble: "PebbleService"):
+        self.stored = stored_state
+        self.stored.set_default(
+            config_hash=None,
+        )
+        self.pebble = pebble
         self.config_changed = False
 
-    def update_config(self, pebble: "PebbleService", config: str) -> None:
-        config_file = None
-        try:
-            config_file = pebble.pull_config_file().read()
-        except ops.pebble.PathError:
-            pass
+    @property
+    def current_config_hash(self) -> Optional[int]:
+        return self.stored.config_hash
 
-        if config == config_file:
+    def _config_changed(self, config_hash: int) -> bool:
+        return config_hash != self.current_config_hash
+
+    def hash(self, value: str) -> int:
+        return hashlib.md5(value.encode()).digest()
+
+    def update_config(self, config: str) -> None:
+        config_hash = self.hash(config)
+        if not self._config_changed(config_hash):
             return
 
-        pebble.push_config_file(config)
+        self.pebble.push_config_file(config)
+        self.stored.config_hash = config_hash
         self.config_changed = True

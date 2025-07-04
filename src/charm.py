@@ -37,6 +37,7 @@ from charms.traefik_k8s.v2.ingress import (
     IngressPerAppRequirer,
     IngressPerAppRevokedEvent,
 )
+from ops import StoredState
 from ops.charm import (
     ActionEvent,
     CharmBase,
@@ -106,6 +107,8 @@ logger = logging.getLogger(__name__)
 
 
 class HydraCharm(CharmBase):
+    _stored = StoredState()
+
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
 
@@ -117,7 +120,7 @@ class HydraCharm(CharmBase):
         self._workload_service = WorkloadService(self.unit)
         self._pebble_service = PebbleService(self.unit)
         self._cli = CommandLine(self._container)
-        self._config_manager = ConfigFileManager()
+        self._config_manager = ConfigFileManager(self._stored, self._pebble_service)
 
         self.token_hook = HydraHookRequirer(
             self,
@@ -560,7 +563,6 @@ class HydraCharm(CharmBase):
             return
 
         self._config_manager.update_config(
-            self._pebble_service,
             ConfigFile.from_sources(
                 self.secrets,
                 self.charm_config,
