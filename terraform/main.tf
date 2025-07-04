@@ -14,7 +14,7 @@ resource "juju_application" "hydra" {
   units       = var.units
 
   charm {
-    name     = "hydra-operator"
+    name     = "hydra"
     base     = var.base
     channel  = var.channel
     revision = var.revision
