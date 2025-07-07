@@ -54,7 +54,7 @@ from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingSta
 from ops.pebble import Layer
 
 from cli import CommandLine, OAuthClient
-from configs import CharmConfig, ConfigFile, ConfigFileManager
+from configs import CharmConfig, ConfigFile
 from constants import (
     ADMIN_INGRESS_INTEGRATION_NAME,
     ADMIN_PORT,
@@ -118,9 +118,8 @@ class HydraCharm(CharmBase):
 
         self._container = self.unit.get_container(WORKLOAD_CONTAINER)
         self._workload_service = WorkloadService(self.unit)
-        self._pebble_service = PebbleService(self.unit)
+        self._pebble_service = PebbleService(self.unit, self._stored)
         self._cli = CommandLine(self._container)
-        self._config_manager = ConfigFileManager(self._stored, self._pebble_service)
 
         self.token_hook = HydraHookRequirer(
             self,
@@ -562,7 +561,7 @@ class HydraCharm(CharmBase):
             event.defer()
             return
 
-        self._config_manager.update_config(
+        changed = self._pebble_service.update_config_file(
             ConfigFile.from_sources(
                 self.secrets,
                 self.charm_config,
@@ -574,7 +573,7 @@ class HydraCharm(CharmBase):
         )
 
         try:
-            self._pebble_service.plan(self._pebble_layer, self._config_manager)
+            self._pebble_service.plan(self._pebble_layer, changed)
         except PebbleServiceError as e:
             logger.error(f"Failed to start the service, please check the container logs: {e}")
             self.unit.status = BlockedStatus(
