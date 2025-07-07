@@ -1,14 +1,12 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
-from unittest.mock import MagicMock, create_autospec, mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
-from ops import BoundStoredState
 from ops.testing import Harness
 
-from configs import CharmConfig, ConfigFile, ConfigFileManager, ServiceConfigSource
+from configs import CharmConfig, ConfigFile, ServiceConfigSource
 from constants import DEFAULT_OAUTH_SCOPES
-from services import PebbleService
 
 
 class TestCharmConfig:
@@ -66,39 +64,4 @@ class TestConfigFile:
         with patch("builtins.open", mock_open(read_data=config_template)):
             config_file = ConfigFile.from_sources(source, another_source)
 
-        assert config_file == f"{DEFAULT_OAUTH_SCOPES} and value1 and value2"
-
-
-class TestConfigManager:
-    @pytest.fixture
-    def config(self) -> str:
-        return "config"
-
-    @pytest.fixture
-    def pebble(self) -> MagicMock:
-        return create_autospec(PebbleService)
-
-    @pytest.fixture
-    def stored_state(self) -> MagicMock:
-        s = create_autospec(BoundStoredState)
-        s.config_hash = None
-        return s
-
-    def test_update_config_without_previous_config(
-        self, stored_state: MagicMock, pebble: MagicMock, config: str
-    ) -> None:
-        c = ConfigFileManager(stored_state, pebble)
-
-        c.update_config(config)
-
-        assert c.config_changed is True
-
-    def test_update_config_unchanged(
-        self, stored_state: MagicMock, pebble: MagicMock, config: str
-    ) -> None:
-        c = ConfigFileManager(stored_state, pebble)
-        stored_state.config_hash = c.hash(config)
-
-        c.update_config(config)
-
-        assert c.config_changed is False
+        assert str(config_file) == f"{DEFAULT_OAUTH_SCOPES} and value1 and value2"

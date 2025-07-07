@@ -5,13 +5,12 @@ from typing import Generator
 from unittest.mock import MagicMock, PropertyMock, create_autospec
 
 import pytest
-from ops import Container, EventBase, Unit
+from ops import BoundStoredState, Container, EventBase, Unit
 from ops.testing import Harness
 from pytest_mock import MockerFixture
 from yarl import URL
 
 from charm import HydraCharm
-from configs import ConfigFileManager
 from constants import (
     DATABASE_INTEGRATION_NAME,
     HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
@@ -44,8 +43,10 @@ def mocked_container() -> MagicMock:
 
 
 @pytest.fixture
-def mocked_config_manager() -> MagicMock:
-    return create_autospec(ConfigFileManager)
+def mocked_stored_state() -> MagicMock:
+    m = create_autospec(BoundStoredState)
+    m.config_hash = None
+    return m
 
 
 @pytest.fixture
@@ -89,7 +90,6 @@ def mocked_workload_service_version(mocker: MockerFixture) -> MagicMock:
 def mocked_pebble_service(mocker: MockerFixture, harness: Harness) -> MagicMock:
     mocked = mocker.patch("charm.PebbleService", autospec=True)
     harness.charm._pebble_service = mocked
-    harness.charm._config_manager.pebble = mocked
     return mocked
 
 
