@@ -323,6 +323,7 @@ class HydraCharm(CharmBase):
         return self.charm_config["dev"]
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         if not container_connectivity(self):
             event.defer()
             self.unit.status = WaitingStatus("Container is not connected yet")
@@ -341,29 +342,35 @@ class HydraCharm(CharmBase):
             self.secrets[SYSTEM_SECRET_LABEL] = {SYSTEM_SECRET_KEY: token_hex(16)}
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
         self._on_oauth_integration_created(event)
 
     def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
         self._on_oauth_integration_created(event)
         self._on_hydra_endpoints_ready(event)
 
     def _on_admin_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         self._on_hydra_endpoints_ready(event)
 
     def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
         self._on_oauth_integration_created(event)
         self._on_hydra_endpoints_ready(event)
 
     @leader_unit
     def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         self.internal_ingress._relation = event.relation
         self._on_internal_ingress_changed(event)
 
     @leader_unit
     def _on_internal_ingress_changed(self, event: RelationEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         if self.internal_ingress.is_ready():
             internal_ingress_config = InternalIngressData.load(self.internal_ingress).config
             self.internal_ingress.submit_to_traefik(internal_ingress_config)
@@ -376,6 +383,7 @@ class HydraCharm(CharmBase):
         return adjust_resource_requirements(limits, requests, adhere_to_requests=True)
 
     def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         if not container_connectivity(self):
             self.unit.status = WaitingStatus("Container is not connected yet")
             event.defer()
@@ -415,9 +423,11 @@ class HydraCharm(CharmBase):
         self._holistic_handler(event)
 
     def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
 
     def _on_database_integration_broken(self, event: RelationBrokenEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
 
     def _on_oauth_integration_created(self, event: RelationEvent) -> None:
@@ -506,8 +516,6 @@ class HydraCharm(CharmBase):
             event.defer()
             self.unit.status = WaitingStatus("Container is not connected yet")
             return
-
-        self.unit.status = MaintenanceStatus("Configuring resources")
 
         if not peer_integration_exists(self):
             self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
