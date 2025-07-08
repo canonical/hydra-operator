@@ -1,6 +1,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import hashlib
 from collections import ChainMap
 from typing import Any, Mapping, Protocol, TypeAlias
 
@@ -45,8 +46,11 @@ class CharmConfig:
 class ConfigFile:
     """An abstraction of the workload service configurations."""
 
+    def __init__(self, content: str) -> None:
+        self.content = content
+
     @classmethod
-    def from_sources(cls, *service_config_sources: ServiceConfigSource) -> str:
+    def from_sources(cls, *service_config_sources: ServiceConfigSource) -> "ConfigFile":
         with open("templates/hydra.yaml.j2", "r") as file:
             template = Template(file.read())
 
@@ -56,4 +60,12 @@ class ConfigFile:
         }
         rendered = template.render(configs)
 
-        return rendered
+        return cls(rendered)
+
+    def __hash__(self) -> int:
+        # Do not use the builtin `hash` function, the salt changes on every interpreter
+        # run making it useless in charms
+        return int(hashlib.md5(self.content.encode()).hexdigest(), 16)
+
+    def __str__(self) -> str:
+        return self.content

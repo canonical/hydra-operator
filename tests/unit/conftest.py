@@ -5,7 +5,7 @@ from typing import Generator
 from unittest.mock import MagicMock, PropertyMock, create_autospec
 
 import pytest
-from ops import Container, EventBase, Unit
+from ops import BoundStoredState, Container, EventBase, Unit
 from ops.testing import Harness
 from pytest_mock import MockerFixture
 from yarl import URL
@@ -40,6 +40,13 @@ def mocked_k8s_resource_patch(mocker: MockerFixture) -> None:
 @pytest.fixture
 def mocked_container() -> MagicMock:
     return create_autospec(Container)
+
+
+@pytest.fixture
+def mocked_stored_state() -> MagicMock:
+    m = create_autospec(BoundStoredState)
+    m.config_hash = None
+    return m
 
 
 @pytest.fixture

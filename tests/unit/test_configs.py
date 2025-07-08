@@ -64,4 +64,4 @@ class TestConfigFile:
         with patch("builtins.open", mock_open(read_data=config_template)):
             config_file = ConfigFile.from_sources(source, another_source)
 
-        assert config_file == f"{DEFAULT_OAUTH_SCOPES} and value1 and value2"
+        assert str(config_file) == f"{DEFAULT_OAUTH_SCOPES} and value1 and value2"

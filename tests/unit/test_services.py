@@ -89,20 +89,49 @@ class TestWorkloadService:
 
 class TestPebbleService:
     @pytest.fixture
-    def pebble_service(self, mocked_unit: MagicMock) -> PebbleService:
-        return PebbleService(mocked_unit)
+    def pebble_service(
+        self, mocked_unit: MagicMock, mocked_stored_state: MagicMock
+    ) -> PebbleService:
+        return PebbleService(mocked_unit, mocked_stored_state)
 
-    def test_push_config_file(
+    def test_update_config_file(
         self, mocked_container: MagicMock, pebble_service: PebbleService
     ) -> None:
         config_file_content = "config"
-        pebble_service.push_config_file(config_file_content)
+        changed = pebble_service.update_config_file(config_file_content)
+
+        assert changed is True
         mocked_container.push.assert_called_once_with(
             CONFIG_FILE_NAME, config_file_content, make_dirs=True
         )
 
+    def test_update_config_file_without_change(
+        self, mocked_container: MagicMock, pebble_service: PebbleService
+    ) -> None:
+        config_file_content = "config"
+        pebble_service.stored.config_hash = hash(config_file_content)
+
+        changed = pebble_service.update_config_file(config_file_content)
+
+        assert changed is False
+        mocked_container.push.assert_not_called()
+
     @patch("ops.pebble.Layer")
-    def test_plan(
+    def test_plan_without_restart(
+        self,
+        mocked_layer: MagicMock,
+        mocked_container: MagicMock,
+        pebble_service: PebbleService,
+    ) -> None:
+        pebble_service.plan(mocked_layer, restart=False)
+
+        mocked_container.add_layer.assert_called_once_with(
+            WORKLOAD_CONTAINER, mocked_layer, combine=True
+        )
+        mocked_container.replan.assert_called_once()
+
+    @patch("ops.pebble.Layer")
+    def test_plan_with_restart(
         self,
         mocked_layer: MagicMock,
         mocked_container: MagicMock,
