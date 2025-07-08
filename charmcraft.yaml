@@ -131,7 +131,7 @@ actions:
         description: A user-friendly name given to the client
         type: string
       metadata:
-        description: A JSON string with extra information relevant for the client
+        description: A comma-separated string of <key>=<value> with extra information relevant for the client, eg dept=IT
         type: string
       audience:
         description: A list with the allowed audience for the client
@@ -174,7 +174,7 @@ actions:
         description: A user-friendly name given to the client
         type: string
       metadata:
-        description: A JSON string with extra information relevant for the client
+        description: A comma-separated string of <key>=<value> with extra information relevant for the client, eg dept=IT
       audience:
         description: A list with the allowed audience for the client
         type: array

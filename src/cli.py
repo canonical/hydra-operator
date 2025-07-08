@@ -36,7 +36,7 @@ class OAuthClient(BaseModel):
         validation_alias=AliasChoices("token-endpoint-auth-method", "token_endpoint_auth_method"),
         serialization_alias="token-endpoint-auth-method",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict, serialization_alias="metadata")
+    metadata: Optional[dict[str, Any]] = Field(default_factory=dict)
     audience: Optional[list[str]] = None
     client_id: Optional[str] = Field(
         default=None,
@@ -63,6 +63,7 @@ class OAuthClient(BaseModel):
     def managed_by_integration(self) -> bool:
         return "integration-id" in self.metadata
 
+   
     @field_validator("redirect_uris", mode="before")
     @classmethod
     def deserialize_redirect_uris(cls, v: str | list[str]) -> list[str]:
@@ -82,6 +83,22 @@ class OAuthClient(BaseModel):
     @field_serializer("scope")
     def serialize_scope(self, scope: str) -> list[str]:
         return scope.split()
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def deserialize_metadata(cls, v: str | dict[str, Any]) -> dict[str, Any]:
+        if isinstance(v, dict):
+            return v
+
+        kv = v.split(",")
+
+        metadata = {}
+
+        for pair in kv:
+            key, value = pair.split("=")
+            metadata[key] = value
+
+        return metadata
 
     def to_cmd_options(self) -> list[str]:
         cmd_options = []
