@@ -1,7 +1,7 @@
 cosl
 dacite
 jinja2
-ops>=2.0.0
+ops==2.22.0
 pydantic~=2.11.0
 lightkube~=0.17.2
 lightkube-models~=1.33.1.8
