@@ -127,6 +127,12 @@ actions:
   create-oauth-client:
     description: Register an oauth client
     params:
+      name:
+        description: A user-friendly name given to the client
+        type: string
+      metadata:
+        description: A JSON string with extra information relevant for the client
+        type: string
       audience:
         description: A list with the allowed audience for the client
         type: array
@@ -164,6 +170,11 @@ actions:
       client-id:
         description: The client_id
         type: string
+      name:
+        description: A user-friendly name given to the client
+        type: string
+      metadata:
+        description: A JSON string with extra information relevant for the client
       audience:
         description: A list with the allowed audience for the client
         type: array
