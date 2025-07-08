@@ -161,7 +161,10 @@ class TestCreateOAuthClientAction:
 
         mocked_cli.assert_called_once()
         assert output.results["redirect-uris"] == [mocked_oauth_client_config["redirect_uri"]]
-        assert output.results["token-endpoint-auth-method"] == "client_secret_basic"
+        assert (
+            output.results["token-endpoint-auth-method"]
+            == mocked_oauth_client_config["token_endpoint_auth_method"]
+        )
 
 
 class TestGetOAuthClientInfoAction:
@@ -313,13 +316,24 @@ class TestUpdateOAuthClientAction:
 
         output = harness.run_action(
             "update-oauth-client",
-            {"client-id": "client_id", "redirect-uris": ["https://example.ory.com"]},
+            {
+                "client-id": "client_id",
+                "redirect-uris": ["https://example.ory.com"],
+                "contacts": ["test@canonical.com", "me@me.com"],
+                "client-uri": "https://example.com",
+                "metadata": "foo=bar,bar=foo",
+                "name": "test-client",
+            },
         )
         assert "Successfully updated the OAuth client client_id" in output.logs
 
         mocked_cli.assert_called_once()
         action_call_arg: OAuthClient = mocked_cli.call_args[0][0]
         assert action_call_arg.redirect_uris == ["https://example.ory.com"]
+        assert action_call_arg.contacts == ["test@canonical.com", "me@me.com"]
+        assert action_call_arg.client_uri == "https://example.com"
+        assert action_call_arg.metadata == {"foo": "bar", "bar": "foo"}
+        assert action_call_arg.name == "test-client"
 
 
 class TestDeleteOAuthClientAction:
