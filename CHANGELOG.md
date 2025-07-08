@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.8](https://github.com/canonical/hydra-operator/compare/v1.1.7...v1.1.8) (2025-07-08)
+
+
+### Bug Fixes
+
+* do not always set maintenance status ([de9678c](https://github.com/canonical/hydra-operator/commit/de9678c84b7c796340eb1be39ab96a79f030e061))
+* don't restart service if config didn't change ([3d7f6b3](https://github.com/canonical/hydra-operator/commit/3d7f6b3de94a1473523e3f62ac4a110b1668dda1))
+* use storedstate to check if config changed ([1e8d58e](https://github.com/canonical/hydra-operator/commit/1e8d58e779be990025d1034b7247e6f5f8ddab13))
+
 ## [1.1.7](https://github.com/canonical/hydra-operator/compare/v1.1.6...v1.1.7) (2025-07-04)
 
 
