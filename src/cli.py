@@ -62,12 +62,16 @@ class OAuthClient(BaseModel):
         default_factory=list,
         serialization_alias="contacts",
     )
+    client_uri: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("client-uri", "client_uri"),
+        serialization_alias="client-uri",
+    )
 
     @property
     def managed_by_integration(self) -> bool:
         return "integration-id" in self.metadata
 
-   
     @field_validator("redirect_uris", mode="before")
     @classmethod
     def deserialize_redirect_uris(cls, v: str | list[str]) -> list[str]:
@@ -115,6 +119,9 @@ class OAuthClient(BaseModel):
 
         if self.name:
             cmd_options.extend(["--name", self.name])
+
+        if self.client_uri:
+            cmd_options.extend(["--client-uri", self.client_uri])
 
         if self.contacts:
             cmd_options.extend(["--contact", ",".join(self.contacts)])
