@@ -58,6 +58,10 @@ class OAuthClient(BaseModel):
         validation_alias=AliasChoices("client-name", "client_name", "name"),
         serialization_alias="name",
     )
+    contacts: Optional[list[str]] = Field(
+        default_factory=list,
+        serialization_alias="contacts",
+    )
 
     @property
     def managed_by_integration(self) -> bool:
@@ -111,6 +115,9 @@ class OAuthClient(BaseModel):
 
         if self.name:
             cmd_options.extend(["--name", self.name])
+
+        if self.contacts:
+            cmd_options.extend(["--contact", ",".join(self.contacts)])
 
         if self.grant_types:
             cmd_options.extend(["--grant-type", ",".join(self.grant_types)])
