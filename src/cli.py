@@ -36,7 +36,7 @@ class OAuthClient(BaseModel):
         validation_alias=AliasChoices("token-endpoint-auth-method", "token_endpoint_auth_method"),
         serialization_alias="token-endpoint-auth-method",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, serialization_alias="metadata")
     audience: Optional[list[str]] = None
     client_id: Optional[str] = Field(
         default=None,
@@ -52,6 +52,11 @@ class OAuthClient(BaseModel):
         default=None,
         validation_alias=AliasChoices("grant-types", "grant_types"),
         serialization_alias="grant-types",
+    )
+    name: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("client-name", "client_name", "name"),
+        serialization_alias="name",
     )
 
     @property
@@ -86,6 +91,9 @@ class OAuthClient(BaseModel):
 
         if self.audience:
             cmd_options.extend(["--audience", ",".join(self.audience)])
+
+        if self.name:
+            cmd_options.extend(["--name", self.name])
 
         if self.grant_types:
             cmd_options.extend(["--grant-type", ",".join(self.grant_types)])
