@@ -36,7 +36,7 @@ class OAuthClient(BaseModel):
         validation_alias=AliasChoices("token-endpoint-auth-method", "token_endpoint_auth_method"),
         serialization_alias="token-endpoint-auth-method",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Optional[dict[str, Any]] = Field(default_factory=dict)
     audience: Optional[list[str]] = None
     client_id: Optional[str] = Field(
         default=None,
@@ -52,6 +52,20 @@ class OAuthClient(BaseModel):
         default=None,
         validation_alias=AliasChoices("grant-types", "grant_types"),
         serialization_alias="grant-types",
+    )
+    name: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("client-name", "client_name", "name"),
+        serialization_alias="name",
+    )
+    contacts: Optional[list[str]] = Field(
+        default_factory=list,
+        serialization_alias="contacts",
+    )
+    client_uri: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("client-uri", "client_uri"),
+        serialization_alias="client-uri",
     )
 
     @property
@@ -78,6 +92,22 @@ class OAuthClient(BaseModel):
     def serialize_scope(self, scope: str) -> list[str]:
         return scope.split()
 
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def deserialize_metadata(cls, v: str | dict[str, Any]) -> dict[str, Any]:
+        if isinstance(v, dict):
+            return v
+
+        kv = v.split(",")
+
+        metadata = {}
+
+        for pair in kv:
+            key, value = pair.split("=")
+            metadata[key] = value
+
+        return metadata
+
     def to_cmd_options(self) -> list[str]:
         cmd_options = []
 
@@ -86,6 +116,15 @@ class OAuthClient(BaseModel):
 
         if self.audience:
             cmd_options.extend(["--audience", ",".join(self.audience)])
+
+        if self.name:
+            cmd_options.extend(["--name", self.name])
+
+        if self.client_uri:
+            cmd_options.extend(["--client-uri", self.client_uri])
+
+        if self.contacts:
+            cmd_options.extend(["--contact", ",".join(self.contacts)])
 
         if self.grant_types:
             cmd_options.extend(["--grant-type", ",".join(self.grant_types)])

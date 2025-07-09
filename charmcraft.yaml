@@ -127,6 +127,15 @@ actions:
   create-oauth-client:
     description: Register an oauth client
     params:
+      name:
+        description: A user-friendly name given to the client
+        type: string
+      contacts:
+        description: A list of contacts for the client
+        type: array
+      metadata:
+        description: A comma-separated string of <key>=<value> with extra information relevant for the client, eg dept=IT
+        type: string
       audience:
         description: A list with the allowed audience for the client
         type: array
@@ -151,6 +160,9 @@ actions:
       token-endpoint-auth-method:
         description: The authentication method the client may use at the token endpoint.
         type: string
+      client-uri:
+        description: The client's uri, usually its homepage
+        type: string
   get-oauth-client-info:
     description: Get an oauth client's information
     params:
@@ -164,6 +176,14 @@ actions:
       client-id:
         description: The client_id
         type: string
+      name:
+        description: A user-friendly name given to the client
+        type: string
+      contacts:
+        description: A list of contacts for the client
+        type: array
+      metadata:
+        description: A comma-separated string of <key>=<value> with extra information relevant for the client, eg dept=IT
       audience:
         description: A list with the allowed audience for the client
         type: array
@@ -184,6 +204,9 @@ actions:
         type: string
       token-endpoint-auth-method:
         description: The authentication method the client may use at the token endpoint.
+        type: string
+      client-uri:
+        description: The client's uri, usually its homepage
         type: string
     required: ["client-id"]
   delete-oauth-client:
