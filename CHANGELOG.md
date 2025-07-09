@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/canonical/hydra-operator/compare/v1.1.8...v1.2.0) (2025-07-09)
+
+
+### Features
+
+* add name to the create and update actions ([38f3b33](https://github.com/canonical/hydra-operator/commit/38f3b333b4f90a6209342308220e7451078ec636))
+* expose client-uri via cli ([09e92b1](https://github.com/canonical/hydra-operator/commit/09e92b1e3ce5c4bd54c68fde06a421ec215f7475))
+* expose contacts via cli ([8f007cc](https://github.com/canonical/hydra-operator/commit/8f007cc78d1a616590eeb28dd35798270ebdd504))
+
+
+### Bug Fixes
+
+* add serializer for metadata ([f10cf75](https://github.com/canonical/hydra-operator/commit/f10cf758b62ab5914cfb82e51349f5bb58c730d1))
+
 ## [1.1.8](https://github.com/canonical/hydra-operator/compare/v1.1.7...v1.1.8) (2025-07-08)
 
 
