@@ -274,3 +274,43 @@ class InternalIngressData:
             admin_endpoint=admin_endpoint,
             config=ingress_config,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PublicRouteData:
+    """The data source from the public-route integration."""
+
+    url: URL = URL()
+    config: dict = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, requirer: TraefikRouteRequirer) -> "PublicRouteData":
+        model, app = requirer._charm.model.name, requirer._charm.app.name
+        external_host = requirer.external_host
+        external_endpoint = f"{requirer.scheme}://{external_host}"
+
+        # template could have use PathPrefixRegexp but going for a simple one right now
+        with open("templates/route.json.j2", "r") as file:
+            template = Template(file.read())
+
+        ingress_config = json.loads(
+            template.render(
+                model=model,
+                app=app,
+                public_port=PUBLIC_PORT,
+                external_host=external_host,
+            )
+        )
+
+        if not external_host:
+            logger.error("External hostname is not set on the ingress provider")
+            return cls()
+
+        return cls(
+            url=URL(external_endpoint),
+            config=ingress_config,
+        )
+
+    @property
+    def secured(self) -> bool:
+        return self.url.scheme == "https"
