@@ -32,11 +32,6 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from charms.traefik_k8s.v2.ingress import (
-    IngressPerAppReadyEvent,
-    IngressPerAppRequirer,
-    IngressPerAppRevokedEvent,
-)
 from ops import StoredState
 from ops.charm import (
     ActionEvent,
@@ -56,7 +51,6 @@ from ops.pebble import Layer
 from cli import CommandLine, OAuthClient
 from configs import CharmConfig, ConfigFile
 from constants import (
-    ADMIN_INGRESS_INTEGRATION_NAME,
     ADMIN_PORT,
     COOKIE_SECRET_KEY,
     COOKIE_SECRET_LABEL,
@@ -64,15 +58,13 @@ from constants import (
     DEFAULT_OAUTH_SCOPES,
     GRAFANA_DASHBOARD_INTEGRATION_NAME,
     HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
-    INTERNAL_INGRESS_INTEGRATION_NAME,
-    PUBLIC_ROUTE_INTEGRATION_NAME,
+    INTERNAL_ROUTE_INTEGRATION_NAME,
     LOGGING_RELATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PROMETHEUS_SCRAPE_INTEGRATION_NAME,
-    PUBLIC_INGRESS_INTEGRATION_NAME,
-    PUBLIC_PORT,
+    PUBLIC_ROUTE_INTEGRATION_NAME,
     SYSTEM_SECRET_KEY,
     SYSTEM_SECRET_LABEL,
     TEMPO_TRACING_INTEGRATION_NAME,
@@ -88,10 +80,9 @@ from integrations import (
     DatabaseConfig,
     HydraHookData,
     InternalIngressData,
-    PublicRouteData,
     LoginUIEndpointData,
     PeerData,
-    PublicIngressData,
+    PublicRouteData,
     TracingData,
 )
 from secret import Secrets
@@ -102,7 +93,7 @@ from utils import (
     leader_unit,
     login_ui_integration_exists,
     peer_integration_exists,
-    public_ingress_integration_exists,
+    public_route_integration_exists,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,26 +126,12 @@ class HydraCharm(CharmBase):
             extra_user_roles="SUPERUSER",
         )
 
-        self.admin_ingress = IngressPerAppRequirer(
-            self,
-            relation_name=ADMIN_INGRESS_INTEGRATION_NAME,
-            port=ADMIN_PORT,
-            strip_prefix=True,
-            redirect_https=False,
-        )
-        self.public_ingress = IngressPerAppRequirer(
-            self,
-            relation_name=PUBLIC_INGRESS_INTEGRATION_NAME,
-            port=PUBLIC_PORT,
-            strip_prefix=True,
-            redirect_https=False,
-        )
-
         # ingress via raw traefik routing configuration
         self.internal_ingress = TraefikRouteRequirer(
             self,
-            self.model.get_relation(INTERNAL_INGRESS_INTEGRATION_NAME),
-            INTERNAL_INGRESS_INTEGRATION_NAME,
+            self.model.get_relation(INTERNAL_ROUTE_INTEGRATION_NAME),
+            INTERNAL_ROUTE_INTEGRATION_NAME,
+            raw=True,
         )
 
         # public route via raw traefik routing configuration
@@ -162,6 +139,7 @@ class HydraCharm(CharmBase):
             self,
             self.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME),
             PUBLIC_ROUTE_INTEGRATION_NAME,
+            raw=True,
         )
 
         self.oauth_provider = OAuthProvider(self)
@@ -227,32 +205,24 @@ class HydraCharm(CharmBase):
             self._on_database_integration_broken,
         )
 
-        # admin ingress
-        self.framework.observe(self.admin_ingress.on.ready, self._on_admin_ingress_ready)
-        self.framework.observe(self.admin_ingress.on.revoked, self._on_ingress_revoked)
-
-        # public ingress
-        self.framework.observe(self.public_ingress.on.ready, self._on_public_ingress_ready)
-        self.framework.observe(self.public_ingress.on.revoked, self._on_ingress_revoked)
-
         # internal ingress
         self.framework.observe(
-            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_joined,
+            self.on[INTERNAL_ROUTE_INTEGRATION_NAME].relation_joined,
             self._on_internal_ingress_joined,
         )
         self.framework.observe(
-            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_changed,
+            self.on[INTERNAL_ROUTE_INTEGRATION_NAME].relation_changed,
             self._on_internal_ingress_changed,
         )
         self.framework.observe(
-            self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_broken,
+            self.on[INTERNAL_ROUTE_INTEGRATION_NAME].relation_broken,
             self._on_internal_ingress_changed,
         )
 
         # public route
         self.framework.observe(
             self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_joined,
-            self._on_public_route_joined,
+            self._on_public_route_changed,
         )
         self.framework.observe(
             self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_changed,
@@ -260,7 +230,7 @@ class HydraCharm(CharmBase):
         )
         self.framework.observe(
             self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_broken,
-            self._on_public_route_changed,
+            self._on_public_route_broken,
         )
 
         # login-ui
@@ -369,51 +339,50 @@ class HydraCharm(CharmBase):
         self._holistic_handler(event)
         self._on_oauth_integration_created(event)
 
-    def _on_public_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
-        self._holistic_handler(event)
-        self._on_oauth_integration_created(event)
-        self._on_hydra_endpoints_ready(event)
-
-    def _on_admin_ingress_ready(self, event: IngressPerAppReadyEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
-        self._on_hydra_endpoints_ready(event)
-
-    def _on_ingress_revoked(self, event: IngressPerAppRevokedEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
-        self._holistic_handler(event)
-        self._on_oauth_integration_created(event)
-        self._on_hydra_endpoints_ready(event)
-
-    @leader_unit
     def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
-        self.internal_ingress._relation = event.relation
         self._on_internal_ingress_changed(event)
 
-    @leader_unit
     def _on_internal_ingress_changed(self, event: RelationEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
-        if self.internal_ingress.is_ready():
+
+        # needed due to how traefik_route lib is handling the event
+        self.internal_ingress._relation = event.relation
+
+        if not self.internal_ingress.is_ready():
+            return
+
+        if self.unit.is_leader():
             internal_ingress_config = InternalIngressData.load(self.internal_ingress).config
             self.internal_ingress.submit_to_traefik(internal_ingress_config)
-            self._on_hydra_endpoints_ready(event)
-            self._on_oauth_integration_created(event)
 
-    @leader_unit
-    def _on_public_route_joined(self, event: RelationJoinedEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
-        self.public_route._relation = event.relation
-        self._on_public_route_changed(event)
+        self._on_hydra_endpoints_ready(event)
+        self._on_oauth_integration_created(event)
 
-    @leader_unit
     def _on_public_route_changed(self, event: RelationEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
-        if self.public_route.is_ready():
+
+        # needed due to how traefik_route lib is handling the event
+        self.public_route._relation = event.relation
+
+        if not self.public_route.is_ready():
+            return
+
+        if self.unit.is_leader():
             public_route_config = PublicRouteData.load(self.public_route).config
             self.public_route.submit_to_traefik(public_route_config)
-            self._on_hydra_endpoints_ready(event)
-            self._on_oauth_integration_created(event)
+
+        self._holistic_handler(event)
+        self._on_hydra_endpoints_ready(event)
+        self._on_oauth_integration_created(event)
+
+    def _on_public_route_broken(self, event: RelationBrokenEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
+
+        # needed due to how traefik_route lib is handling the event
+        self.public_route._relation = event.relation
+
+        self._holistic_handler(event)
 
     def _resource_reqs_from_config(self) -> ResourceRequirements:
         limits = {"cpu": self.model.config.get("cpu"), "memory": self.model.config.get("memory")}
@@ -469,9 +438,9 @@ class HydraCharm(CharmBase):
         self._holistic_handler(event)
 
     def _on_oauth_integration_created(self, event: RelationEvent) -> None:
-        if not (public_url := PublicIngressData.load(self.public_ingress).url):
+        if not (public_url := PublicRouteData.load(self.public_route).url):
             event.defer()
-            logger.info("Public ingress URL is not available. Deferring the event.")
+            logger.info("Public route URL is not available. Deferring the event.")
             return
 
         internal_endpoints = InternalIngressData.load(self.internal_ingress)
@@ -564,9 +533,9 @@ class HydraCharm(CharmBase):
             self.unit.status = BlockedStatus(f"Missing integration {DATABASE_INTEGRATION_NAME}")
             return
 
-        if not public_ingress_integration_exists(self):
+        if not public_route_integration_exists(self):
             self.unit.status = BlockedStatus(
-                f"Missing required relation with {PUBLIC_INGRESS_INTEGRATION_NAME}"
+                f"Missing required relation with {PUBLIC_ROUTE_INTEGRATION_NAME}"
             )
             return
 
@@ -576,12 +545,12 @@ class HydraCharm(CharmBase):
             )
             return
 
-        if not self.public_ingress.is_ready():
+        if not self.public_route.is_ready():
             self.unit.status = WaitingStatus("Waiting for ingress to be ready")
             return
 
-        public_ingress = PublicIngressData.load(self.public_ingress)
-        if not self.dev_mode and not public_ingress.secured:
+        public_route = PublicRouteData.load(self.public_route)
+        if not self.dev_mode and not public_route.secured:
             self.unit.status = BlockedStatus(
                 "Requires a secure (HTTPS) public ingress. "
                 "Either enable HTTPS on public ingress or set 'dev' config to true for local development."
@@ -613,7 +582,7 @@ class HydraCharm(CharmBase):
                 self.charm_config,
                 DatabaseConfig.load(self.database_requirer),
                 LoginUIEndpointData.load(self.login_ui_requirer),
-                public_ingress,
+                public_route,
                 HydraHookData.load(self.token_hook),
             ),
         )
