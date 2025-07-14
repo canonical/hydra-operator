@@ -31,12 +31,6 @@ requires:
     interface: postgresql_client
     limit: 1
     optional: false
-  public-ingress:
-    interface: ingress
-    optional: false
-  admin-ingress:
-    interface: ingress
-    optional: true
   ui-endpoint-info:
     interface: login_ui_endpoints
     limit: 1
@@ -50,13 +44,18 @@ requires:
     optional: true
     description: |
       Provides traces to COS Tempo instance
-  internal-ingress:
+  internal-route:
     interface: traefik_route
     limit: 1
     optional: true
     description: |
-      Ingress used for cross-cluster communication where network topology is more complex
+      Allows the charm to be exposed cross-cluster communication, needed for where network topology is more complex
       than just one k8s cluster
+  public-route:
+    interface: traefik_route
+    optional: false
+    description: |
+      Allows the charm to be exposed to the public internet
   hydra-token-hook:
     interface: hydra_token_hook
     optional: true

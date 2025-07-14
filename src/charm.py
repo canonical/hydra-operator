@@ -65,6 +65,7 @@ from constants import (
     GRAFANA_DASHBOARD_INTEGRATION_NAME,
     HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
     INTERNAL_INGRESS_INTEGRATION_NAME,
+    PUBLIC_ROUTE_INTEGRATION_NAME,
     LOGGING_RELATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
@@ -87,6 +88,7 @@ from integrations import (
     DatabaseConfig,
     HydraHookData,
     InternalIngressData,
+    PublicRouteData,
     LoginUIEndpointData,
     PeerData,
     PublicIngressData,
@@ -153,6 +155,13 @@ class HydraCharm(CharmBase):
             self,
             self.model.get_relation(INTERNAL_INGRESS_INTEGRATION_NAME),
             INTERNAL_INGRESS_INTEGRATION_NAME,
+        )
+
+        # public route via raw traefik routing configuration
+        self.public_route = TraefikRouteRequirer(
+            self,
+            self.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME),
+            PUBLIC_ROUTE_INTEGRATION_NAME,
         )
 
         self.oauth_provider = OAuthProvider(self)
@@ -238,6 +247,20 @@ class HydraCharm(CharmBase):
         self.framework.observe(
             self.on[INTERNAL_INGRESS_INTEGRATION_NAME].relation_broken,
             self._on_internal_ingress_changed,
+        )
+
+        # public route
+        self.framework.observe(
+            self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_joined,
+            self._on_public_route_joined,
+        )
+        self.framework.observe(
+            self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_changed,
+            self._on_public_route_changed,
+        )
+        self.framework.observe(
+            self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_broken,
+            self._on_public_route_changed,
         )
 
         # login-ui
@@ -374,6 +397,21 @@ class HydraCharm(CharmBase):
         if self.internal_ingress.is_ready():
             internal_ingress_config = InternalIngressData.load(self.internal_ingress).config
             self.internal_ingress.submit_to_traefik(internal_ingress_config)
+            self._on_hydra_endpoints_ready(event)
+            self._on_oauth_integration_created(event)
+
+    @leader_unit
+    def _on_public_route_joined(self, event: RelationJoinedEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
+        self.public_route._relation = event.relation
+        self._on_public_route_changed(event)
+
+    @leader_unit
+    def _on_public_route_changed(self, event: RelationEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
+        if self.public_route.is_ready():
+            public_route_config = PublicRouteData.load(self.public_route).config
+            self.public_route.submit_to_traefik(public_route_config)
             self._on_hydra_endpoints_ready(event)
             self._on_oauth_integration_created(event)
 
