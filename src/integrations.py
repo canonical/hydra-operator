@@ -15,7 +15,6 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 )
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from jinja2 import Template
 from ops.model import Model
 from yarl import URL
@@ -214,24 +213,6 @@ class HydraHookData:
 
 
 @dataclass(frozen=True, slots=True)
-class PublicIngressData:
-    """The data source from the public-ingress integration."""
-
-    url: URL = URL()
-
-    def to_service_configs(self) -> ServiceConfigs:
-        return {"public_url": str(self.url)}
-
-    @property
-    def secured(self) -> bool:
-        return self.url.scheme == "https"
-
-    @classmethod
-    def load(cls, requirer: IngressPerAppRequirer) -> "PublicIngressData":
-        return cls(url=URL(requirer.url)) if requirer.is_ready() else cls()  # type: ignore[arg-type]
-
-
-@dataclass(frozen=True, slots=True)
 class InternalIngressData:
     """The data source from the internal-ingress integration."""
 
@@ -314,3 +295,6 @@ class PublicRouteData:
     @property
     def secured(self) -> bool:
         return self.url.scheme == "https"
+
+    def to_service_configs(self) -> ServiceConfigs:
+        return {"public_url": str(self.url)}
