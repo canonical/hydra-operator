@@ -131,6 +131,7 @@ class HydraCharm(CharmBase):
             self,
             self.model.get_relation(INTERNAL_INGRESS_INTEGRATION_NAME),
             INTERNAL_INGRESS_INTEGRATION_NAME,
+            raw=True,
         )
 
         # public route via raw traefik routing configuration
@@ -138,6 +139,7 @@ class HydraCharm(CharmBase):
             self,
             self.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME),
             PUBLIC_ROUTE_INTEGRATION_NAME,
+            raw=True,
         )
 
         self.oauth_provider = OAuthProvider(self)
