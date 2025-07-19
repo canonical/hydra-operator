@@ -15,7 +15,6 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 )
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from jinja2 import Template
 from ops.model import Model
 from yarl import URL
@@ -214,24 +213,6 @@ class HydraHookData:
 
 
 @dataclass(frozen=True, slots=True)
-class PublicIngressData:
-    """The data source from the public-ingress integration."""
-
-    url: URL = URL()
-
-    def to_service_configs(self) -> ServiceConfigs:
-        return {"public_url": str(self.url)}
-
-    @property
-    def secured(self) -> bool:
-        return self.url.scheme == "https"
-
-    @classmethod
-    def load(cls, requirer: IngressPerAppRequirer) -> "PublicIngressData":
-        return cls(url=URL(requirer.url)) if requirer.is_ready() else cls()  # type: ignore[arg-type]
-
-
-@dataclass(frozen=True, slots=True)
 class InternalIngressData:
     """The data source from the internal-ingress integration."""
 
@@ -274,3 +255,46 @@ class InternalIngressData:
             admin_endpoint=admin_endpoint,
             config=ingress_config,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PublicRouteData:
+    """The data source from the public-route integration."""
+
+    url: URL = URL()
+    config: dict = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, requirer: TraefikRouteRequirer) -> "PublicRouteData":
+        model, app = requirer._charm.model.name, requirer._charm.app.name
+        external_host = requirer.external_host
+        external_endpoint = f"{requirer.scheme}://{external_host}"
+
+        # template could have use PathPrefixRegexp but going for a simple one right now
+        with open("templates/route.json.j2", "r") as file:
+            template = Template(file.read())
+
+        ingress_config = json.loads(
+            template.render(
+                model=model,
+                app=app,
+                public_port=PUBLIC_PORT,
+                external_host=external_host,
+            )
+        )
+
+        if not external_host:
+            logger.error("External hostname is not set on the ingress provider")
+            return cls()
+
+        return cls(
+            url=URL(external_endpoint),
+            config=ingress_config,
+        )
+
+    @property
+    def secured(self) -> bool:
+        return self.url.scheme == "https"
+
+    def to_service_configs(self) -> ServiceConfigs:
+        return {"public_url": str(self.url)}
