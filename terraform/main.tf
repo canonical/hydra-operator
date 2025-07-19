@@ -5,7 +5,7 @@
  * using the Juju Terraform provider.
  */
 
-resource "juju_application" "hydra" {
+resource "juju_application" "application" {
   name        = var.app_name
   model       = var.model_name
   trust       = true
@@ -24,6 +24,6 @@ resource "juju_application" "hydra" {
 resource "juju_offer" "oauth_offer" {
   name             = "oauth-offer"
   model            = var.model_name
-  application_name = juju_application.hydra.name
+  application_name = juju_application.application.name
   endpoints         = ["oauth"]
 }
