@@ -20,9 +20,9 @@ from jwt import PyJWKClient
 from pytest_operator.plugin import OpsTest
 
 from constants import (
-    INTERNAL_INGRESS_INTEGRATION_NAME,
+    INTERNAL_ROUTE_INTEGRATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
-    PUBLIC_INGRESS_INTEGRATION_NAME,
+    PUBLIC_ROUTE_INTEGRATION_NAME,
 )
 
 METADATA = yaml.safe_load(Path("./charmcraft.yaml").read_text())
@@ -43,13 +43,13 @@ ADMIN_INGRESS_DOMAIN = "admin"
 async def integrate_dependencies(ops_test: OpsTest) -> None:
     await ops_test.model.integrate(HYDRA_APP, DB_APP)
     await ops_test.model.integrate(
+        f"{HYDRA_APP}:{PUBLIC_ROUTE_INTEGRATION_NAME}", TRAEFIK_PUBLIC_APP
+    )
+    await ops_test.model.integrate(
+        f"{HYDRA_APP}:{INTERNAL_ROUTE_INTEGRATION_NAME}", TRAEFIK_ADMIN_APP
+    )
+    await ops_test.model.integrate(
         f"{HYDRA_APP}:{LOGIN_UI_INTEGRATION_NAME}", f"{LOGIN_UI_APP}:{LOGIN_UI_INTEGRATION_NAME}"
-    )
-    await ops_test.model.integrate(
-        f"{HYDRA_APP}:{INTERNAL_INGRESS_INTEGRATION_NAME}", TRAEFIK_ADMIN_APP
-    )
-    await ops_test.model.integrate(
-        f"{HYDRA_APP}:{PUBLIC_INGRESS_INTEGRATION_NAME}", TRAEFIK_PUBLIC_APP
     )
 
 
@@ -95,15 +95,15 @@ async def login_ui_endpoint_integration_data(app_integration_data: Callable) -> 
 
 
 @pytest_asyncio.fixture
-async def leader_public_ingress_integration_data(app_integration_data: Callable) -> Optional[dict]:
-    return await app_integration_data(HYDRA_APP, PUBLIC_INGRESS_INTEGRATION_NAME)
+async def leader_public_route_integration_data(app_integration_data: Callable) -> Optional[dict]:
+    return await app_integration_data(HYDRA_APP, PUBLIC_ROUTE_INTEGRATION_NAME)
 
 
 @pytest_asyncio.fixture
 async def leader_internal_ingress_integration_data(
     app_integration_data: Callable,
 ) -> Optional[dict]:
-    return await app_integration_data(HYDRA_APP, INTERNAL_INGRESS_INTEGRATION_NAME)
+    return await app_integration_data(HYDRA_APP, INTERNAL_ROUTE_INTEGRATION_NAME)
 
 
 @pytest_asyncio.fixture
@@ -145,7 +145,7 @@ async def get_hydra_jwks(
 
     async def wrapper() -> Response:
         address = await address_func(ops_test)
-        url = f"{scheme}://{address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/jwks.json"
+        url = f"{scheme}://{address}/.well-known/jwks.json"
         return await http_client.get(url)
 
     return wrapper
@@ -156,7 +156,7 @@ async def get_openid_configuration(
     ops_test: OpsTest, public_address: Callable, http_client: AsyncClient
 ) -> Response:
     address = await public_address(ops_test)
-    url = f"https://{address}/{ops_test.model_name}-{HYDRA_APP}/.well-known/openid-configuration"
+    url = f"https://{address}/.well-known/openid-configuration"
     return await http_client.get(url)
 
 
@@ -165,7 +165,7 @@ async def get_admin_clients(
     ops_test: OpsTest, admin_address: Callable, http_client: AsyncClient
 ) -> Response:
     address = await admin_address(ops_test)
-    url = f"http://{address}/{ops_test.model_name}-{HYDRA_APP}/admin/clients"
+    url = f"http://{address}/admin/clients"
     return await http_client.get(url)
 
 
@@ -175,7 +175,7 @@ async def client_credential_request(
 ) -> Callable[[str, str], Awaitable[Response]]:
     async def wrapper(client_id: str, client_secret: str) -> Response:
         address = await public_address(ops_test)
-        url = f"https://{address}/{ops_test.model_name}-{HYDRA_APP}/oauth2/token"
+        url = f"https://{address}/oauth2/token"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         return await http_client.post(
             url,
@@ -233,7 +233,7 @@ async def jwks_client(ops_test: OpsTest, public_address: Callable) -> PyJWKClien
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
     return PyJWKClient(
-        f"https://{address}/{ops_test.model.name}-{HYDRA_APP}/.well-known/jwks.json",
+        f"https://{address}/.well-known/jwks.json",
         ssl_context=ssl_ctx,
     )
 

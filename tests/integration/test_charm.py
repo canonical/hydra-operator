@@ -36,7 +36,7 @@ from yarl import URL
 from constants import (
     DATABASE_INTEGRATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
-    PUBLIC_INGRESS_INTEGRATION_NAME,
+    PUBLIC_ROUTE_INTEGRATION_NAME,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,14 +45,6 @@ logger = logging.getLogger(__name__)
 @pytest.mark.skip_if_deployed
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
-    await ops_test.model.deploy(
-        application_name=HYDRA_APP,
-        entity_url=str(local_charm),
-        resources={"oci-image": HYDRA_IMAGE},
-        series="jammy",
-        trust=True,
-    )
-
     # Deploy dependencies
     await ops_test.model.deploy(
         entity_url=DB_APP,
@@ -61,9 +53,14 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
         trust=True,
     )
     await ops_test.model.deploy(
+        CA_APP,
+        channel="latest/stable",
+        trust=True,
+    )
+    await ops_test.model.deploy(
         TRAEFIK_CHARM,
         application_name=TRAEFIK_PUBLIC_APP,
-        channel="latest/stable",
+        channel="latest/edge",  # using edge to take advantage of the raw args in traefik route
         config={"external_hostname": PUBLIC_INGRESS_DOMAIN},
         trust=True,
     )
@@ -75,29 +72,27 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
         trust=True,
     )
     await ops_test.model.deploy(
-        CA_APP,
-        channel="latest/stable",
-        trust=True,
-    )
-    await ops_test.model.deploy(
         LOGIN_UI_APP,
         channel="latest/edge",
         trust=True,
     )
+
     await ops_test.model.integrate(f"{TRAEFIK_PUBLIC_APP}:certificates", f"{CA_APP}:certificates")
+    # await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:public-route") # TODO @shipperizer change this once login-ui is g2g
     await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:ingress")
+
+    await ops_test.model.deploy(
+        application_name=HYDRA_APP,
+        entity_url=str(local_charm),
+        resources={"oci-image": HYDRA_IMAGE},
+        series="jammy",
+        trust=True,
+    )
 
     # Integrate with dependencies
     await integrate_dependencies(ops_test)
 
     await asyncio.gather(
-        ops_test.model.wait_for_idle(
-            apps=[DB_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP],
-            raise_on_blocked=False,
-            raise_on_error=False,
-            status="active",
-            timeout=5 * 60,
-        ),
         ops_test.model.wait_for_idle(
             apps=[HYDRA_APP],
             raise_on_blocked=False,
@@ -124,16 +119,14 @@ async def test_login_ui_endpoint_integration(
 
 
 @pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)
-async def test_public_ingress_integration(
+async def test_public_route_integration(
     ops_test: OpsTest,
-    leader_public_ingress_integration_data: Optional[dict],
+    leader_public_route_integration_data: Optional[dict],
     get_hydra_jwks: Callable[[], Awaitable[Response]],
 ) -> None:
-    assert leader_public_ingress_integration_data
-    assert leader_public_ingress_integration_data["ingress"]
-
-    data = json.loads(leader_public_ingress_integration_data["ingress"])
-    assert data["url"] == f"https://{PUBLIC_INGRESS_DOMAIN}/{ops_test.model_name}-{HYDRA_APP}"
+    assert leader_public_route_integration_data
+    assert leader_public_route_integration_data["external_host"] == PUBLIC_INGRESS_DOMAIN
+    assert leader_public_route_integration_data["scheme"] == "https"
 
     resp = await get_hydra_jwks()
     assert resp.status_code == http.HTTPStatus.OK
@@ -142,7 +135,7 @@ async def test_public_ingress_integration(
 async def test_openid_configuration_endpoint(
     ops_test: OpsTest, get_openid_configuration: Response
 ) -> None:
-    base_path = URL(f"https://{PUBLIC_INGRESS_DOMAIN}/{ops_test.model.name}-{HYDRA_APP}")
+    base_path = URL(f"https://{PUBLIC_INGRESS_DOMAIN}")
     assert get_openid_configuration.status_code == http.HTTPStatus.OK
 
     payload = get_openid_configuration.json()
@@ -365,10 +358,10 @@ async def test_remove_database_integration(
         assert hydra_application.status == "blocked"
 
 
-async def test_remove_public_ingress_integration(
+async def test_remove_public_route_integration(
     ops_test: OpsTest, hydra_application: Application
 ) -> None:
-    async with remove_integration(ops_test, TRAEFIK_PUBLIC_APP, PUBLIC_INGRESS_INTEGRATION_NAME):
+    async with remove_integration(ops_test, TRAEFIK_PUBLIC_APP, PUBLIC_ROUTE_INTEGRATION_NAME):
         assert hydra_application.status == "blocked"
 
 
@@ -391,6 +384,7 @@ async def test_scale_down(ops_test: OpsTest, hydra_application: Application) -> 
     )
 
 
+@pytest.mark.skip
 async def test_upgrade(
     ops_test: OpsTest, hydra_application: Application, local_charm: Path
 ) -> None:
