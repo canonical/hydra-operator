@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.2.0](https://github.com/canonical/hydra-operator/compare/track/0.3-v1.1.0...track/0.3-v1.2.0) (2025-09-08)
+
+
+### Features
+
+* add name to the create and update actions ([10a1924](https://github.com/canonical/hydra-operator/commit/10a19240d61d6b73b8b71600f1467031451d67fc))
+* expose client-uri via cli ([2ee7086](https://github.com/canonical/hydra-operator/commit/2ee708689bf17a7de84b0ec1dd97e892b59da31b))
+* expose contacts via cli ([a76ce78](https://github.com/canonical/hydra-operator/commit/a76ce78e886485e28bee3f12e2c88d06953ebb43))
+* update juju_application resource name ([c424606](https://github.com/canonical/hydra-operator/commit/c42460640405757b7a78e4eb818ad525f231248f))
+
+
+### Bug Fixes
+
+* add pod constraints ([7a49308](https://github.com/canonical/hydra-operator/commit/7a49308b6682b50e1af58555e3769705f84fb20c))
+* add serializer for metadata ([6273a30](https://github.com/canonical/hydra-operator/commit/6273a30abbdedd297faff3d2d998ecd8d4608a67))
+* add token hook integration ([ca9f156](https://github.com/canonical/hydra-operator/commit/ca9f1569160e325a943ec94b7e34ce354410606f))
+* block charm if not integrated with ui ([ed46b76](https://github.com/canonical/hydra-operator/commit/ed46b76f867d37ed906b5a40516f7fae0c23ce0a))
+* block the charm when public ingress is not secured in non-dev mode ([526e5b5](https://github.com/canonical/hydra-operator/commit/526e5b51ea1c7d99c8c8212c90543305a1c9654d))
+* do not always set maintenance status ([b0acbd6](https://github.com/canonical/hydra-operator/commit/b0acbd686fdb7ffda3a3697199fff3295442fbe6))
+* don't restart service if config didn't change ([76bed8a](https://github.com/canonical/hydra-operator/commit/76bed8ab1d5a9691c0a8d5d14321299d2fffdd4d))
+* fix constraint ([da1248b](https://github.com/canonical/hydra-operator/commit/da1248b697846deb445f686a1e1c81fdb5c58ea1))
+* fix tests ([b915a48](https://github.com/canonical/hydra-operator/commit/b915a48c534020272904460958f491fa179fa5ae))
+* fix tests ([627b58f](https://github.com/canonical/hydra-operator/commit/627b58fb7d7ed4e25c216fdeae974ea80a6ba4d3))
+* fix the issue that disregards the dev mode when dev config is set to true ([e859590](https://github.com/canonical/hydra-operator/commit/e859590d49f6eb88e1c84a758512dfa60bd5ee8e))
+* mark ui relation as mandatory ([a6ed9c2](https://github.com/canonical/hydra-operator/commit/a6ed9c27b5c4fac15884dc05199a0e840d6f7c22))
+* update charm dependent libs ([9e487b1](https://github.com/canonical/hydra-operator/commit/9e487b134daae5f81f802e54e0254214d83100ac))
+* update charm dependent libs ([3ca2e5e](https://github.com/canonical/hydra-operator/commit/3ca2e5e3fd3d981f4f4fc3264d52643c4b8076a7))
+* update charm libs ([8070840](https://github.com/canonical/hydra-operator/commit/8070840d0a7b6a589ba37fc9341c92365530d10e))
+* update to use juju 0.20 ([5a20fbb](https://github.com/canonical/hydra-operator/commit/5a20fbb67aa8e5c0a017904c4dd20debf0182234))
+* use proper charm name ([512e7e4](https://github.com/canonical/hydra-operator/commit/512e7e444e85cb6c1b94ff037504b116bb77082b))
+* use storedstate to check if config changed ([ab26d3f](https://github.com/canonical/hydra-operator/commit/ab26d3f92ab9744919ebcc71704d9f3248678987))
+* use terraform module in deployment ([0713912](https://github.com/canonical/hydra-operator/commit/071391201efea257381def6306d51f89b5dab2df))
+* wait for login ui integration to be ready ([6ad4ff5](https://github.com/canonical/hydra-operator/commit/6ad4ff596fce0427ec1d3002bd05ac645cf5923c))
+
 ## [1.1.0](https://github.com/canonical/hydra-operator/compare/track/0.3-v1.0.0...track/0.3-v1.1.0) (2025-04-02)
 
 
