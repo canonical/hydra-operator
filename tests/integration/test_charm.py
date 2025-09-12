@@ -40,7 +40,8 @@ from constants import (
 )
 
 logger = logging.getLogger(__name__)
-
+system_secret = None
+cookie_secret = None
 
 @pytest.mark.skip_if_deployed
 @pytest.mark.abort_on_fail
@@ -384,9 +385,43 @@ async def test_scale_down(ops_test: OpsTest, hydra_application: Application) -> 
     )
 
 
-@pytest.mark.skip
+async def test_get_system_secret(hydra_unit: Unit, oauth_clients: dict[str, str]) -> None:
+    global system_secret
+
+    action = await hydra_unit.run_action(
+        "get-secret-keys",
+        **{
+            "type": "system",
+        },
+    )
+
+    res = (await action.wait()).results
+    assert res["system"]
+    system_secret = res["system"]
+
+
+async def test_get_cookie_secret(hydra_unit: Unit, oauth_clients: dict[str, str]) -> None:
+    global cookie_secret
+
+    action = await hydra_unit.run_action(
+        "get-secret-keys",
+        **{
+            "type": "cookie",
+        },
+    )
+
+    res = (await action.wait()).results
+    assert res["cookie"]
+    cookie_secret = res["cookie"]
+
+
+@pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)
 async def test_upgrade(
-    ops_test: OpsTest, hydra_application: Application, local_charm: Path
+    ops_test: OpsTest,
+    hydra_application: Application,
+    local_charm: Path,
+    hydra_unit: Unit,
+    get_hydra_jwks: Callable[[], Awaitable[Response]],
 ) -> None:
     # remove the current hydra application
     await ops_test.model.remove_application(
@@ -425,3 +460,32 @@ async def test_upgrade(
         status="active",
         timeout=5 * 60,
     )
+
+    for secret in json.loads(cookie_secret):
+        action = await hydra_unit.run_action(
+            "add-secret-key",
+            **{
+                "type": "cookie",
+                "key": secret,
+            },
+        )
+        await action.wait()
+
+    for secret in json.loads(system_secret):
+        action = await hydra_unit.run_action(
+            "add-secret-key",
+            **{
+                "type": "system",
+                "key": secret,
+            },
+        )
+        await action.wait()
+
+    await ops_test.model.wait_for_idle(
+        apps=[HYDRA_APP],
+        status="active",
+        timeout=5 * 60,
+    )
+
+    jwks = (await get_hydra_jwks()).json()
+    assert "error" not in jwks

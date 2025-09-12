@@ -234,6 +234,24 @@ actions:
         enumerate: [RS256, RS512, ES256, ES512, EdDSA]
   reconcile-oauth-clients:
     description: Clean up clients that were created by the oauth relation
+  get-secret-keys:
+    description: Get all the system or cookie secret keys used by hydra to encrypt sensitive data
+    params:
+      type:
+        description: The type of secret to fetch, allowed values are ["system", "cookie"]
+        type: string
+        enumerate: [system, cookie]
+  add-secret-key:
+    description: Adds a new secret key used by hydra to encrypt sensitive data
+    params:
+      type:
+        description: The type of secret to fetch, allowed values are ["system", "cookie"]
+        type: string
+        enumerate: [system, cookie]
+      key:
+        description: The key
+        type: string
+
 
 platforms:
   ubuntu@22.04:amd64:

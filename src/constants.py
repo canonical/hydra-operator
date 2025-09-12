@@ -13,6 +13,13 @@ COOKIE_SECRET_LABEL = "cookiesecret"
 SYSTEM_SECRET_LABEL = "systemsecret"
 DEFAULT_OAUTH_SCOPES = ["openid", "profile", "email", "phone"]
 DEFAULT_RESPONSE_TYPES = ["code"]
+SYSTEM_SECRET = "system"
+COOKIE_SECRET = "cookie"
+ALLOWED_SECRET_TYPES = [SYSTEM_SECRET, COOKIE_SECRET]
+
+# Peer relation keys
+PEER_INTEGRATION_SYSTEM_SECRET_KEYS = "system_keys"
+PEER_INTEGRATION_COOKIE_SECRET_KEYS = "cookie_keys"
 
 # Application constants
 HYDRA_SERVICE_COMMAND = "hydra serve all"
