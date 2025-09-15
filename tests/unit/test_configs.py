@@ -25,7 +25,7 @@ class TestCharmConfig:
     )
     def test_to_service_configs(self, harness: Harness, config: dict, expected: dict) -> None:
         harness.update_config(config)
-        actual = CharmConfig(harness.charm.config).to_service_configs()
+        actual = CharmConfig(harness.charm.config, harness.model).to_service_configs()
 
         assert actual == expected
 
@@ -44,7 +44,7 @@ class TestCharmConfig:
     )
     def test_to_env_vars(self, harness: Harness, config: dict, expected: dict) -> None:
         harness.update_config(config)
-        actual = CharmConfig(harness.charm.config).to_env_vars()
+        actual = CharmConfig(harness.charm.config, harness.model).to_env_vars()
 
         assert actual == expected
 

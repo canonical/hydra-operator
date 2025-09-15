@@ -9,16 +9,13 @@ from ops import Model, SecretNotFoundError
 
 from configs import ServiceConfigs
 from constants import (
+    COOKIE_SECRET,
     COOKIE_SECRET_KEY,
     COOKIE_SECRET_LABEL,
-    COOKIE_SECRET,
-    PEER_INTEGRATION_COOKIE_SECRET_KEYS,
-    PEER_INTEGRATION_SYSTEM_SECRET_KEYS,
+    SYSTEM_SECRET,
     SYSTEM_SECRET_KEY,
     SYSTEM_SECRET_LABEL,
-    SYSTEM_SECRET,
 )
-from integrations import PeerData
 
 
 class Secrets:
@@ -109,7 +106,9 @@ class HydraSecrets:
             COOKIE_SECRET: (COOKIE_SECRET_KEY, COOKIE_SECRET_LABEL),
         }[typ]
         secrets = self._secrets[secret_label] or {}
-        secrets[f"{secret_key}{datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d%H%M%S')}"] = key
+        secrets[
+            f"{secret_key}-{len(secrets)}-{datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d%H%M%S')}"
+        ] = key
         self._secrets[secret_label] = secrets
 
     @property
