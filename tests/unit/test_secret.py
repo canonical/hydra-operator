@@ -1,19 +1,16 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import json
+
 import pytest
 from ops.testing import Harness
 
 from constants import (
     COOKIE_SECRET_KEY,
     COOKIE_SECRET_LABEL,
-    PEER_INTEGRATION_COOKIE_SECRET_KEYS,
-    PEER_INTEGRATION_SYSTEM_SECRET_KEYS,
     SYSTEM_SECRET_KEY,
     SYSTEM_SECRET_LABEL,
 )
-from integrations import PeerData
 from secret import HydraSecrets, Secrets
 
 
@@ -56,12 +53,6 @@ class TestSecrets:
     def test_values_with_missing_secret(self, secrets: Secrets) -> None:
         assert not secrets.values()
 
-    def test_to_service_configs(self, secrets: Secrets, add_secrets: None) -> None:
-        assert secrets.to_service_configs() == {
-            "cookie_secrets": ["cookie"],
-            "system_secrets": ["system"],
-        }
-
     def test_is_ready(self, secrets: Secrets, add_secrets: None) -> None:
         assert secrets.is_ready is True
 
@@ -76,8 +67,14 @@ class TestHydraSecrets:
 
     @pytest.fixture
     def add_secrets(self, harness: Harness) -> None:
-        harness.model.app.add_secret({COOKIE_SECRET_KEY: "old_cookie", COOKIE_SECRET_KEY+"1": "new_cookie"}, label=COOKIE_SECRET_LABEL)
-        harness.model.app.add_secret({SYSTEM_SECRET_KEY: "old_system", SYSTEM_SECRET_KEY+"1": "new_system"}, label=SYSTEM_SECRET_LABEL)
+        harness.model.app.add_secret(
+            {COOKIE_SECRET_KEY: "old_cookie", COOKIE_SECRET_KEY + "1": "new_cookie"},
+            label=COOKIE_SECRET_LABEL,
+        )
+        harness.model.app.add_secret(
+            {SYSTEM_SECRET_KEY: "old_system", SYSTEM_SECRET_KEY + "1": "new_system"},
+            label=SYSTEM_SECRET_LABEL,
+        )
 
     def test_get_secret_keys(self, secrets: HydraSecrets, add_secrets: None) -> None:
         content = secrets.get_secret_keys("cookie")
