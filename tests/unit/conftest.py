@@ -17,10 +17,10 @@ from constants import (
     LOGIN_UI_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
-    PUBLIC_INGRESS_INTEGRATION_NAME,
+    PUBLIC_ROUTE_INTEGRATION_NAME,
     WORKLOAD_CONTAINER,
 )
-from integrations import InternalIngressData, PublicIngressData
+from integrations import InternalIngressData, PublicRouteData
 
 
 @pytest.fixture(autouse=True)
@@ -124,8 +124,8 @@ def token_hook_integration(harness: Harness) -> int:
 
 
 @pytest.fixture
-def public_ingress_integration(harness: Harness) -> int:
-    return harness.add_relation(PUBLIC_INGRESS_INTEGRATION_NAME, "traefik-public")
+def public_route_integration(harness: Harness) -> int:
+    return harness.add_relation(PUBLIC_ROUTE_INTEGRATION_NAME, "traefik-public")
 
 
 @pytest.fixture
@@ -154,12 +154,13 @@ def database_integration_data(harness: Harness, database_integration: int) -> No
 
 
 @pytest.fixture
-def public_ingress_integration_data(harness: Harness, public_ingress_integration: int) -> None:
+def public_route_integration_data(harness: Harness, public_route_integration: int) -> None:
     harness.update_relation_data(
-        public_ingress_integration,
+        public_route_integration,
         "traefik-public",
         {
-            "ingress": '{"url": "https://hydra.ory.com"}',
+            "external_host": "hydra.ory.com",
+            "scheme": "https",
         },
     )
 
@@ -185,10 +186,10 @@ def login_ui_integration_data(harness: Harness, login_ui_integration: int) -> No
 
 
 @pytest.fixture
-def mocked_public_ingress_data(mocker: MockerFixture) -> PublicIngressData:
+def mocked_public_route_data(mocker: MockerFixture) -> PublicRouteData:
     mocked = mocker.patch(
-        "charm.PublicIngressData.load",
-        return_value=PublicIngressData(url=URL("https://hydra.ory.com")),
+        "charm.PublicRouteData.load",
+        return_value=PublicRouteData(url=URL("https://hydra.ory.com")),
     )
     return mocked.return_value
 
