@@ -60,7 +60,9 @@ class TestPebbleReadyEvent:
 
 
 class TestLeaderElectedEvent:
-    def test_when_event_emitted(self, harness: Harness, mocked_charm_holistic_handler: MagicMock) -> None:
+    def test_when_event_emitted(
+        self, harness: Harness, mocked_charm_holistic_handler: MagicMock
+    ) -> None:
         harness.set_leader(True)
 
         mocked_charm_holistic_handler.assert_called_once()

@@ -3,13 +3,14 @@
 
 import hashlib
 from collections import ChainMap
-from typing import Any, Mapping, Protocol, TypeAlias
+from typing import Any, Mapping, Optional, Protocol, TypeAlias
 
 from jinja2 import Template
-from ops import ConfigData
+from ops import ConfigData, Model, SecretNotFoundError
 
 from constants import DEFAULT_OAUTH_SCOPES
 from env_vars import EnvVars
+from exceptions import InvalidHydraConfig
 
 ServiceConfigs: TypeAlias = Mapping[str, Any]
 
@@ -24,18 +25,53 @@ class ServiceConfigSource(Protocol):
 class CharmConfig:
     """A class representing the data source of charm configurations."""
 
-    def __init__(self, config: ConfigData) -> None:
+    def __init__(self, config: ConfigData, model: Model) -> None:
         self._config = config
+        self._model = model
 
     def __getitem__(self, key: str) -> Any:
         return self._config.get(key)
 
+    def _get_secret(self, id) -> dict[str, str]:
+        secret = self._model.get_secret(id=id)
+        return secret.get_content(refresh=True)
+
+    def get_system_secret(self) -> Optional[list[str]]:
+        if not (secret_id := self._config.get("initial_system_secret_id")):
+            return None
+
+        try:
+            content = self._get_secret(secret_id)
+        except SecretNotFoundError:
+            return None
+        except Exception as e:
+            raise InvalidHydraConfig from e
+        if any(len(s) < 16 for s in content.values()):
+            raise InvalidHydraConfig("key must be >16 chars")
+        return [secret for _, secret in sorted(content.items(), reverse=True)]
+
+    def get_cookie_secret(self) -> Optional[list[str]]:
+        if not (secret_id := self._config.get("initial_cookie_secret_id")):
+            return None
+
+        try:
+            content = self._get_secret(secret_id)
+        except SecretNotFoundError:
+            return None
+        except Exception as e:
+            raise InvalidHydraConfig from e
+        if any(len(s) < 16 for s in content.values()):
+            raise InvalidHydraConfig("key must be >16 chars")
+        return [secret for _, secret in sorted(content.items(), reverse=True)]
+
     def to_service_configs(self) -> ServiceConfigs:
-        return {
+        config = {
             "dev_mode": self._config["dev"],
             "log_level": self._config["log_level"],
             "access_token_strategy": "jwt" if self._config["jwt_access_tokens"] else "opaque",
         }
+
+        return config
 
     def to_env_vars(self) -> EnvVars:
         return {
