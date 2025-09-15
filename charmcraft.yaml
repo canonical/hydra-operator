@@ -112,6 +112,40 @@ config:
         Run Hydra in dev mode, it is needed if HTTPS is not set up. This should only be used for development purposes.
       type: boolean
       default: False
+    initial_system_secret_id:
+      description: |
+        Juju secret id containing the system secret key used to encrypt database entries.
+
+        This config is only used when the application is deployed the first time. On an existing deployment, you
+        need to use the `add-secret-key` action.
+
+        All the values from the secret will be used as keys sorted, with the last one being used for both
+        encryption and decryption. E.g:
+          {
+            "1": <secret-1>,
+            "2": <secret-2>,
+            "3": <secret-3>,
+          }
+
+        The length of the secrets must be >16 characters
+      type: secret
+    initial_cookie_secret_id:
+      description: |
+        Juju secret id containing the cookie secret key used to encrypt the hydra cookies.
+
+        This config is only used when the application is deployed the first time. On an existing deployment, you
+        need to use the `add-secret-key` action.
+
+        All the values from the secret will be used as keys sorted, with the last one being used for both
+        encryption and decryption. E.g:
+          {
+            "1": <secret-1>,
+            "2": <secret-2>,
+            "3": <secret-3>,
+          }
+
+        The length of the secrets must be >16 characters
+      type: secret
 
 actions:
   run-migration:

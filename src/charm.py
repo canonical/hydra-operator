@@ -39,7 +39,6 @@ from ops.charm import (
     CharmBase,
     ConfigChangedEvent,
     HookEvent,
-    LeaderElectedEvent,
     RelationBrokenEvent,
     RelationEvent,
     RelationJoinedEvent,
@@ -107,7 +106,7 @@ class HydraCharm(CharmBase):
         self.peer_data = PeerData(self.model)
         self.secrets = Secrets(self.model)
         self.hydra_secrets = HydraSecrets(self.secrets)
-        self.charm_config = CharmConfig(self.config)
+        self.charm_config = CharmConfig(self.config, self.model)
 
         self._container = self.unit.get_container(WORKLOAD_CONTAINER)
         self._workload_service = WorkloadService(self.unit)
@@ -193,8 +192,12 @@ class HydraCharm(CharmBase):
         self.framework.observe(self.on.secret_changed, self._holistic_handler)
 
         # peers
-        self.framework.observe(self.on[PEER_INTEGRATION_NAME].relation_created, self._holistic_handler)
-        self.framework.observe(self.on[PEER_INTEGRATION_NAME].relation_changed, self._holistic_handler)
+        self.framework.observe(
+            self.on[PEER_INTEGRATION_NAME].relation_created, self._holistic_handler
+        )
+        self.framework.observe(
+            self.on[PEER_INTEGRATION_NAME].relation_changed, self._holistic_handler
+        )
 
         # hooks
         self.framework.observe(self.token_hook.on.ready, self._holistic_handler)
@@ -325,8 +328,17 @@ class HydraCharm(CharmBase):
         return self.charm_config["dev"]
 
     def _initialize_secrets(self) -> None:
-        self.hydra_secrets.add_secret_key(COOKIE_SECRET, token_hex(16))
-        self.hydra_secrets.add_secret_key(SYSTEM_SECRET, token_hex(16))
+        if not (system_secrets := self.charm_config.get_system_secret()):
+            self.hydra_secrets.add_secret_key(SYSTEM_SECRET, token_hex(16))
+        else:
+            for s in system_secrets:
+                self.hydra_secrets.add_secret_key(SYSTEM_SECRET, s)
+
+        if not (cookie_secrets := self.charm_config.get_cookie_secret()):
+            self.hydra_secrets.add_secret_key(COOKIE_SECRET, token_hex(16))
+        else:
+            for s in cookie_secrets:
+                self.hydra_secrets.add_secret_key(COOKIE_SECRET, s)
 
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
@@ -772,7 +784,7 @@ class HydraCharm(CharmBase):
         keys = self.hydra_secrets.get_secret_keys(event.params["type"])
 
         event.log(f"Successfully fetched the `{event.params['type']}` keys")
-        event.set_results({event.params['type']: json.dumps(keys)})
+        event.set_results({event.params["type"]: json.dumps(keys)})
 
     def _on_add_secret_key_action(self, event: ActionEvent) -> None:
         if not peer_integration_exists(self):

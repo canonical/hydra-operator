@@ -1,24 +1,20 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import datetime
-import time
+from datetime import datetime, timezone
 from typing import Optional, ValuesView
 
 from ops import Model, SecretNotFoundError
 
 from configs import ServiceConfigs
 from constants import (
+    COOKIE_SECRET,
     COOKIE_SECRET_KEY,
     COOKIE_SECRET_LABEL,
-    COOKIE_SECRET,
-    PEER_INTEGRATION_COOKIE_SECRET_KEYS,
-    PEER_INTEGRATION_SYSTEM_SECRET_KEYS,
+    SYSTEM_SECRET,
     SYSTEM_SECRET_KEY,
     SYSTEM_SECRET_LABEL,
-    SYSTEM_SECRET,
 )
-from integrations import PeerData
 
 
 class Secrets:
@@ -64,16 +60,6 @@ class Secrets:
 
         return secret_contents.values()
 
-    def to_service_configs(self) -> ServiceConfigs:
-        return {
-            "cookie_secrets": [
-                self[COOKIE_SECRET_LABEL][COOKIE_SECRET_KEY],  # type: ignore[index]
-            ],
-            "system_secrets": [
-                self[SYSTEM_SECRET_LABEL][SYSTEM_SECRET_KEY],  # type: ignore[index]
-            ],
-        }
-
     @property
     def is_ready(self) -> bool:
         values = self.values()
@@ -109,7 +95,9 @@ class HydraSecrets:
             COOKIE_SECRET: (COOKIE_SECRET_KEY, COOKIE_SECRET_LABEL),
         }[typ]
         secrets = self._secrets[secret_label] or {}
-        secrets[f"{secret_key}{datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d%H%M%S')}"] = key
+        secrets[
+            f"{secret_key}-{int(datetime.now(tz=timezone.utc).timestamp())}-{len(secrets):0>3}"
+        ] = key
         self._secrets[secret_label] = secrets
 
     @property

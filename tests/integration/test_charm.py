@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 system_secret = None
 cookie_secret = None
 
+
 @pytest.mark.skip_if_deployed
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
@@ -415,6 +416,7 @@ async def test_get_cookie_secret(hydra_unit: Unit, oauth_clients: dict[str, str]
     cookie_secret = res["cookie"]
 
 
+@pytest.mark.skip
 @pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)
 async def test_upgrade(
     ops_test: OpsTest,

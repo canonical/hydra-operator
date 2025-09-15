@@ -20,3 +20,7 @@ class ClientDoesNotExistError(CharmError):
 
 class MigrationError(CharmError):
     """Error for migration plan."""
+
+
+class InvalidHydraConfig(CharmError):
+    """Error for invalid hydra config."""
