@@ -6,6 +6,7 @@
 
 """A Juju charm for Ory Hydra."""
 
+import json
 import logging
 from secrets import token_hex
 from typing import Any
@@ -43,7 +44,6 @@ from ops.charm import (
     CharmBase,
     ConfigChangedEvent,
     HookEvent,
-    LeaderElectedEvent,
     RelationBrokenEvent,
     RelationEvent,
     RelationJoinedEvent,
@@ -58,8 +58,7 @@ from configs import CharmConfig, ConfigFile
 from constants import (
     ADMIN_INGRESS_INTEGRATION_NAME,
     ADMIN_PORT,
-    COOKIE_SECRET_KEY,
-    COOKIE_SECRET_LABEL,
+    COOKIE_SECRET,
     DATABASE_INTEGRATION_NAME,
     DEFAULT_OAUTH_SCOPES,
     GRAFANA_DASHBOARD_INTEGRATION_NAME,
@@ -72,8 +71,7 @@ from constants import (
     PROMETHEUS_SCRAPE_INTEGRATION_NAME,
     PUBLIC_INGRESS_INTEGRATION_NAME,
     PUBLIC_PORT,
-    SYSTEM_SECRET_KEY,
-    SYSTEM_SECRET_LABEL,
+    SYSTEM_SECRET,
     TEMPO_TRACING_INTEGRATION_NAME,
     WORKLOAD_CONTAINER,
 )
@@ -92,7 +90,7 @@ from integrations import (
     PublicIngressData,
     TracingData,
 )
-from secret import Secrets
+from secret import HydraSecrets, Secrets
 from services import PebbleService, WorkloadService
 from utils import (
     container_connectivity,
@@ -114,7 +112,8 @@ class HydraCharm(CharmBase):
 
         self.peer_data = PeerData(self.model)
         self.secrets = Secrets(self.model)
-        self.charm_config = CharmConfig(self.config)
+        self.hydra_secrets = HydraSecrets(self.secrets)
+        self.charm_config = CharmConfig(self.config, self.model)
 
         self._container = self.unit.get_container(WORKLOAD_CONTAINER)
         self._workload_service = WorkloadService(self.unit)
@@ -199,8 +198,19 @@ class HydraCharm(CharmBase):
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
         self.framework.observe(self.on.update_status, self._holistic_handler)
-        self.framework.observe(self.on.leader_elected, self._on_leader_elected)
+        self.framework.observe(self.on.leader_elected, self._holistic_handler)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+
+        # secrets
+        self.framework.observe(self.on.secret_changed, self._holistic_handler)
+
+        # peers
+        self.framework.observe(
+            self.on[PEER_INTEGRATION_NAME].relation_created, self._holistic_handler
+        )
+        self.framework.observe(
+            self.on[PEER_INTEGRATION_NAME].relation_changed, self._holistic_handler
+        )
 
         # hooks
         self.framework.observe(self.token_hook.on.ready, self._holistic_handler)
@@ -301,6 +311,8 @@ class HydraCharm(CharmBase):
         self.framework.observe(
             self.on.reconcile_oauth_clients_action, self._reconcile_oauth_clients_action
         )
+        self.framework.observe(self.on.get_secret_keys_action, self._on_get_secret_keys_action)
+        self.framework.observe(self.on.add_secret_key_action, self._on_add_secret_key_action)
 
     @property
     def _pebble_layer(self) -> Layer:
@@ -322,6 +334,19 @@ class HydraCharm(CharmBase):
     def dev_mode(self) -> bool:
         return self.charm_config["dev"]
 
+    def _initialize_secrets(self) -> None:
+        if not (system_secrets := self.charm_config.get_system_secret()):
+            self.hydra_secrets.add_secret_key(SYSTEM_SECRET, token_hex(16))
+        else:
+            for s in system_secrets:
+                self.hydra_secrets.add_secret_key(SYSTEM_SECRET, s)
+
+        if not (cookie_secrets := self.charm_config.get_cookie_secret()):
+            self.hydra_secrets.add_secret_key(COOKIE_SECRET, token_hex(16))
+        else:
+            for s in cookie_secrets:
+                self.hydra_secrets.add_secret_key(COOKIE_SECRET, s)
+
     def _on_hydra_pebble_ready(self, event: WorkloadEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
         if not container_connectivity(self):
@@ -335,11 +360,6 @@ class HydraCharm(CharmBase):
         self._workload_service.version = service_version
 
         self._holistic_handler(event)
-
-    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
-        if not self.secrets.is_ready:
-            self.secrets[COOKIE_SECRET_LABEL] = {COOKIE_SECRET_KEY: token_hex(16)}
-            self.secrets[SYSTEM_SECRET_LABEL] = {SYSTEM_SECRET_KEY: token_hex(16)}
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
@@ -391,11 +411,6 @@ class HydraCharm(CharmBase):
 
         if not peer_integration_exists(self):
             self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
-            event.defer()
-            return
-
-        if not self.secrets.is_ready:
-            self.unit.status = WaitingStatus("Missing required secrets")
             event.defer()
             return
 
@@ -519,7 +534,6 @@ class HydraCharm(CharmBase):
 
         if not peer_integration_exists(self):
             self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
-            event.defer()
             return
 
         if not database_integration_exists(self):
@@ -564,14 +578,16 @@ class HydraCharm(CharmBase):
             )
             return
 
-        if not self.secrets.is_ready:
-            self.unit.status = WaitingStatus("Waiting for secrets creation")
-            event.defer()
-            return
+        if not self.hydra_secrets.is_ready:
+            if self.unit.is_leader():
+                self._initialize_secrets()
+            else:
+                self.unit.status = WaitingStatus("Waiting for secrets creation")
+                return
 
         changed = self._pebble_service.update_config_file(
             ConfigFile.from_sources(
-                self.secrets,
+                self.hydra_secrets,
                 self.charm_config,
                 DatabaseConfig.load(self.database_requirer),
                 LoginUIEndpointData.load(self.login_ui_requirer),
@@ -748,6 +764,41 @@ class HydraCharm(CharmBase):
         deleted = self._clean_up_oauth_relation_clients()
 
         event.log(f"Successfully deleted {deleted} clients")
+
+    def _on_get_secret_keys_action(self, event: ActionEvent) -> None:
+        if not peer_integration_exists(self):
+            event.fail("Peer integration is not ready yet")
+            return
+
+        if not self.hydra_secrets.is_ready:
+            event.fail("Juju secrets are not ready yet")
+            return
+
+        keys = self.hydra_secrets.get_secret_keys(event.params["type"])
+
+        event.log(f"Successfully fetched the `{event.params['type']}` keys")
+        event.set_results({event.params["type"]: json.dumps(keys)})
+
+    def _on_add_secret_key_action(self, event: ActionEvent) -> None:
+        if not peer_integration_exists(self):
+            event.fail("Peer integration is not ready yet")
+            return
+
+        if not self.hydra_secrets.is_ready:
+            event.fail("Juju secrets are not ready yet")
+            return
+
+        if len(event.params["key"]) < 16:
+            event.fail("Key must have >16 characters")
+            return
+
+        if not isinstance(event.params["key"], str):
+            event.fail("Key must be string")
+            return
+
+        self.hydra_secrets.add_secret_key(event.params["type"], event.params["key"])
+
+        event.log(f"Successfully set the `{event.params['type']}` key")
 
     @leader_unit
     def _clean_up_oauth_relation_clients(self) -> int:
