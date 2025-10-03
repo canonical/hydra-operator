@@ -15,7 +15,6 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 )
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from ops.testing import Harness
 from yarl import URL
 
@@ -26,7 +25,7 @@ from integrations import (
     InternalIngressData,
     LoginUIEndpointData,
     PeerData,
-    PublicIngressData,
+    PublicRouteData,
     TracingData,
 )
 
@@ -202,27 +201,67 @@ class TestLoginUIEndpointData:
         assert actual == LoginUIEndpointData()
 
 
-class TestPublicIngressData:
+class TestPublicRouteData:
     @pytest.fixture
     def mocked_requirer(self) -> MagicMock:
-        return create_autospec(IngressPerAppRequirer)
+        mocked = create_autospec(TraefikRouteRequirer)
+        mocked._charm = MagicMock()
+        mocked._charm.model.name = "model"
+        mocked._charm.app.name = "app"
+        mocked.scheme = "http"
 
-    def test_to_service_configs(self) -> None:
-        data = PublicIngressData(url=URL("https://hydra.ory.com"))
-        assert data.to_service_configs() == {"public_url": "https://hydra.ory.com"}
+        relation = MagicMock()
+        relation.app = "app"
+        relation.data = {"app": {"external_host": "external.hydra.com", "scheme": "http"}}
+        mocked._charm.model.get_relation = MagicMock(return_value=relation)
 
-    def test_load_with_integration_ready(self, mocked_requirer: MagicMock) -> None:
-        mocked_requirer.is_ready.return_value = True
-        mocked_requirer.url = "https://hydra.ory.com"
+        return mocked
 
-        actual = PublicIngressData.load(mocked_requirer)
-        assert actual == PublicIngressData(url=URL("https://hydra.ory.com"))
+    @pytest.fixture
+    def ingress_template(self) -> str:
+        return (
+            '{"model": "{{ model }}", '
+            '"app": "{{ app }}", '
+            '"public_port": {{ public_port }}, '
+            '"external_host": "{{ external_host }}"}'
+        )
 
-    def test_load_without_integration_ready(self, mocked_requirer: MagicMock) -> None:
-        mocked_requirer.is_ready.return_value = False
+    def test_load_with_external_host(
+        self,
+        mocked_requirer: MagicMock,
+        ingress_template: str,
+        public_route_integration_data: None,
+    ) -> None:
+        with patch("builtins.open", mock_open(read_data=ingress_template)):
+            actual = PublicRouteData.load(mocked_requirer)
 
-        actual = PublicIngressData.load(mocked_requirer)
-        assert actual == PublicIngressData()
+        expected_ingress_config = {
+            "model": "model",
+            "app": "app",
+            "public_port": PUBLIC_PORT,
+            "external_host": "external.hydra.com",
+        }
+        assert actual == PublicRouteData(
+            url=URL("http://external.hydra.com"),
+            config=expected_ingress_config,
+        )
+
+    def test_load_without_external_host(
+        self, mocked_requirer: MagicMock, ingress_template: str
+    ) -> None:
+        relation = MagicMock()
+        relation.app = "app"
+        relation.data = {"app": {"scheme": "http", "external_host": ""}}
+
+        with (
+            patch("builtins.open", mock_open(read_data=ingress_template)),
+            patch.object(
+                mocked_requirer._charm.model, "get_relation", MagicMock(return_value=relation)
+            ),
+        ):
+            actual = PublicRouteData.load(mocked_requirer)
+
+        assert actual == PublicRouteData()
 
 
 class TestHydraHookData:
@@ -313,6 +352,12 @@ class TestInternalIngressData:
         mocked._charm.model.name = "model"
         mocked._charm.app.name = "app"
         mocked.scheme = "http"
+
+        relation = MagicMock()
+        relation.app = "app"
+        relation.data = {"app": {"external_host": "external.hydra.com", "scheme": "http"}}
+        mocked._charm.model.get_relation = MagicMock(return_value=relation)
+
         return mocked
 
     @pytest.fixture
@@ -328,8 +373,6 @@ class TestInternalIngressData:
     def test_load_with_external_host(
         self, mocked_requirer: MagicMock, ingress_template: str
     ) -> None:
-        mocked_requirer.external_host = "external.hydra.com"
-
         with patch("builtins.open", mock_open(read_data=ingress_template)):
             actual = InternalIngressData.load(mocked_requirer)
 
@@ -341,8 +384,8 @@ class TestInternalIngressData:
             "external_host": "external.hydra.com",
         }
         assert actual == InternalIngressData(
-            public_endpoint=URL("http://external.hydra.com/model-app"),
-            admin_endpoint=URL("http://external.hydra.com/model-app"),
+            public_endpoint=URL("http://external.hydra.com"),
+            admin_endpoint=URL("http://external.hydra.com"),
             config=expected_ingress_config,
         )
 
@@ -350,8 +393,16 @@ class TestInternalIngressData:
         self, mocked_requirer: MagicMock, ingress_template: str
     ) -> None:
         mocked_requirer.external_host = ""
+        relation = MagicMock()
+        relation.app = "app"
+        relation.data = {"app": {"scheme": "http", "external_host": ""}}
 
-        with patch("builtins.open", mock_open(read_data=ingress_template)):
+        with (
+            patch("builtins.open", mock_open(read_data=ingress_template)),
+            patch.object(
+                mocked_requirer._charm.model, "get_relation", MagicMock(return_value=relation)
+            ),
+        ):
             actual = InternalIngressData.load(mocked_requirer)
 
         expected_ingress_config = {
