@@ -15,11 +15,11 @@ from constants import (
     HYDRA_TOKEN_HOOK_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
-    PUBLIC_INGRESS_INTEGRATION_NAME,
+    PUBLIC_ROUTE_INTEGRATION_NAME,
     WORKLOAD_CONTAINER,
 )
 from exceptions import CommandExecError, PebbleServiceError
-from integrations import InternalIngressData, PublicIngressData
+from integrations import InternalIngressData, PublicRouteData
 
 
 class TestPebbleReadyEvent:
@@ -104,17 +104,17 @@ class TestHydraEndpointsReadyEvent:
         )
 
 
-class TestPublicIngressReadyEvent:
+class TestPublicRouteJoinedEvent:
     def test_when_event_emitted(
         self,
         harness: Harness,
-        public_ingress_integration: int,
+        public_route_integration: int,
         mocked_charm_holistic_handler: MagicMock,
         mocked_oauth_integration_created_handler: MagicMock,
         mocked_hydra_endpoints_ready_handler: MagicMock,
     ) -> None:
-        harness.charm.public_ingress.on.ready.emit(
-            harness.model.get_relation("public-ingress"), "url"
+        harness.charm.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_joined.emit(
+            harness.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME)
         )
 
         mocked_charm_holistic_handler.assert_called_once()
@@ -122,20 +122,37 @@ class TestPublicIngressReadyEvent:
         mocked_hydra_endpoints_ready_handler.assert_called_once()
 
 
-class TestPublicIngressRevokedEvent:
+class TestPublicRouteChangedEvent:
     def test_when_event_emitted(
         self,
         harness: Harness,
-        public_ingress_integration: int,
+        public_route_integration: int,
         mocked_charm_holistic_handler: MagicMock,
         mocked_oauth_integration_created_handler: MagicMock,
         mocked_hydra_endpoints_ready_handler: MagicMock,
     ) -> None:
-        harness.charm.public_ingress.on.revoked.emit(harness.model.get_relation("public-ingress"))
-
+        harness.charm.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_changed.emit(
+            harness.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME)
+        )
         mocked_charm_holistic_handler.assert_called_once()
         mocked_oauth_integration_created_handler.assert_called_once()
         mocked_hydra_endpoints_ready_handler.assert_called_once()
+
+
+class TestPublicRouteBrokenEvent:
+    def test_when_event_emitted(
+        self,
+        harness: Harness,
+        public_route_integration: int,
+        mocked_charm_holistic_handler: MagicMock,
+        mocked_oauth_integration_created_handler: MagicMock,
+        mocked_hydra_endpoints_ready_handler: MagicMock,
+    ) -> None:
+        harness.charm.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_broken.emit(
+            harness.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME)
+        )
+
+        mocked_charm_holistic_handler.assert_called_once()
 
 
 class TestDatabaseCreatedEvent:
@@ -313,7 +330,7 @@ class TestOAuthIntegrationCreatedEvent:
     def test_when_event_emitted(
         self,
         harness: Harness,
-        mocked_public_ingress_data: PublicIngressData,
+        mocked_public_route_data: PublicRouteData,
         mocked_internal_ingress_data: InternalIngressData,
         oauth_integration: int,
     ) -> None:
@@ -321,7 +338,7 @@ class TestOAuthIntegrationCreatedEvent:
             harness.charm.on.oauth_relation_created.emit(
                 harness.model.get_relation(OAUTH_INTEGRATION_NAME),
             )
-        expected_public_url = str(mocked_public_ingress_data.url)
+        expected_public_url = str(mocked_public_route_data.url)
         expected_admin_url = str(mocked_internal_ingress_data.admin_endpoint)
         mocked_provider.assert_called_once()
         assert mocked_provider.call_args == call(
@@ -524,8 +541,8 @@ class TestOAuthClientDeletedEvent:
         return mocker.patch("charm.DatabaseRequires.is_resource_created", return_value=True)
 
     @pytest.fixture(autouse=True)
-    def mocked_public_ingress_ready(self, mocker: MockerFixture) -> MagicMock:
-        return mocker.patch("charm.IngressPerAppRequirer.is_ready", return_value=True)
+    def mocked_public_route_ready(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.TraefikRouteRequirer.is_ready", return_value=True)
 
     @pytest.fixture(autouse=True)
     def migration_needed(self, mocker: MockerFixture, harness: Harness) -> None:
@@ -537,7 +554,7 @@ class TestOAuthClientDeletedEvent:
         self,
         harness: Harness,
         mocked_workload_service: MagicMock,
-        public_ingress_integration_data: PublicIngressData,
+        public_route_integration_data: PublicRouteData,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
@@ -559,7 +576,7 @@ class TestOAuthClientDeletedEvent:
         self,
         harness: Harness,
         mocked_workload_service: MagicMock,
-        public_ingress_integration_data: PublicIngressData,
+        public_route_integration_data: PublicRouteData,
         peer_integration: int,
         oauth_integration: int,
         caplog: pytest.LogCaptureFixture,
@@ -592,7 +609,7 @@ class TestOAuthClientDeletedEvent:
         self,
         harness: Harness,
         mocked_workload_service: MagicMock,
-        public_ingress_integration_data: PublicIngressData,
+        public_route_integration_data: PublicRouteData,
         peer_integration: int,
         oauth_integration: int,
     ) -> None:
@@ -624,8 +641,8 @@ class TestHolisticHandler:
         return mocker.patch("charm.DatabaseRequires.is_resource_created", return_value=True)
 
     @pytest.fixture(autouse=True)
-    def mocked_public_ingress_ready(self, mocker: MockerFixture) -> MagicMock:
-        return mocker.patch("charm.IngressPerAppRequirer.is_ready", return_value=True)
+    def mocked_public_route_ready(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("charm.TraefikRouteRequirer.is_ready", return_value=True)
 
     @pytest.fixture(autouse=True)
     def mocked_secrets(self, mocker: MockerFixture, harness: Harness) -> MagicMock:
@@ -645,10 +662,14 @@ class TestHolisticHandler:
         mocker.patch("charm.HydraCharm.dev_mode", new_callable=PropertyMock, return_value=False)
 
     @pytest.fixture
-    def non_secured_ingress(self, mocker: MockerFixture) -> None:
+    def non_secured_public_route(self, mocker: MockerFixture) -> None:
         mocker.patch(
-            "charm.PublicIngressData.secured", new_callable=PropertyMock, return_value=False
+            "charm.PublicRouteData.secured", new_callable=PropertyMock, return_value=False
         )
+
+    @pytest.fixture
+    def secured_public_route(self, mocker: MockerFixture) -> None:
+        mocker.patch("charm.PublicRouteData.secured", new_callable=PropertyMock, return_value=True)
 
     def test_when_container_not_connected(
         self,
@@ -680,48 +701,48 @@ class TestHolisticHandler:
             f"Missing integration {DATABASE_INTEGRATION_NAME}"
         )
 
-    def test_when_no_public_ingress_integration(
+    def test_when_no_public_route_integration(
         self,
         harness: Harness,
         mocked_event: MagicMock,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
-        with patch("charm.IngressPerAppRequirer.is_ready", return_value=False):
+        with patch("charm.TraefikRouteRequirer.is_ready", return_value=False):
             harness.charm._holistic_handler(mocked_event)
 
         mocked_pebble_service.update_config_file.assert_not_called()
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == BlockedStatus(
-            f"Missing required relation with {PUBLIC_INGRESS_INTEGRATION_NAME}"
+            f"Missing required relation with {PUBLIC_ROUTE_INTEGRATION_NAME}"
         )
 
-    def test_when_public_ingress_not_ready(
+    def test_when_public_route_not_ready(
         self,
         harness: Harness,
         mocked_event: MagicMock,
         mocked_pebble_service: MagicMock,
         peer_integration: int,
         login_ui_integration: int,
-        public_ingress_integration: MagicMock,
+        public_route_integration: MagicMock,
     ) -> None:
-        with patch("charm.IngressPerAppRequirer.is_ready", return_value=False):
+        with patch("charm.TraefikRouteRequirer.is_ready", return_value=False):
             harness.charm._holistic_handler(mocked_event)
 
         mocked_pebble_service.update_config_file.assert_not_called()
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus("Waiting for ingress to be ready")
 
-    def test_when_public_ingress_not_secured(
+    def test_when_public_route_not_secured(
         self,
         harness: Harness,
         mocked_event: MagicMock,
         mocked_pebble_service: MagicMock,
         non_dev_mode: None,
-        non_secured_ingress: None,
+        non_secured_public_route: None,
         peer_integration: int,
         login_ui_integration_data: None,
-        public_ingress_integration_data: None,
+        public_route_integration_data: None,
     ) -> None:
         harness.charm._holistic_handler(mocked_event)
 
@@ -736,7 +757,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: None,
+        secured_public_route: None,
+        public_route_integration_data: None,
         login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
@@ -752,7 +774,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: None,
+        secured_public_route: None,
+        public_route_integration_data: None,
         login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
@@ -772,7 +795,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: None,
+        secured_public_route: None,
+        public_route_integration_data: None,
         login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
@@ -789,7 +813,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: None,
+        secured_public_route: None,
+        public_route_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
         mocked_secrets: MagicMock,
@@ -805,7 +830,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: None,
+        secured_public_route: None,
+        public_route_integration_data: None,
         login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
@@ -825,7 +851,8 @@ class TestHolisticHandler:
         self,
         harness: Harness,
         mocked_event: MagicMock,
-        public_ingress_integration_data: None,
+        secured_public_route: None,
+        public_route_integration_data: None,
         login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
