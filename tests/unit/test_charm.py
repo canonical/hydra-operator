@@ -60,20 +60,12 @@ class TestPebbleReadyEvent:
 
 
 class TestLeaderElectedEvent:
-    @patch("charm.Secrets")
-    def test_when_secrets_ready(self, mocked_secrets: MagicMock, harness: Harness) -> None:
-        harness.charm.secrets = mocked_secrets
-        mocked_secrets.is_ready = True
-
+    def test_when_event_emitted(
+        self, harness: Harness, mocked_charm_holistic_handler: MagicMock
+    ) -> None:
         harness.set_leader(True)
 
-        mocked_secrets.__setitem__.assert_not_called()
-
-    def test_when_event_emitted(self, harness: Harness) -> None:
-        harness.set_leader(True)
-
-        secrets = harness.charm.secrets
-        assert secrets.is_ready is True
+        mocked_charm_holistic_handler.assert_called_once()
 
 
 class TestConfigChangeEvent:
@@ -194,19 +186,6 @@ class TestDatabaseCreatedEvent:
             f"Missing integration {PEER_INTEGRATION_NAME}"
         )
 
-    def test_when_secrets_not_ready(
-        self,
-        harness: Harness,
-        database_integration: int,
-        peer_integration: int,
-        mocked_secrets: MagicMock,
-    ) -> None:
-        mocked_secrets.is_ready = False
-        harness.charm.database_requirer.on.database_created.emit(
-            harness.model.get_relation(DATABASE_INTEGRATION_NAME)
-        )
-        assert harness.model.unit.status == WaitingStatus("Missing required secrets")
-
     @patch("charm.CommandLine.migrate")
     def test_when_migration_not_needed(
         self,
@@ -256,6 +235,7 @@ class TestDatabaseCreatedEvent:
         mocked_workload_service_version: MagicMock,
     ) -> None:
         harness.set_leader(True)
+        mocked_charm_holistic_handler.reset_mock()
 
         harness.charm.database_requirer.on.database_created.emit(
             harness.model.get_relation(DATABASE_INTEGRATION_NAME)
@@ -836,6 +816,8 @@ class TestHolisticHandler:
         peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
+        harness.set_leader(True)
+        mocked_pebble_service.update_config_file.reset_mock()
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.PebbleService.plan", side_effect=PebbleServiceError),
@@ -857,6 +839,8 @@ class TestHolisticHandler:
         peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
+        harness.set_leader(True)
+        mocked_pebble_service.reset_mock()
         with patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")):
             harness.charm._holistic_handler(mocked_event)
 
