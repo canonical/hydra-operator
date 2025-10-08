@@ -728,9 +728,14 @@ class HydraCharm(CharmBase):
             event.fail("Failed to list OAuth clients. Please check the juju logs")
             return
 
-        event.set_results({
-            str(idx): client.client_id for idx, client in enumerate(oauth_clients, start=1)
-        })
+        clients = [
+            client.model_dump(
+                by_alias=True, exclude_none=True, exclude={"client_secret"}, mode="json"
+            )
+            for client in oauth_clients
+        ]
+
+        event.set_results({"clients": json.dumps(clients)})
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
         if not self._workload_service.is_running:

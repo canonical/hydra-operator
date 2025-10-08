@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import functools
+import json
 import os
 import re
 import ssl
@@ -220,9 +221,10 @@ def hydra_unit(hydra_application: Application) -> Unit:
 
 
 @pytest_asyncio.fixture
-async def oauth_clients(hydra_unit: Unit) -> dict[str, str]:
+async def oauth_clients(hydra_unit: Unit) -> list[dict[str, str]]:
     action = await hydra_unit.run_action("list-oauth-clients")
-    return (await action.wait()).results
+    results = (await action.wait()).results
+    return json.loads(results["clients"])
 
 
 @pytest_asyncio.fixture
