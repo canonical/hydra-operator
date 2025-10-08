@@ -184,10 +184,12 @@ async def test_list_oauth_clients(oauth_clients: dict[str, str]) -> None:
 
 
 async def test_get_client(hydra_unit: Unit, oauth_clients: dict[str, str]) -> None:
+    clients = json.loads(oauth_clients["clients"])
+    client_id = clients[0]["client-id"]
     action = await hydra_unit.run_action(
         "get-oauth-client-info",
         **{
-            "client-id": oauth_clients["1"],
+            "client-id": client_id,
         },
     )
     res = (await action.wait()).results
@@ -200,10 +202,12 @@ async def test_update_client(
     oauth_clients: dict[str, str],
 ) -> None:
     redirect_uris = ["https://other.app/oauth/callback"]
+    clients = json.loads(oauth_clients["clients"])
+    client_id = clients[0]["client-id"]
     action = await hydra_unit.run_action(
         "update-oauth-client",
         **{
-            "client-id": oauth_clients["1"],
+            "client-id": client_id,
             "redirect-uris": redirect_uris,
         },
     )
@@ -227,7 +231,8 @@ async def test_get_opaque_access_token(
         timeout=5 * 60,
     )
 
-    client_id = oauth_clients["1"]
+    clients = json.loads(oauth_clients["clients"])
+    client_id = clients[0]["client-id"]
     resp = await client_credential_request(client_id, CLIENT_SECRET)
     assert resp.status_code == 200
     assert resp.json()["access_token"]
@@ -256,7 +261,8 @@ async def test_get_jwt_access_token(
         timeout=5 * 60,
     )
 
-    client_id = oauth_clients["1"]
+    clients = json.loads(oauth_clients["clients"])
+    client_id = clients[0]["client-id"]
     resp = await client_credential_request(client_id, CLIENT_SECRET)
     assert resp.status_code == 200
     assert resp.json()["access_token"]
@@ -274,7 +280,8 @@ async def test_get_jwt_access_token(
 async def test_revoke_oauth_client_access_tokens(
     hydra_unit: Unit, oauth_clients: dict[str, str]
 ) -> None:
-    client_id = oauth_clients["1"]
+    clients = json.loads(oauth_clients["clients"])
+    client_id = clients[0]["client-id"]
 
     action = await hydra_unit.run_action(
         "revoke-oauth-client-access-tokens",
@@ -288,7 +295,8 @@ async def test_revoke_oauth_client_access_tokens(
 
 
 async def test_delete_oauth_client(hydra_unit: Unit, oauth_clients: dict[str, str]) -> None:
-    client_id = oauth_clients["1"]
+    clients = json.loads(oauth_clients["clients"])
+    client_id = clients[0]["client-id"]
 
     action = await hydra_unit.run_action(
         "delete-oauth-client",
