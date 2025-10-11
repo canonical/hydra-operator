@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.0](https://github.com/canonical/hydra-operator/compare/v1.2.0...v2.0.0) (2025-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* drop public and admin ingresses, rewrite internal ingress to internal route
+
+### Features
+
+* introduce public-route relation ([1c1f1bc](https://github.com/canonical/hydra-operator/commit/1c1f1bc8b06857b2ba12bc5ce0baa63cfc6cf060))
+* update juju_application resource name ([70a330f](https://github.com/canonical/hydra-operator/commit/70a330f6b877830bf1b993c80862e98dfb243f5b))
+
+
+### Bug Fixes
+
+* add config to prepopulate the hydra keys ([3a9a459](https://github.com/canonical/hydra-operator/commit/3a9a45976e2a8f15c712292a0a4814f881e265f8))
+* add secret management actions ([0449395](https://github.com/canonical/hydra-operator/commit/0449395efd3b7f44a3e630f0c44e8c68fb800ad5))
+* drop public and admin ingresses, rewrite internal ingress to internal route ([d2b56d5](https://github.com/canonical/hydra-operator/commit/d2b56d52e0508b17100445797ec93e1a0268aa29))
+* update charm dependent libs ([81df22f](https://github.com/canonical/hydra-operator/commit/81df22f80796e26fa7cc292b78fe47fbaee6792a))
+* use terraform module in deployment ([31ed04a](https://github.com/canonical/hydra-operator/commit/31ed04a0059b5c4862f3ce233daa2b999456e502))
+
 ## [1.2.0](https://github.com/canonical/hydra-operator/compare/v1.1.8...v1.2.0) (2025-07-09)
 
 
