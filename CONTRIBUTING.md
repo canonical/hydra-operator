@@ -30,8 +30,8 @@ You can use the environments created by `tox` for development. It helps
 install `pre-commit`, `mypy` type checker, linting tools, and formatting tools.
 
 ```shell
-tox -e dev
-source .tox/dev/bin/activate
+tox devenv
+source venv/bin/activate
 ```
 
 ## Testing
