@@ -10,7 +10,7 @@ enhancements to this operator.
   explaining your use case.
 - If you would like to chat with us about charm development, you can reach
   us
-  at [Canonical Mattermost public channel](https://chat.charmhub.io/charmhub/channels/charm-dev)
+  at [Canonical Matrix public channel](https://matrix.to/#/!nRbdoDYxdQndEfzlJi:ubuntu.com?via=ubuntu.com&via=matrix.org)
   or [Discourse](https://discourse.charmhub.io/).
 - Familiarising yourself with
   the [Charmed Operator Framework](https://juju.is/docs/sdk) library
