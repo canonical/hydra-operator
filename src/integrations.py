@@ -22,6 +22,7 @@ from yarl import URL
 from configs import ServiceConfigs
 from constants import (
     ADMIN_PORT,
+    INTERNAL_ROUTE_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     POSTGRESQL_DSN_TEMPLATE,
     PUBLIC_PORT,
@@ -228,7 +229,7 @@ class InternalIngressData:
 
     @classmethod
     def _external_host(cls, requirer: TraefikRouteRequirer) -> str:
-        if not (relation := requirer._charm.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME)):
+        if not (relation := requirer._charm.model.get_relation(INTERNAL_ROUTE_INTEGRATION_NAME)):
             return
         if not relation.app:
             return
@@ -236,7 +237,7 @@ class InternalIngressData:
 
     @classmethod
     def _scheme(cls, requirer: TraefikRouteRequirer) -> str:
-        if not (relation := requirer._charm.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME)):
+        if not (relation := requirer._charm.model.get_relation(INTERNAL_ROUTE_INTEGRATION_NAME)):
             return
         if not relation.app:
             return

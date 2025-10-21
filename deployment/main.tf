@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     juju = {
-      version = ">= 0.15.0"
+      version = ">= 1.0.0"
       source  = "juju/juju"
     }
   }
@@ -58,7 +58,7 @@ provider "juju" {
 }
 
 data "juju_model" "model" {
-  name = var.model
+  uuid = var.model
 }
 
 module "application" {

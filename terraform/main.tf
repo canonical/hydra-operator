@@ -7,7 +7,6 @@
 
 resource "juju_application" "application" {
   name        = var.app_name
-  model       = var.model_name
   trust       = true
   config      = var.config
   constraints = var.constraints
@@ -19,11 +18,12 @@ resource "juju_application" "application" {
     channel  = var.channel
     revision = var.revision
   }
+  model_uuid = var.model_name
 }
 
 resource "juju_offer" "oauth_offer" {
   name             = "oauth-offer"
-  model            = var.model_name
   application_name = juju_application.application.name
-  endpoints         = ["oauth"]
+  endpoints        = ["oauth"]
+  model_uuid       = var.model_name
 }
