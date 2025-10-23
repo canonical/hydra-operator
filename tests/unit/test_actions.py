@@ -485,7 +485,27 @@ class TestListOAuthClientsAction:
 
         output = harness.run_action("list-oauth-clients")
         mocked_cli.assert_called_once()
-        assert output.results == {"1": "client_id"}
+        assert output.results["clients"]
+        clients = output.results["clients"]
+
+        assert json.loads(clients) == [
+            {
+                "redirect-uris": ["https://example.oidc.client/callback"],
+                "token-endpoint-auth-method": "client_secret_basic",
+                "grant-types": [
+                    "authorization_code",
+                    "refresh_token",
+                    "client_credentials",
+                    "urn:ietf:params:oauth:grant-type:device_code",
+                ],
+                "metadata": {},
+                "audience": [],
+                "contacts": [],
+                "client-id": "client_id",
+                "response-types": ["code"],
+                "scope": ["openid", "email", "offline_access"],
+            }
+        ]
 
 
 class TestRevokeOAuthClientAccessTokenAction:
