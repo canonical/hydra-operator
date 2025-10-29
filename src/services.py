@@ -1,12 +1,9 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import logging
 from collections import ChainMap
-from pathlib import PurePath
-from typing import Optional
 
-from ops import StoredState
 from ops.model import Container, ModelError, Unit
 from ops.pebble import Layer, LayerDict
 
@@ -90,51 +87,21 @@ class WorkloadService:
 class PebbleService:
     """Pebble service abstraction running in a Juju unit."""
 
-    def __init__(self, unit: Unit, stored_state: StoredState) -> None:
+    def __init__(self, unit: Unit) -> None:
         self._unit = unit
         self._container = unit.get_container(WORKLOAD_SERVICE)
         self._layer_dict: LayerDict = PEBBLE_LAYER_DICT
-        self.stored = stored_state
-        self.stored.set_default(
-            config_hash=None,
-        )
 
-    @property
-    def current_config_hash(self) -> Optional[int]:
-        return self.stored.config_hash
+    def plan(self, layer: Layer, config_file: ConfigFile) -> None:
+        self._container.add_layer(WORKLOAD_SERVICE, layer, combine=True)
 
-    def prepare_dir(self, path: str | PurePath) -> None:
-        if self._container.isdir(path):
-            return
-
-        self._container.make_dir(path=path, make_parents=True)
-
-    def update_config_file(self, content: "ConfigFile") -> bool:
-        """Update the config file.
-
-        Return True if the config changed.
-        """
-        config_hash = hash(content)
-        if config_hash == self.current_config_hash:
-            return False
-
-        self._container.push(CONFIG_FILE_NAME, str(content), make_dirs=True)
-        self.stored.config_hash = config_hash
-        return True
-
-    def _restart_service(self, restart: bool = False) -> None:
-        if restart:
-            self._container.restart(WORKLOAD_CONTAINER)
-        elif not self._container.get_service(WORKLOAD_CONTAINER).is_running():
-            self._container.start(WORKLOAD_CONTAINER)
-        else:
-            self._container.replan()
-
-    def plan(self, layer: Layer, restart: bool = True) -> None:
-        self._container.add_layer(WORKLOAD_CONTAINER, layer, combine=True)
-
+        current_config_file = ConfigFile.from_workload_container(self._container)
         try:
-            self._restart_service(restart)
+            if config_file != current_config_file:
+                self._container.push(CONFIG_FILE_NAME, config_file.content, make_dirs=True)
+                self._container.restart(WORKLOAD_SERVICE)
+            else:
+                self._container.replan()
         except Exception as e:
             raise PebbleServiceError(f"Pebble failed to restart the workload service. Error: {e}")
 
