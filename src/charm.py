@@ -33,7 +33,6 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from ops import StoredState
 from ops.charm import (
     ActionEvent,
     CharmBase,
@@ -98,8 +97,6 @@ logger = logging.getLogger(__name__)
 
 
 class HydraCharm(CharmBase):
-    _stored = StoredState()
-
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
 
@@ -110,7 +107,7 @@ class HydraCharm(CharmBase):
 
         self._container = self.unit.get_container(WORKLOAD_CONTAINER)
         self._workload_service = WorkloadService(self.unit)
-        self._pebble_service = PebbleService(self.unit, self._stored)
+        self._pebble_service = PebbleService(self.unit)
         self._cli = CommandLine(self._container)
 
         self.token_hook = HydraHookRequirer(
@@ -592,19 +589,17 @@ class HydraCharm(CharmBase):
                 self.unit.status = WaitingStatus("Waiting for secrets creation")
                 return
 
-        changed = self._pebble_service.update_config_file(
-            ConfigFile.from_sources(
-                self.hydra_secrets,
-                self.charm_config,
-                DatabaseConfig.load(self.database_requirer),
-                LoginUIEndpointData.load(self.login_ui_requirer),
-                public_route,
-                HydraHookData.load(self.token_hook),
-            ),
+        config_file = ConfigFile.from_sources(
+            self.hydra_secrets,
+            self.charm_config,
+            DatabaseConfig.load(self.database_requirer),
+            LoginUIEndpointData.load(self.login_ui_requirer),
+            public_route,
+            HydraHookData.load(self.token_hook),
         )
 
         try:
-            self._pebble_service.plan(self._pebble_layer, changed)
+            self._pebble_service.plan(self._pebble_layer, config_file)
         except PebbleServiceError as e:
             logger.error(f"Failed to start the service, please check the container logs: {e}")
             self.unit.status = BlockedStatus(
