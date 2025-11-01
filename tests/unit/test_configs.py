@@ -1,8 +1,10 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
+from ops.pebble import PathError
 from ops.testing import Harness
 
 from configs import CharmConfig, ConfigFile, ServiceConfigSource
@@ -65,3 +67,19 @@ class TestConfigFile:
             config_file = ConfigFile.from_sources(source, another_source)
 
         assert str(config_file) == f"{DEFAULT_OAUTH_SCOPES} and value1 and value2"
+
+    def test_from_workload_container(self, mocked_container: MagicMock) -> None:
+        mocked_file = MagicMock()
+        mocked_file.__enter__.return_value.read.return_value = "config file"
+        mocked_container.pull.return_value = mocked_file
+
+        config_file = ConfigFile.from_workload_container(mocked_container)
+
+        assert config_file.content == "config file"
+
+    def test_from_workload_container_non_existing_file(self, mocked_container: MagicMock) -> None:
+        mocked_container.pull.side_effect = PathError(kind="", message="")
+
+        config_file = ConfigFile.from_workload_container(mocked_container)
+
+        assert not config_file.content
