@@ -2,10 +2,11 @@
 # See LICENSE file for licensing details.
 
 from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, create_autospec, patch
 
 import pytest
 from ops import ModelError
+from ops.pebble import CheckInfo, CheckStatus
 from pytest_mock import MockerFixture
 
 from configs import ConfigFile
@@ -64,11 +65,14 @@ class TestWorkloadService:
         self, mocked_container: MagicMock, workload_service: WorkloadService
     ) -> None:
         mocked_service_info = MagicMock(is_running=MagicMock(return_value=True))
+        check = create_autospec(CheckInfo)
+        check.status = CheckStatus.UP
+        mocked_container.get_checks.return_value = {"ready": check}
 
         with patch.object(
             mocked_container, "get_service", return_value=mocked_service_info
         ) as get_service:
-            is_running = workload_service.is_running
+            is_running = workload_service.is_running()
 
         assert is_running is True
         get_service.assert_called_once_with(WORKLOAD_CONTAINER)
@@ -77,7 +81,7 @@ class TestWorkloadService:
         self, mocked_container: MagicMock, workload_service: WorkloadService
     ) -> None:
         with patch.object(mocked_container, "get_service", side_effect=ModelError):
-            is_running = workload_service.is_running
+            is_running = workload_service.is_running()
 
         assert is_running is False
 

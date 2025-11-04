@@ -4,6 +4,7 @@
 
 import pytest
 from ops.testing import Harness
+from pytest_mock import MockerFixture
 
 from constants import (
     COOKIE_SECRET_KEY,
@@ -62,7 +63,8 @@ class TestSecrets:
 
 class TestHydraSecrets:
     @pytest.fixture
-    def secrets(self, harness: Harness) -> HydraSecrets:
+    def secrets(self, harness: Harness, mocker: MockerFixture) -> HydraSecrets:
+        harness.disable_hooks()
         harness.set_leader(True)
         return HydraSecrets(Secrets(harness.charm.model))
 
