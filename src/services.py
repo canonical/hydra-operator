@@ -3,9 +3,10 @@
 
 import logging
 from collections import ChainMap
+from typing import Optional
 
 from ops.model import Container, ModelError, Unit
-from ops.pebble import Layer, LayerDict
+from ops.pebble import CheckStatus, Layer, LayerDict, ServiceInfo
 
 from cli import CommandLine
 from configs import ConfigFile
@@ -36,7 +37,13 @@ PEBBLE_LAYER_DICT = {
     "checks": {
         "ready": {
             "override": "replace",
+            "level": "ready",
             "http": {"url": f"http://localhost:{ADMIN_PORT}/health/ready"},
+        },
+        "alive": {
+            "override": "replace",
+            "level": "alive",
+            "http": {"url": f"http://localhost:{ADMIN_PORT}/health/alive"},
         },
     },
 }
@@ -70,14 +77,22 @@ class WorkloadService:
         else:
             self._version = version
 
-    @property
-    def is_running(self) -> bool:
+    def get_service(self) -> Optional[ServiceInfo]:
         try:
-            workload_service = self._container.get_service(WORKLOAD_CONTAINER)
-        except ModelError:
+            return self._container.get_service(WORKLOAD_SERVICE)
+        except (ModelError, ConnectionError) as e:
+            logger.error("Failed to get pebble service: %s", e)
+
+    def is_running(self) -> bool:
+        """Checks whether the service is running."""
+        if not (service := self.get_service()):
             return False
 
-        return workload_service.is_running()
+        if not service.is_running():
+            return False
+
+        c = self._container.get_checks().get("ready")
+        return c.status == CheckStatus.UP
 
     def open_port(self) -> None:
         self._unit.open_port(protocol="tcp", port=ADMIN_PORT)
