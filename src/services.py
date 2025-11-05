@@ -120,6 +120,12 @@ class PebbleService:
         except Exception as e:
             raise PebbleServiceError(f"Pebble failed to restart the workload service. Error: {e}")
 
+    def stop(self) -> None:
+        try:
+            self._container.stop(WORKLOAD_CONTAINER)
+        except Exception as e:
+            raise PebbleServiceError(f"Pebble failed to stop the workload service. Error: {e}")
+
     def render_pebble_layer(self, *env_var_sources: EnvVarConvertible) -> Layer:
         updated_env_vars = ChainMap(*(source.to_env_vars() for source in env_var_sources))  # type: ignore
         env_vars = {

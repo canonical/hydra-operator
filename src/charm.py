@@ -458,6 +458,10 @@ class HydraCharm(CharmBase):
     def _on_database_integration_broken(self, event: RelationBrokenEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
+        try:
+            self._pebble_service.stop()
+        except PebbleServiceError as e:
+            logger.error(f"Failed to stop the service, please check the container logs: {e}")
 
     def _on_oauth_integration_created(self, event: RelationEvent) -> None:
         if not (public_url := PublicRouteData.load(self.public_route).url):
@@ -569,34 +573,34 @@ class HydraCharm(CharmBase):
         self._clean_up_oauth_relation_clients()
 
     def _on_collect_status(self, event: CollectStatusEvent) -> None:  # noqa: C901
-        ready = True
+        config_ready = True
         if not (can_connect := container_connectivity(self)):
             event.add_status(WaitingStatus("Container is not connected yet"))
-            ready = False
+            config_ready = False
 
         if not peer_integration_exists(self):
             event.add_status(WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}"))
-            ready = False
+            config_ready = False
 
         if not database_integration_exists(self):
             event.add_status(BlockedStatus(f"Missing integration {DATABASE_INTEGRATION_NAME}"))
-            ready = False
+            config_ready = False
 
         if not public_route_integration_exists(self):
             event.add_status(
                 BlockedStatus(f"Missing required relation with {PUBLIC_ROUTE_INTEGRATION_NAME}")
             )
-            ready = False
+            config_ready = False
 
         if not login_ui_integration_exists(self):
             event.add_status(
                 BlockedStatus(f"Missing required relation with {LOGIN_UI_INTEGRATION_NAME}")
             )
-            ready = False
+            config_ready = False
 
         if not public_route_is_ready(self):
             event.add_status(WaitingStatus("Waiting for ingress to be ready"))
-            ready = False
+            config_ready = False
 
         if public_route_is_ready(self) and not public_route_is_secure(self):
             event.add_status(
@@ -605,15 +609,15 @@ class HydraCharm(CharmBase):
                     "Either enable HTTPS on public ingress or set 'dev' config to true for local development."
                 )
             )
-            ready = False
+            config_ready = False
 
         if not login_ui_is_ready(self):
             event.add_status(WaitingStatus("Waiting for login UI to be ready"))
-            ready = False
+            config_ready = False
 
         if not database_resource_is_created(self):
             event.add_status(WaitingStatus("Waiting for database creation"))
-            ready = False
+            config_ready = False
 
         if not migration_is_ready(self):
             event.add_status(
@@ -621,13 +625,13 @@ class HydraCharm(CharmBase):
                     "Waiting for migration to run, try running the `run-migration` action"
                 )
             )
-            ready = False
+            config_ready = False
 
         if not secrets_is_ready(self):
             event.add_status(WaitingStatus("Waiting for secrets creation"))
-            ready = False
+            config_ready = False
 
-        if can_connect and not self._workload_service.is_running() and ready:
+        if can_connect and not self._workload_service.is_running() and config_ready:
             event.add_status(
                 BlockedStatus(
                     f"Failed to start the service, please check the {WORKLOAD_CONTAINER} container logs"
