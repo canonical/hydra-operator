@@ -341,6 +341,9 @@ class HydraCharm(CharmBase):
         return self.charm_config["dev"]
 
     def _initialize_secrets(self) -> None:
+        if not self.unit.is_leader():
+            return
+
         if not (system_secrets := self.charm_config.get_system_secret()):
             self.hydra_secrets.add_secret_key(SYSTEM_SECRET, token_hex(16))
         else:
@@ -373,7 +376,6 @@ class HydraCharm(CharmBase):
         self._on_oauth_integration_created(event)
 
     def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
         self._on_internal_ingress_changed(event)
 
     def _on_internal_ingress_changed(self, event: RelationEvent) -> None:
@@ -383,6 +385,13 @@ class HydraCharm(CharmBase):
         self.internal_ingress._relation = event.relation
 
         if not self.internal_ingress.is_ready():
+            return
+        if event.relation.app is None:
+            # We need to defer the event as this is not handled in the holistic handler
+            # TODO(nsklikas): move this to the holistic handler and remove defer
+            # TODO2(nsklikas): Fix this in traefik_route lib, this is a bug and the lib should handle
+            # this in the `is_ready` method, like it does for the Provider side.
+            event.defer()
             return
 
         if self.unit.is_leader():
@@ -399,6 +408,14 @@ class HydraCharm(CharmBase):
         self.public_route._relation = event.relation
 
         if not self.public_route.is_ready():
+            return
+
+        if event.relation.app is None:
+            # We need to defer the event as this is not handled in the holistic handler
+            # TODO(nsklikas): move this to the holistic handler and remove defer
+            # TODO2(nsklikas): Fix this in traefik_route lib, this is a bug and the lib should handle
+            # this in the `is_ready` method, like it does for the Provider side.
+            event.defer()
             return
 
         if self.unit.is_leader():
@@ -548,10 +565,9 @@ class HydraCharm(CharmBase):
 
     def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
         logger.error(f"Failed to patch resource constraints: {event.message}")
-        self.unit.status = BlockedStatus(event.message)
 
     def _holistic_handler(self, event: HookEvent) -> None:
-        if not self.hydra_secrets.is_ready and self.unit.is_leader():
+        if not self.hydra_secrets.is_ready:
             self._initialize_secrets()
 
         if not all(condition(self) for condition in NOOP_CONDITIONS):
@@ -633,6 +649,8 @@ class HydraCharm(CharmBase):
         if not secrets_is_ready(self):
             event.add_status(WaitingStatus("Waiting for secrets creation"))
 
+        event.add_status(self.resources_patch.get_status())
+
         if can_connect and self._workload_service.is_failing():
             event.add_status(
                 BlockedStatus(
@@ -640,8 +658,7 @@ class HydraCharm(CharmBase):
                 )
             )
 
-        if can_connect and self._workload_service.is_running():
-            event.add_status(ActiveStatus())
+        event.add_status(ActiveStatus())
 
     def _on_run_migration(self, event: ActionEvent) -> None:
         if not self._workload_service.is_running:
