@@ -831,6 +831,7 @@ class TestHolisticHandler:
             patch("charm.NOOP_CONDITIONS", new=[]),
             patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.PebbleService.plan", side_effect=PebbleServiceError),
+            patch("charm.WorkloadService.is_failing", return_value=True),
         ):
             harness.charm._holistic_handler(mocked_event)
             harness.evaluate_status()

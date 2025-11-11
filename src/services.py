@@ -14,6 +14,7 @@ from constants import (
     ADMIN_PORT,
     CONFIG_FILE_NAME,
     HYDRA_SERVICE_COMMAND,
+    PEBBLE_READY_CHECK_NAME,
     PUBLIC_PORT,
     WORKLOAD_CONTAINER,
     WORKLOAD_SERVICE,
@@ -35,7 +36,7 @@ PEBBLE_LAYER_DICT = {
         }
     },
     "checks": {
-        "ready": {
+        PEBBLE_READY_CHECK_NAME: {
             "override": "replace",
             "level": "ready",
             "http": {"url": f"http://localhost:{ADMIN_PORT}/health/ready"},
@@ -91,8 +92,18 @@ class WorkloadService:
         if not service.is_running():
             return False
 
-        c = self._container.get_checks().get("ready")
+        c = self._container.get_checks().get(PEBBLE_READY_CHECK_NAME)
         return c.status == CheckStatus.UP
+
+    def is_failing(self) -> bool:
+        """Checks whether the service has crashed."""
+        if not self.get_service():
+            return False
+
+        if not (c := self._container.get_checks().get(PEBBLE_READY_CHECK_NAME)):
+            return False
+
+        return c.failures > 0
 
     def open_port(self) -> None:
         self._unit.open_port(protocol="tcp", port=ADMIN_PORT)
@@ -122,7 +133,7 @@ class PebbleService:
 
     def stop(self) -> None:
         try:
-            self._container.stop(WORKLOAD_CONTAINER)
+            self._container.stop(WORKLOAD_SERVICE)
         except Exception as e:
             raise PebbleServiceError(f"Pebble failed to stop the workload service. Error: {e}")
 

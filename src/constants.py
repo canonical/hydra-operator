@@ -7,6 +7,7 @@ from string import Template
 POSTGRESQL_DSN_TEMPLATE = Template("postgres://$username:$password@$endpoint/$database")
 WORKLOAD_CONTAINER = "hydra"
 WORKLOAD_SERVICE = "hydra"
+PEBBLE_READY_CHECK_NAME = "ready"
 COOKIE_SECRET_KEY = "cookie"
 SYSTEM_SECRET_KEY = "system"
 COOKIE_SECRET_LABEL = "cookiesecret"

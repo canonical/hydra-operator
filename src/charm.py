@@ -33,6 +33,7 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
+from ops import PebbleCheckFailedEvent, PebbleCheckRecoveredEvent
 from ops.charm import (
     ActionEvent,
     CharmBase,
@@ -61,6 +62,7 @@ from constants import (
     LOGGING_RELATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
+    PEBBLE_READY_CHECK_NAME,
     PEER_INTEGRATION_NAME,
     PROMETHEUS_SCRAPE_INTEGRATION_NAME,
     PUBLIC_ROUTE_INTEGRATION_NAME,
@@ -190,6 +192,10 @@ class HydraCharm(CharmBase):
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.hydra_pebble_check_failed, self._on_pebble_check_failed)
+        self.framework.observe(
+            self.on.hydra_pebble_check_recovered, self._on_pebble_check_recovered
+        )
         self.framework.observe(self.on.update_status, self._holistic_handler)
         self.framework.observe(self.on.leader_elected, self._holistic_handler)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -572,35 +578,36 @@ class HydraCharm(CharmBase):
 
         self._clean_up_oauth_relation_clients()
 
+    def _on_pebble_check_failed(self, event: PebbleCheckFailedEvent) -> None:
+        if event.info.name == PEBBLE_READY_CHECK_NAME:
+            logger.warning("The service is not running")
+
+    def _on_pebble_check_recovered(self, event: PebbleCheckRecoveredEvent) -> None:
+        if event.info.name == PEBBLE_READY_CHECK_NAME:
+            logger.info("The service is online again")
+
     def _on_collect_status(self, event: CollectStatusEvent) -> None:  # noqa: C901
-        config_ready = True
         if not (can_connect := container_connectivity(self)):
             event.add_status(WaitingStatus("Container is not connected yet"))
-            config_ready = False
 
         if not peer_integration_exists(self):
             event.add_status(WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}"))
-            config_ready = False
 
         if not database_integration_exists(self):
             event.add_status(BlockedStatus(f"Missing integration {DATABASE_INTEGRATION_NAME}"))
-            config_ready = False
 
         if not public_route_integration_exists(self):
             event.add_status(
                 BlockedStatus(f"Missing required relation with {PUBLIC_ROUTE_INTEGRATION_NAME}")
             )
-            config_ready = False
 
         if not login_ui_integration_exists(self):
             event.add_status(
                 BlockedStatus(f"Missing required relation with {LOGIN_UI_INTEGRATION_NAME}")
             )
-            config_ready = False
 
         if not public_route_is_ready(self):
             event.add_status(WaitingStatus("Waiting for ingress to be ready"))
-            config_ready = False
 
         if public_route_is_ready(self) and not public_route_is_secure(self):
             event.add_status(
@@ -609,15 +616,12 @@ class HydraCharm(CharmBase):
                     "Either enable HTTPS on public ingress or set 'dev' config to true for local development."
                 )
             )
-            config_ready = False
 
         if not login_ui_is_ready(self):
             event.add_status(WaitingStatus("Waiting for login UI to be ready"))
-            config_ready = False
 
         if not database_resource_is_created(self):
             event.add_status(WaitingStatus("Waiting for database creation"))
-            config_ready = False
 
         if not migration_is_ready(self):
             event.add_status(
@@ -625,20 +629,19 @@ class HydraCharm(CharmBase):
                     "Waiting for migration to run, try running the `run-migration` action"
                 )
             )
-            config_ready = False
 
         if not secrets_is_ready(self):
             event.add_status(WaitingStatus("Waiting for secrets creation"))
-            config_ready = False
 
-        if can_connect and not self._workload_service.is_running() and config_ready:
+        if can_connect and self._workload_service.is_failing():
             event.add_status(
                 BlockedStatus(
                     f"Failed to start the service, please check the {WORKLOAD_CONTAINER} container logs"
                 )
             )
 
-        event.add_status(ActiveStatus())
+        if can_connect and self._workload_service.is_running():
+            event.add_status(ActiveStatus())
 
     def _on_run_migration(self, event: ActionEvent) -> None:
         if not self._workload_service.is_running:
