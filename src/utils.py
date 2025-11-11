@@ -8,6 +8,7 @@ from ops.charm import CharmBase
 
 from constants import (
     DATABASE_INTEGRATION_NAME,
+    INTERNAL_ROUTE_INTEGRATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PUBLIC_ROUTE_INTEGRATION_NAME,
@@ -48,11 +49,12 @@ def integration_existence(integration_name: str) -> Condition:
 peer_integration_exists = integration_existence(PEER_INTEGRATION_NAME)
 database_integration_exists = integration_existence(DATABASE_INTEGRATION_NAME)
 public_route_integration_exists = integration_existence(PUBLIC_ROUTE_INTEGRATION_NAME)
+internal_route_integration_exists = integration_existence(INTERNAL_ROUTE_INTEGRATION_NAME)
 login_ui_integration_exists = integration_existence(LOGIN_UI_INTEGRATION_NAME)
 
 
 def public_route_is_ready(charm: "HydraCharm") -> bool:
-    return charm.public_route.is_ready()
+    return PublicRouteData.load(charm.public_route).is_ready()
 
 
 def login_ui_is_ready(charm: "HydraCharm") -> bool:
