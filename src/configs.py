@@ -1,14 +1,15 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import hashlib
 from collections import ChainMap
 from typing import Any, Mapping, Optional, Protocol, TypeAlias
 
 from jinja2 import Template
-from ops import ConfigData, Model, SecretNotFoundError
+from ops import ConfigData, Container, Model, SecretNotFoundError
+from ops.pebble import PathError
+from typing_extensions import Self
 
-from constants import DEFAULT_OAUTH_SCOPES
+from constants import CONFIG_FILE_NAME, DEFAULT_OAUTH_SCOPES
 from env_vars import EnvVars
 from exceptions import InvalidHydraConfig
 
@@ -32,8 +33,8 @@ class CharmConfig:
     def __getitem__(self, key: str) -> Any:
         return self._config.get(key)
 
-    def _get_secret(self, id) -> dict[str, str]:
-        secret = self._model.get_secret(id=id)
+    def _get_secret(self, secret_id: str) -> dict[str, str]:
+        secret = self._model.get_secret(id=secret_id)
         return secret.get_content(refresh=True)
 
     def get_system_secret(self) -> Optional[list[str]]:
@@ -98,10 +99,19 @@ class ConfigFile:
 
         return cls(rendered)
 
-    def __hash__(self) -> int:
-        # Do not use the builtin `hash` function, the salt changes on every interpreter
-        # run making it useless in charms
-        return int(hashlib.md5(self.content.encode()).hexdigest(), 16)
+    @classmethod
+    def from_workload_container(cls, workload_container: Container) -> Self:
+        try:
+            with workload_container.pull(CONFIG_FILE_NAME, encoding="utf-8") as config_file:
+                return cls(config_file.read())
+        except PathError:
+            return cls("")
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, ConfigFile):
+            return NotImplemented
+
+        return self.content == other.content
 
     def __str__(self) -> str:
         return self.content
