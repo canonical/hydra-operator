@@ -23,5 +23,6 @@ jobs:
     uses: canonical/identity-team/.github/workflows/charm-pull-request.yaml@2a4ae518f9c792dcdf14d05f8d86e3d72e160d96 # v1.9.0
     with:
       container-name: "hydra"
-      use-charmcraftcache: true
+      # TODO: Switch to true once hydra is re-added to charmcraftcache-hub
+      use-charmcraftcache: false
       node-size: large

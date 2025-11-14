@@ -80,8 +80,7 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
     )
 
     await ops_test.model.integrate(f"{TRAEFIK_PUBLIC_APP}:certificates", f"{CA_APP}:certificates")
-    # await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:public-route") # TODO @shipperizer change this once login-ui is g2g
-    await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:ingress")
+    await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:public-route")
 
     await ops_test.model.deploy(
         application_name=HYDRA_APP,
