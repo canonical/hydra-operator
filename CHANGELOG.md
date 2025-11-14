@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/canonical/hydra-operator/compare/v1.2.0...v1.3.0) (2025-09-08)
+
+
+### Features
+
+* update juju_application resource name ([70a330f](https://github.com/canonical/hydra-operator/commit/70a330f6b877830bf1b993c80862e98dfb243f5b))
+
+
+### Bug Fixes
+
+* update charm dependent libs ([81df22f](https://github.com/canonical/hydra-operator/commit/81df22f80796e26fa7cc292b78fe47fbaee6792a))
+* use terraform module in deployment ([31ed04a](https://github.com/canonical/hydra-operator/commit/31ed04a0059b5c4862f3ce233daa2b999456e502))
+
 ## [1.2.0](https://github.com/canonical/hydra-operator/compare/v1.1.8...v1.2.0) (2025-07-09)
 
 
