@@ -81,7 +81,7 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
     )
     await ops_test.model.deploy(
         LOGIN_UI_APP,
-        channel="latest/edge",
+        channel="0.3/edge",
         trust=True,
     )
     await ops_test.model.integrate(f"{TRAEFIK_PUBLIC_APP}:certificates", f"{CA_APP}:certificates")
