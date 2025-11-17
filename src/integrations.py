@@ -289,6 +289,9 @@ class PublicRouteData:
     url: URL = URL()
     config: dict = field(default_factory=dict)
 
+    def is_ready(self) -> bool:
+        return bool(self.url)
+
     @classmethod
     def _external_host(cls, requirer: TraefikRouteRequirer) -> str:
         if not (relation := requirer._charm.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME)):
@@ -309,8 +312,12 @@ class PublicRouteData:
     def load(cls, requirer: TraefikRouteRequirer) -> "PublicRouteData":
         model, app = requirer._charm.model.name, requirer._charm.app.name
         external_host = cls._external_host(requirer)
-        scheme = cls._scheme(requirer)
 
+        if not external_host:
+            logger.error("External hostname is not set on the ingress provider")
+            return cls()
+
+        scheme = cls._scheme(requirer)
         external_endpoint = f"{scheme}://{external_host}"
 
         # template could have use PathPrefixRegexp but going for a simple one right now
@@ -325,10 +332,6 @@ class PublicRouteData:
                 external_host=external_host,
             )
         )
-
-        if not external_host:
-            logger.error("External hostname is not set on the ingress provider")
-            return cls()
 
         return cls(
             url=URL(external_endpoint),

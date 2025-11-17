@@ -3,9 +3,10 @@
 
 import logging
 from collections import ChainMap
+from typing import Optional
 
 from ops.model import Container, ModelError, Unit
-from ops.pebble import Layer, LayerDict
+from ops.pebble import CheckStatus, Layer, LayerDict, ServiceInfo
 
 from cli import CommandLine
 from configs import ConfigFile
@@ -13,6 +14,7 @@ from constants import (
     ADMIN_PORT,
     CONFIG_FILE_NAME,
     HYDRA_SERVICE_COMMAND,
+    PEBBLE_READY_CHECK_NAME,
     PUBLIC_PORT,
     WORKLOAD_CONTAINER,
     WORKLOAD_SERVICE,
@@ -34,9 +36,15 @@ PEBBLE_LAYER_DICT = {
         }
     },
     "checks": {
-        "ready": {
+        PEBBLE_READY_CHECK_NAME: {
             "override": "replace",
+            "level": "ready",
             "http": {"url": f"http://localhost:{ADMIN_PORT}/health/ready"},
+        },
+        "alive": {
+            "override": "replace",
+            "level": "alive",
+            "http": {"url": f"http://localhost:{ADMIN_PORT}/health/alive"},
         },
     },
 }
@@ -70,14 +78,32 @@ class WorkloadService:
         else:
             self._version = version
 
-    @property
-    def is_running(self) -> bool:
+    def get_service(self) -> Optional[ServiceInfo]:
         try:
-            workload_service = self._container.get_service(WORKLOAD_CONTAINER)
-        except ModelError:
+            return self._container.get_service(WORKLOAD_SERVICE)
+        except (ModelError, ConnectionError) as e:
+            logger.error("Failed to get pebble service: %s", e)
+
+    def is_running(self) -> bool:
+        """Checks whether the service is running."""
+        if not (service := self.get_service()):
             return False
 
-        return workload_service.is_running()
+        if not service.is_running():
+            return False
+
+        c = self._container.get_checks().get(PEBBLE_READY_CHECK_NAME)
+        return c.status == CheckStatus.UP
+
+    def is_failing(self) -> bool:
+        """Checks whether the service has crashed."""
+        if not self.get_service():
+            return False
+
+        if not (c := self._container.get_checks().get(PEBBLE_READY_CHECK_NAME)):
+            return False
+
+        return c.failures > 0
 
     def open_port(self) -> None:
         self._unit.open_port(protocol="tcp", port=ADMIN_PORT)
@@ -104,6 +130,12 @@ class PebbleService:
                 self._container.replan()
         except Exception as e:
             raise PebbleServiceError(f"Pebble failed to restart the workload service. Error: {e}")
+
+    def stop(self) -> None:
+        try:
+            self._container.stop(WORKLOAD_SERVICE)
+        except Exception as e:
+            raise PebbleServiceError(f"Pebble failed to stop the workload service. Error: {e}")
 
     def render_pebble_layer(self, *env_var_sources: EnvVarConvertible) -> Layer:
         updated_env_vars = ChainMap(*(source.to_env_vars() for source in env_var_sources))  # type: ignore

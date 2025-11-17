@@ -628,13 +628,11 @@ class TestHolisticHandler:
         mocked = mocker.patch("charm.Secrets", autospec=True)
         mocked.is_ready = True
         harness.charm.secrets = mocked
-        return mocked
 
-    @pytest.fixture(autouse=True)
-    def migration_needed(self, mocker: MockerFixture, harness: Harness) -> None:
-        mocker.patch(
-            "charm.HydraCharm.migration_needed", new_callable=PropertyMock, return_value=False
-        )
+        mocked = mocker.patch("charm.HydraSecrets", autospec=True)
+        mocked.is_ready = True
+        harness.charm.hydra_secrets = mocked
+        return mocked
 
     @pytest.fixture
     def non_dev_mode(self, mocker: MockerFixture) -> None:
@@ -643,8 +641,12 @@ class TestHolisticHandler:
     @pytest.fixture
     def non_secured_public_route(self, mocker: MockerFixture) -> None:
         mocker.patch(
-            "charm.PublicRouteData.secured", new_callable=PropertyMock, return_value=False
+            "utils.PublicRouteData.secured", new_callable=PropertyMock, return_value=False
         )
+
+    @pytest.fixture
+    def migration_is_ready(self, mocker: MockerFixture) -> None:
+        mocker.patch("charm.migration_is_ready", return_value=True)
 
     @pytest.fixture
     def secured_public_route(self, mocker: MockerFixture) -> None:
@@ -655,10 +657,15 @@ class TestHolisticHandler:
         harness: Harness,
         mocked_event: MagicMock,
         mocked_pebble_service: MagicMock,
+        secured_public_route: None,
+        peer_integration: int,
+        login_ui_integration_data: None,
+        public_route_integration_data: None,
     ) -> None:
         harness.set_can_connect(WORKLOAD_CONTAINER, False)
 
         harness.charm._holistic_handler(mocked_event)
+        harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus("Container is not connected yet")
@@ -672,6 +679,7 @@ class TestHolisticHandler:
     ) -> None:
         with patch("charm.database_integration_exists", return_value=False):
             harness.charm._holistic_handler(mocked_event)
+            harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == BlockedStatus(
@@ -687,6 +695,7 @@ class TestHolisticHandler:
     ) -> None:
         with patch("charm.TraefikRouteRequirer.is_ready", return_value=False):
             harness.charm._holistic_handler(mocked_event)
+            harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == BlockedStatus(
@@ -704,6 +713,7 @@ class TestHolisticHandler:
     ) -> None:
         with patch("charm.TraefikRouteRequirer.is_ready", return_value=False):
             harness.charm._holistic_handler(mocked_event)
+            harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus("Waiting for ingress to be ready")
@@ -720,6 +730,7 @@ class TestHolisticHandler:
         public_route_integration_data: None,
     ) -> None:
         harness.charm._holistic_handler(mocked_event)
+        harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == BlockedStatus(
@@ -739,6 +750,7 @@ class TestHolisticHandler:
     ) -> None:
         with patch("charm.DatabaseRequires.is_resource_created", return_value=False):
             harness.charm._holistic_handler(mocked_event)
+            harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus("Waiting for database creation")
@@ -752,11 +764,11 @@ class TestHolisticHandler:
         login_ui_integration_data: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
+        mocked_secrets: MagicMock,
     ) -> None:
-        with patch(
-            "charm.HydraCharm.migration_needed", new_callable=PropertyMock, return_value=True
-        ):
+        with patch("charm.migration_is_ready", return_value=False):
             harness.charm._holistic_handler(mocked_event)
+            harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus(
@@ -770,6 +782,7 @@ class TestHolisticHandler:
         secured_public_route: None,
         public_route_integration_data: None,
         login_ui_integration_data: None,
+        migration_is_ready: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
         mocked_secrets: MagicMock,
@@ -777,6 +790,7 @@ class TestHolisticHandler:
         mocked_secrets.is_ready = False
 
         harness.charm._holistic_handler(mocked_event)
+        harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus("Waiting for secrets creation")
@@ -793,6 +807,7 @@ class TestHolisticHandler:
         login_ui_integration: int,
     ) -> None:
         harness.charm._holistic_handler(mocked_event)
+        harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_not_called()
         assert harness.charm.unit.status == WaitingStatus("Waiting for login UI to be ready")
@@ -804,19 +819,25 @@ class TestHolisticHandler:
         secured_public_route: None,
         public_route_integration_data: None,
         login_ui_integration_data: None,
+        migration_is_ready: None,
         peer_integration: int,
+        mocked_secrets: MagicMock,
         mocked_pebble_service: MagicMock,
     ) -> None:
         harness.set_leader(True)
 
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
+            patch("charm.NOOP_CONDITIONS", new=[]),
+            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.PebbleService.plan", side_effect=PebbleServiceError),
+            patch("charm.WorkloadService.is_failing", return_value=True),
         ):
             harness.charm._holistic_handler(mocked_event)
+            harness.evaluate_status()
 
         assert harness.charm.unit.status == BlockedStatus(
-            f"Failed to restart the service, please check the {WORKLOAD_CONTAINER} logs"
+            f"Failed to start the service, please check the {WORKLOAD_CONTAINER} container logs"
         )
 
     def test_when_succeeds(
@@ -826,13 +847,20 @@ class TestHolisticHandler:
         secured_public_route: None,
         public_route_integration_data: None,
         login_ui_integration_data: None,
+        migration_is_ready: None,
         peer_integration: int,
         mocked_pebble_service: MagicMock,
     ) -> None:
         harness.set_leader(True)
         mocked_pebble_service.reset_mock()
-        with patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")):
+        with (
+            patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
+            patch("charm.NOOP_CONDITIONS", new=[]),
+            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
+            patch("charm.WorkloadService.is_running", return_value=True),
+        ):
             harness.charm._holistic_handler(mocked_event)
+            harness.evaluate_status()
 
         mocked_pebble_service.plan.assert_called_once()
         assert harness.charm.unit.status == ActiveStatus()
