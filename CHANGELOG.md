@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.0.0](https://github.com/canonical/hydra-operator/compare/v1.2.0...v2.0.0) (2025-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* drop public and admin ingresses, rewrite internal ingress to internal route
+
+### Features
+
+* introduce public-route relation ([1c1f1bc](https://github.com/canonical/hydra-operator/commit/1c1f1bc8b06857b2ba12bc5ce0baa63cfc6cf060))
+* List all details except secrets in `list-oauth-clients` output ([e5fbd2a](https://github.com/canonical/hydra-operator/commit/e5fbd2a5127a844038657b6a53d04757709d0d28))
+* List all details except secrets in `list-oauth-clients` output ([3b10539](https://github.com/canonical/hydra-operator/commit/3b105392f0338c044a34ac547c64eb75575e15c9))
+* update juju_application resource name ([70a330f](https://github.com/canonical/hydra-operator/commit/70a330f6b877830bf1b993c80862e98dfb243f5b))
+
+
+### Bug Fixes
+
+* add collect_status handler ([e76ba94](https://github.com/canonical/hydra-operator/commit/e76ba94956625ff15d8a6168d75b6cd87dfdbe9a))
+* add config to prepopulate the hydra keys ([3a9a459](https://github.com/canonical/hydra-operator/commit/3a9a45976e2a8f15c712292a0a4814f881e265f8))
+* add health check handlers ([ce8c745](https://github.com/canonical/hydra-operator/commit/ce8c7454d38821e4c456573c9c2df7188099f3c6))
+* add secret management actions ([0449395](https://github.com/canonical/hydra-operator/commit/0449395efd3b7f44a3e630f0c44e8c68fb800ad5))
+* drop public and admin ingresses, rewrite internal ingress to internal route ([d2b56d5](https://github.com/canonical/hydra-operator/commit/d2b56d52e0508b17100445797ec93e1a0268aa29))
+* improve route integration handling logic ([28392b5](https://github.com/canonical/hydra-operator/commit/28392b5778bf380f911eadc66ffbdc7452489ef1))
+* remove the storedstate to fix the missing config file issue when pod gets recreated ([2c492ce](https://github.com/canonical/hydra-operator/commit/2c492ceb9020ab9642037f411988602d2b549496))
+* remove the storedstate to fix the missing config file issue when the pod gets recreated ([ba710b8](https://github.com/canonical/hydra-operator/commit/ba710b85751466055eb6012a7bde276dfc977364))
+* stop service when database is gone ([8d3f400](https://github.com/canonical/hydra-operator/commit/8d3f400238857d79e6eb7d3221cf9c845a7a1738))
+* switch to use -route relations in the tf module ([5856b84](https://github.com/canonical/hydra-operator/commit/5856b846f28df58a4a8d7153940629ab872ab1dc))
+* update charm dependent libs ([81df22f](https://github.com/canonical/hydra-operator/commit/81df22f80796e26fa7cc292b78fe47fbaee6792a))
+* upgrade tf module to use 1.0.0 syntax ([9e1acf2](https://github.com/canonical/hydra-operator/commit/9e1acf26770d3f29fb865f702c0dc06c5da7c9f9))
+* use owner and name for model ds ([7c3a403](https://github.com/canonical/hydra-operator/commit/7c3a4036cbfa552242576ccd00a022aa84c24764))
+* use proper intergration name for internal route ([68168de](https://github.com/canonical/hydra-operator/commit/68168de505c97fe9049b6a8bba3b2d7dda7cc78f))
+* use terraform module in deployment ([31ed04a](https://github.com/canonical/hydra-operator/commit/31ed04a0059b5c4862f3ce233daa2b999456e502))
+
 ## [1.2.0](https://github.com/canonical/hydra-operator/compare/v1.1.8...v1.2.0) (2025-07-09)
 
 
