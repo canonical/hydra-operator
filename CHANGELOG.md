@@ -30,7 +30,7 @@
 * update charm dependent libs ([81df22f](https://github.com/canonical/hydra-operator/commit/81df22f80796e26fa7cc292b78fe47fbaee6792a))
 * upgrade tf module to use 1.0.0 syntax ([9e1acf2](https://github.com/canonical/hydra-operator/commit/9e1acf26770d3f29fb865f702c0dc06c5da7c9f9))
 * use owner and name for model ds ([7c3a403](https://github.com/canonical/hydra-operator/commit/7c3a4036cbfa552242576ccd00a022aa84c24764))
-* use proper intergration name for internal route ([68168de](https://github.com/canonical/hydra-operator/commit/68168de505c97fe9049b6a8bba3b2d7dda7cc78f))
+* use proper integration name for internal route ([68168de](https://github.com/canonical/hydra-operator/commit/68168de505c97fe9049b6a8bba3b2d7dda7cc78f))
 * use terraform module in deployment ([31ed04a](https://github.com/canonical/hydra-operator/commit/31ed04a0059b5c4862f3ce233daa2b999456e502))
 
 ## [1.2.0](https://github.com/canonical/hydra-operator/compare/v1.1.8...v1.2.0) (2025-07-09)
