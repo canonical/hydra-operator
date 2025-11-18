@@ -7,7 +7,7 @@
       "bump-patch-for-minor-pre-major": false,
       "draft": false,
       "prerelease": false,
-      "component": "track/0.3",
+      "component": "track/0.4",
       "pull-request-title-pattern": "ci: release ${component} ${version}"
     }
   },
