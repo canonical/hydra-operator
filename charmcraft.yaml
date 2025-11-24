@@ -167,7 +167,7 @@ actions:
         description: A list of contacts for the client
         type: array
       metadata:
-        description: A comma-separated string of <key>=<value> with extra information relevant for the client, eg dept=IT
+        description: A space-separated string of <key>=<value> with extra information relevant for the client, eg "dept=IT team=alpha". Keys and values containing spaces should be quoted.
         type: string
       audience:
         description: A list with the allowed audience for the client
