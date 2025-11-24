@@ -321,7 +321,7 @@ class TestUpdateOAuthClientAction:
                 "redirect-uris": ["https://example.ory.com"],
                 "contacts": ["test@canonical.com", "me@me.com"],
                 "client-uri": "https://example.com",
-                "metadata": "foo=bar,bar=foo",
+                "metadata": "foo=bar bar=foo",
                 "name": "test-client",
             },
         )
