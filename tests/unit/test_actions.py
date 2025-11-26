@@ -9,6 +9,7 @@ from ops.testing import ActionFailed, Harness
 from pytest_mock import MockerFixture
 
 from cli import OAuthClient
+from constants import WORKLOAD_CONTAINER
 from exceptions import MigrationError
 from integrations import DatabaseConfig
 
@@ -26,21 +27,18 @@ class TestRunMigrationAction:
     def mocked_cli(self, mocker: MockerFixture) -> MagicMock:
         return mocker.patch("charm.CommandLine.migrate")
 
-    def test_when_hydra_service_not_ready(
+    def test_when_container_not_connected(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
         mocked_cli: MagicMock,
         peer_integration: int,
     ) -> None:
-        mocked_workload_service.is_running = False
+        harness.set_can_connect(WORKLOAD_CONTAINER, False)
+
         try:
             harness.run_action("run-migration")
         except ActionFailed as err:
-            assert (
-                "Service is not ready. Please re-run the action when the charm is active"
-                in err.message
-            )
+            assert "Container is not connected yet" in err.message
 
         mocked_cli.assert_not_called()
 

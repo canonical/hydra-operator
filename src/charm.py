@@ -661,8 +661,8 @@ class HydraCharm(CharmBase):
         event.add_status(ActiveStatus())
 
     def _on_run_migration(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
-            event.fail("Service is not ready. Please re-run the action when the charm is active")
+        if not container_connectivity(self):
+            event.fail("Container is not connected yet")
             return
 
         if not peer_integration_exists(self):
