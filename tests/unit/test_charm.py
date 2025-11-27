@@ -333,16 +333,16 @@ class TestOAuthIntegrationCreatedEvent:
 
 
 class TestOAuthClientCreatedEvent:
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_oauth_client_config: dict,
         peer_integration: int,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = False
 
         with patch("charm.CommandLine.create_oauth_client") as mocked_cli:
             harness.charm.oauth_provider.on.client_created.emit(
@@ -355,12 +355,11 @@ class TestOAuthClientCreatedEvent:
     def test_when_peer_integration_not_exists(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_oauth_client_config: dict,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
 
         with patch("charm.CommandLine.create_oauth_client") as mocked_cli:
             harness.charm.oauth_provider.on.client_created.emit(
@@ -375,14 +374,13 @@ class TestOAuthClientCreatedEvent:
     def test_when_oauth_client_creation_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_oauth_client_config: dict,
         peer_integration: int,
         oauth_integration: int,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
 
         with (
             caplog.at_level("ERROR"),
@@ -407,13 +405,12 @@ class TestOAuthClientCreatedEvent:
     def test_when_succeeds(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_oauth_client_config: dict,
         peer_integration: int,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
 
         with (
             patch(
@@ -434,13 +431,12 @@ class TestOAuthClientCreatedEvent:
     def test_client_created_emitted_twice(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_oauth_client_config: dict,
         peer_integration: int,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
 
         with (
             patch(
@@ -463,15 +459,15 @@ class TestOAuthClientCreatedEvent:
 
 
 class TestOAuthClientChangedEvent:
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_oauth_client_config: dict,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = False
 
         with patch("charm.CommandLine.update_oauth_client") as mocked_cli:
             harness.charm.oauth_provider.on.client_changed.emit(
@@ -484,13 +480,12 @@ class TestOAuthClientChangedEvent:
     def test_when_oauth_client_update_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_oauth_client_config: dict,
         oauth_integration: int,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
 
         with (
             caplog.at_level("ERROR"),
@@ -532,12 +527,11 @@ class TestOAuthClientDeletedEvent:
     def test_when_peer_integration_not_exists(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         public_route_integration_data: PublicRouteData,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
 
         with patch(
             "charm.CommandLine.delete_oauth_client", return_value="client_id"
@@ -554,14 +548,13 @@ class TestOAuthClientDeletedEvent:
     def test_when_oauth_client_deletion_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         public_route_integration_data: PublicRouteData,
         peer_integration: int,
         oauth_integration: int,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
         harness.charm.peer_data[f"oauth_{oauth_integration}"] = {"client_id": "client_id"}
         harness.model.get_relation(OAUTH_INTEGRATION_NAME, oauth_integration).active = False
 
@@ -587,13 +580,12 @@ class TestOAuthClientDeletedEvent:
     def test_when_event_emitted(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         public_route_integration_data: PublicRouteData,
         peer_integration: int,
         oauth_integration: int,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
         harness.charm.peer_data[f"oauth_{oauth_integration}"] = {"client_id": "client_id"}
         harness.model.get_relation(OAUTH_INTEGRATION_NAME, oauth_integration).active = False
 

@@ -508,7 +508,7 @@ class HydraCharm(CharmBase):
 
     @leader_unit
     def _on_oauth_client_created(self, event: ClientCreatedEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             event.defer()
             return
@@ -540,7 +540,7 @@ class HydraCharm(CharmBase):
 
     @leader_unit
     def _on_oauth_client_changed(self, event: ClientChangedEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             event.defer()
             return
@@ -661,6 +661,10 @@ class HydraCharm(CharmBase):
         event.add_status(ActiveStatus())
 
     def _on_run_migration(self, event: ActionEvent) -> None:
+        if not self.unit.is_leader():
+            event.fail("Only the leader unit can run the database migration")
+            return
+
         if not container_connectivity(self):
             event.fail("Container is not connected yet")
             return
@@ -687,7 +691,7 @@ class HydraCharm(CharmBase):
         self._holistic_handler(event)
 
     def _on_create_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -699,7 +703,7 @@ class HydraCharm(CharmBase):
         event.set_results(created_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_get_oauth_client_info_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -711,7 +715,7 @@ class HydraCharm(CharmBase):
         event.set_results(oauth_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -740,7 +744,7 @@ class HydraCharm(CharmBase):
         event.set_results(updated_oauth_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -765,7 +769,7 @@ class HydraCharm(CharmBase):
         event.set_results({"client-id": res})
 
     def _on_list_oauth_clients_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -783,7 +787,7 @@ class HydraCharm(CharmBase):
         event.set_results({"clients": json.dumps(clients)})
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -798,7 +802,7 @@ class HydraCharm(CharmBase):
         event.set_results({"client-id": res})
 
     def _on_rotate_key_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -814,7 +818,7 @@ class HydraCharm(CharmBase):
             event.fail("You need to run this action from the leader unit")
             return
 
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
