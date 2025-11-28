@@ -87,6 +87,11 @@ def mocked_workload_service_version(mocker: MockerFixture) -> MagicMock:
 
 
 @pytest.fixture
+def mocked_workload_service_is_running(mocker: MockerFixture) -> MagicMock:
+    return mocker.patch("charm.WorkloadService.is_running", return_value=True)
+
+
+@pytest.fixture
 def mocked_pebble_service(mocker: MockerFixture, harness: Harness) -> MagicMock:
     mocked = mocker.patch("charm.PebbleService", autospec=True)
     harness.charm._pebble_service = mocked
