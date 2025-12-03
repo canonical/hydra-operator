@@ -58,8 +58,8 @@ provider "juju" {
 }
 
 data "juju_model" "model" {
-  name  = var.model
-  owner = var.client_id
+  name = var.model
+  owner = "${var.client_id}@serviceaccount"
 }
 
 module "application" {
