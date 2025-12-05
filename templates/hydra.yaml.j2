@@ -51,8 +51,9 @@ urls:
   consent: {{ consent_url }}
   error: {{ oidc_error_url }}
   login: {{ login_url }}
-  device_verification: {{ device_verification_url }}
-  post_device_done: {{ post_device_done_url }}
+  device:
+    verification: {{ device_verification_url }}
+    success: {{ post_device_done_url }}
   self:
     issuer: {{ public_url }}
     public: {{ public_url }}

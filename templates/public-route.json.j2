@@ -61,6 +61,25 @@
           ]
         }
       },
+      "juju-{{ identifier }}-public-api-router-well-known-oauth-server": {
+        "entryPoints": ["web"],
+        "rule": "Path(`/.well-known/oauth-authorization-server`)",
+        "service": "juju-{{ identifier }}-public-api-service"
+      },
+      "juju-{{ identifier }}-public-api-router-well-known-oauth-server-tls": {
+        "entryPoints": ["websecure"],
+        "rule": "Path(`/.well-known/oauth-authorization-server`)",
+        "service": "juju-{{ identifier }}-public-api-service",
+        "tls": {
+          "domains": [
+            {
+              "main": "{{ external_host }}",
+              "sans": ["*.{{ external_host }}"]
+
+            }
+          ]
+        }
+      },
       "juju-{{ identifier }}-public-api-router-userinfo": {
         "entryPoints": ["web"],
         "rule": "Path(`/userinfo`)",
