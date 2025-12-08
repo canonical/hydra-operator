@@ -10,7 +10,7 @@ While Ory Hydra v25.4.0 successfully adopts most of the shared schema elements d
 
 This guide ensures a clean transition by applying the upstream migrations first, and then manually removing the obsolete tables and columns.
 
-### Prerequisites
+## Prerequisites
 
 * Access to the Juju controller and Kubernetes cluster with an Identity Platform deployment
 
@@ -21,14 +21,14 @@ This guide ensures a clean transition by applying the upstream migrations first,
 - **Green (New):** Charmed Hydra upgraded to `0.6` with Ory Hydra v25.4.0 connected to a *cloned* and *sanitized* database.
 - **Switchover:** Traffic is routed to Green only after the migration is verified.
 
-1. Prepare and deploy a model with new Charmed Hydra of the *SAME VERSION* as the one you are currently using and a Charmed PostgreSQL. Integrate the two charms and enable `uuid` plugin in postgres in both models:
+1. Prepare and deploy a model with new Charmed Hydra of the **SAME REVISION** as the one you are currently using and a Charmed PostgreSQL. Integrate the two charms and enable `uuid` plugin in postgres in both models:
 
-```
+```shell
 juju deploy hydra <new-hydra-app-name> --channel 0.5/edge --revision <original-rev>
 juju deploy postgresql <new-postgresql-app-name> --channel 14/stable
 juju integrate <new-hydra-app-name> <new-postgresql-app-name>
 
-juju config postgresql-k8s plugin_uuid_ossp_enable=true
+juju config <new-postgresql-app-name> plugin_uuid_ossp_enable=true
 ```
 
 2. Use database migration systems or database replication mechanisms to sync source database to target database. Wait till the target database is synchronized with the source database.
@@ -39,13 +39,13 @@ juju config postgresql-k8s plugin_uuid_ossp_enable=true
 
 4. Upgrade the new Charmed Hydra.
 
-```
+```shell
 juju refresh <new-hydra-app-name> --channel 0.6/edge --revision <new-rev>
 ```
 
 5. Trigger the migration action. Note: depending on the data size, you may want to use a large timeout threshold.
 
-```
+```shell
 juju run <new-hydra-app-name>/<leader> run-migration timeout=<timeout-in-seconds>
 ```
 
@@ -55,40 +55,16 @@ juju run <new-hydra-app-name>/<leader> run-migration timeout=<timeout-in-seconds
 
 **We recommend performing this step to ensure that the database schemas are cleaned up.**
 
-First create a script to clean up the database and transfer it to the postgres charm:
+First transfer the script `cleanup_canonical_hydra.sql` to the new postgresql charm:
 
-```sql
--- cleanup-canonical-hydra.sql
-BEGIN;
-
--- 1. DROP CANONICAL-ONLY TABLES
--- These tables are replaced by Ory Hydra with 'hydra_oauth2_device_auth_codes'
-DROP TABLE IF EXISTS hydra_oauth2_device_code CASCADE;
-DROP TABLE IF EXISTS hydra_oauth2_user_code CASCADE;
-
--- 2. CLEANUP 'hydra_oauth2_flow'
--- We ONLY drop the column that Ory v25 does not use. 
--- The other columns (device_challenge_id, device_verifier, etc.) were adopted by Ory.
-ALTER TABLE hydra_oauth2_flow DROP COLUMN IF EXISTS device_user_code_accepted_at;
-
--- 3. REMOVE MIGRATION HISTORY
--- ==========================================================
--- Delete the version ID that corresponds to the Canonical
--- device flow migration. Otherwise, Ory v25.4.0 may
--- panic because it will see a version ID it doesn't recognize.
-DELETE FROM schema_migration WHERE version = '20240202000001000000';
-
-COMMIT;
+```shell
+juju scp --container postgresql cleanup_canonical_hydra.sql <new-postgresql-app-name>/leader:/tmp/cleanup_canonical_hydra.sql
 ```
 
-```
-juju scp --container postgresql cleanup-canonical-hydra.sql postgresql-k8s/leader:/tmp/cleanup-canonical-hydra.sql
-```
+Then execute the script against the hydra database:
 
-Finally, execute the script against the hydra database.
-
-```sql
-psql --host <psql-host> --username=<hydra-user> --dbname=<hydra-database-name> -f /tmp/cleanup-canonical-hydra.sql
+```shell
+psql --host <psql-host> --username=<hydra-user> --dbname=<hydra-database-name> -f /tmp/cleanup_canonical_hydra.sql
 ```
 
 8. Switch over the traffic to the new Hydra Charm.
