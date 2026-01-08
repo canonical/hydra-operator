@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.0.0](https://github.com/canonical/hydra-operator/compare/v2.0.0...v3.0.0) (2026-01-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* key-values with quotes & commas in metadata
+
+### Features
+
+* expose .well-known/oauth-authorization-server endpoint ([17213f9](https://github.com/canonical/hydra-operator/commit/17213f972671c56781a08eda889fd208a5285849))
+* key-values with quotes & commas in metadata ([5272727](https://github.com/canonical/hydra-operator/commit/52727270bd9a5c6ce49d1e10889931b706ca460a))
+* key-values with quotes & commas in metadata ([#453](https://github.com/canonical/hydra-operator/issues/453)) ([053c4de](https://github.com/canonical/hydra-operator/commit/053c4de0f6d5309bf52dbfcf0b2cb550e0f770b6))
+
+
+### Bug Fixes
+
+* fix the migration docs ([88b311f](https://github.com/canonical/hydra-operator/commit/88b311fd6dbaba4baedc4f632763031c2a29fc82))
+* fix the migration docs ([#473](https://github.com/canonical/hydra-operator/issues/473)) ([89326d9](https://github.com/canonical/hydra-operator/commit/89326d996046bc27266638186cad5aa4fe407d52))
+* fix the run-migration action to check container connectivity ([1a82be1](https://github.com/canonical/hydra-operator/commit/1a82be19f8db237a763b789f4e4351e79b83d310))
+* fix the run-migration action to check container connectivity ([#461](https://github.com/canonical/hydra-operator/issues/461)) ([0dbe050](https://github.com/canonical/hydra-operator/commit/0dbe0505547a2ef0cba89f4ad5b6160cbd67b1af))
+* fix the usages of WorkloadService.is_running ([65ece4d](https://github.com/canonical/hydra-operator/commit/65ece4d359053b07e929e6c43ff3105f271e9c05))
+* fix the usages of WorkloadService.is_running ([#465](https://github.com/canonical/hydra-operator/issues/465)) ([abd1931](https://github.com/canonical/hydra-operator/commit/abd19317041310a4b25e2a55a2a1ddc654414782))
+* update device config ([77a2b1b](https://github.com/canonical/hydra-operator/commit/77a2b1b7d2008680100fa0e6f20c90c0980b6df0))
+
 ## [2.0.0](https://github.com/canonical/hydra-operator/compare/v1.2.0...v2.0.0) (2025-11-17)
 
 
