@@ -1,11 +1,11 @@
-# Copyright 2023 Canonical Ltd.
+# Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 from typing import Generator
 from unittest.mock import MagicMock, PropertyMock, create_autospec
 
 import pytest
-from ops import BoundStoredState, Container, EventBase, Unit
+from ops import Container, EventBase, Unit
 from ops.testing import Harness
 from pytest_mock import MockerFixture
 from yarl import URL
@@ -23,12 +23,19 @@ from constants import (
 from integrations import InternalIngressData, PublicRouteData
 
 
-@pytest.fixture(autouse=True)
-def mocked_k8s_resource_patch(mocker: MockerFixture) -> None:
-    mocker.patch(
+@pytest.fixture()
+def mocked_resource_patch(mocker: MockerFixture) -> MagicMock:
+    mocked = mocker.patch(
         "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher",
         autospec=True,
     )
+    mocked.return_value.is_failed.return_value = (False, "")
+    mocked.return_value.is_in_progress.return_value = False
+    return mocked
+
+
+@pytest.fixture(autouse=True)
+def mocked_k8s_resource_patch(mocker: MockerFixture, mocked_resource_patch: MagicMock) -> None:
     mocker.patch.multiple(
         "charm.KubernetesComputeResourcesPatch",
         _namespace="testing",
@@ -40,13 +47,6 @@ def mocked_k8s_resource_patch(mocker: MockerFixture) -> None:
 @pytest.fixture
 def mocked_container() -> MagicMock:
     return create_autospec(Container)
-
-
-@pytest.fixture
-def mocked_stored_state() -> MagicMock:
-    m = create_autospec(BoundStoredState)
-    m.config_hash = None
-    return m
 
 
 @pytest.fixture
@@ -84,6 +84,11 @@ def mocked_workload_service_version(mocker: MockerFixture) -> MagicMock:
     return mocker.patch(
         "charm.WorkloadService.version", new_callable=PropertyMock, return_value="1.0.0"
     )
+
+
+@pytest.fixture
+def mocked_workload_service_is_running(mocker: MockerFixture) -> MagicMock:
+    return mocker.patch("charm.WorkloadService.is_running", return_value=True)
 
 
 @pytest.fixture

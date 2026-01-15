@@ -1,14 +1,12 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import logging
 from collections import ChainMap
-from pathlib import PurePath
 from typing import Optional
 
-from ops import StoredState
 from ops.model import Container, ModelError, Unit
-from ops.pebble import Layer, LayerDict
+from ops.pebble import CheckStatus, Layer, LayerDict, ServiceInfo
 
 from cli import CommandLine
 from configs import ConfigFile
@@ -16,6 +14,7 @@ from constants import (
     ADMIN_PORT,
     CONFIG_FILE_NAME,
     HYDRA_SERVICE_COMMAND,
+    PEBBLE_READY_CHECK_NAME,
     PUBLIC_PORT,
     WORKLOAD_CONTAINER,
     WORKLOAD_SERVICE,
@@ -37,9 +36,15 @@ PEBBLE_LAYER_DICT = {
         }
     },
     "checks": {
-        "ready": {
+        PEBBLE_READY_CHECK_NAME: {
             "override": "replace",
+            "level": "ready",
             "http": {"url": f"http://localhost:{ADMIN_PORT}/health/ready"},
+        },
+        "alive": {
+            "override": "replace",
+            "level": "alive",
+            "http": {"url": f"http://localhost:{ADMIN_PORT}/health/alive"},
         },
     },
 }
@@ -73,14 +78,32 @@ class WorkloadService:
         else:
             self._version = version
 
-    @property
-    def is_running(self) -> bool:
+    def get_service(self) -> Optional[ServiceInfo]:
         try:
-            workload_service = self._container.get_service(WORKLOAD_CONTAINER)
-        except ModelError:
+            return self._container.get_service(WORKLOAD_SERVICE)
+        except (ModelError, ConnectionError) as e:
+            logger.error("Failed to get pebble service: %s", e)
+
+    def is_running(self) -> bool:
+        """Checks whether the service is running."""
+        if not (service := self.get_service()):
             return False
 
-        return workload_service.is_running()
+        if not service.is_running():
+            return False
+
+        c = self._container.get_checks().get(PEBBLE_READY_CHECK_NAME)
+        return c.status == CheckStatus.UP
+
+    def is_failing(self) -> bool:
+        """Checks whether the service has crashed."""
+        if not self.get_service():
+            return False
+
+        if not (c := self._container.get_checks().get(PEBBLE_READY_CHECK_NAME)):
+            return False
+
+        return c.failures > 0
 
     def open_port(self) -> None:
         self._unit.open_port(protocol="tcp", port=ADMIN_PORT)
@@ -90,53 +113,29 @@ class WorkloadService:
 class PebbleService:
     """Pebble service abstraction running in a Juju unit."""
 
-    def __init__(self, unit: Unit, stored_state: StoredState) -> None:
+    def __init__(self, unit: Unit) -> None:
         self._unit = unit
         self._container = unit.get_container(WORKLOAD_SERVICE)
         self._layer_dict: LayerDict = PEBBLE_LAYER_DICT
-        self.stored = stored_state
-        self.stored.set_default(
-            config_hash=None,
-        )
 
-    @property
-    def current_config_hash(self) -> Optional[int]:
-        return self.stored.config_hash
+    def plan(self, layer: Layer, config_file: ConfigFile) -> None:
+        self._container.add_layer(WORKLOAD_SERVICE, layer, combine=True)
 
-    def prepare_dir(self, path: str | PurePath) -> None:
-        if self._container.isdir(path):
-            return
-
-        self._container.make_dir(path=path, make_parents=True)
-
-    def update_config_file(self, content: "ConfigFile") -> bool:
-        """Update the config file.
-
-        Return True if the config changed.
-        """
-        config_hash = hash(content)
-        if config_hash == self.current_config_hash:
-            return False
-
-        self._container.push(CONFIG_FILE_NAME, str(content), make_dirs=True)
-        self.stored.config_hash = config_hash
-        return True
-
-    def _restart_service(self, restart: bool = False) -> None:
-        if restart:
-            self._container.restart(WORKLOAD_CONTAINER)
-        elif not self._container.get_service(WORKLOAD_CONTAINER).is_running():
-            self._container.start(WORKLOAD_CONTAINER)
-        else:
-            self._container.replan()
-
-    def plan(self, layer: Layer, restart: bool = True) -> None:
-        self._container.add_layer(WORKLOAD_CONTAINER, layer, combine=True)
-
+        current_config_file = ConfigFile.from_workload_container(self._container)
         try:
-            self._restart_service(restart)
+            if config_file != current_config_file:
+                self._container.push(CONFIG_FILE_NAME, config_file.content, make_dirs=True)
+                self._container.restart(WORKLOAD_SERVICE)
+            else:
+                self._container.replan()
         except Exception as e:
             raise PebbleServiceError(f"Pebble failed to restart the workload service. Error: {e}")
+
+    def stop(self) -> None:
+        try:
+            self._container.stop(WORKLOAD_SERVICE)
+        except Exception as e:
+            raise PebbleServiceError(f"Pebble failed to stop the workload service. Error: {e}")
 
     def render_pebble_layer(self, *env_var_sources: EnvVarConvertible) -> Layer:
         updated_env_vars = ChainMap(*(source.to_env_vars() for source in env_var_sources))  # type: ignore

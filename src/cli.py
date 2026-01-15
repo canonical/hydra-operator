@@ -5,6 +5,7 @@
 import json
 import logging
 import re
+import shlex
 from typing import Any, Optional
 
 from ops import Container
@@ -17,6 +18,41 @@ from exceptions import ClientDoesNotExistError, CommandExecError, MigrationError
 logger = logging.getLogger(__name__)
 
 VERSION_REGEX = re.compile(r"Version:\s+(?P<version>v\d+\.\d+\.\d+)")
+
+
+def parse_kv_string(kv_str: str) -> dict[str, str]:
+    """Parse a key-value string into a dictionary.
+
+    Args:
+        kv_str: A string containing key-value pairs in the format
+            "key1=value1 key2=value2 ...". Values can be enclosed in single or
+            double quotes to include spaces.
+
+    Returns:
+        A dictionary with keys and their corresponding values.
+
+    Example:
+        Input: "foo='bar qux' baz=quux"
+        Output: {"foo": "bar qux", "baz": "quux"}
+
+    Undefined behaviour:
+        - Multiple equals signs in unquoted values (e.g., "key=value=extra").
+          Currently this will parse as key="key" and value="value=extra",
+          however this behavior is not guaranteed and may change in the future.
+    """
+    result = {}
+    parts = shlex.split(kv_str)
+
+    for part in parts:
+        if "=" in part:
+            key, value = part.split("=", 1)
+            result[key] = value
+        else:
+            raise ValueError(
+                f"Invalid key-value pair: '{part}'. Expected format 'key=value' (values with spaces should be quoted)."
+            )
+
+    return result
 
 
 class OAuthClient(BaseModel):
@@ -97,16 +133,7 @@ class OAuthClient(BaseModel):
     def deserialize_metadata(cls, v: str | dict[str, Any]) -> dict[str, Any]:
         if isinstance(v, dict):
             return v
-
-        kv = v.split(",")
-
-        metadata = {}
-
-        for pair in kv:
-            key, value = pair.split("=")
-            metadata[key] = value
-
-        return metadata
+        return parse_kv_string(v)
 
     def to_cmd_options(self) -> list[str]:
         cmd_options = []

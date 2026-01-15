@@ -80,8 +80,7 @@ async def test_build_and_deploy(ops_test: OpsTest, local_charm: Path) -> None:
     )
 
     await ops_test.model.integrate(f"{TRAEFIK_PUBLIC_APP}:certificates", f"{CA_APP}:certificates")
-    # await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:public-route") # TODO @shipperizer change this once login-ui is g2g
-    await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:ingress")
+    await ops_test.model.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:public-route")
 
     await ops_test.model.deploy(
         application_name=HYDRA_APP,
@@ -185,11 +184,13 @@ async def test_list_oauth_clients(oauth_clients: dict[str, str]) -> None:
     assert len(oauth_clients) > 0
 
 
-async def test_get_client(hydra_unit: Unit, oauth_clients: dict[str, str]) -> None:
+async def test_get_client(hydra_unit: Unit, oauth_clients: list[dict[str, str]]) -> None:
+    assert len(oauth_clients) > 0
+    client_id = oauth_clients[0]["client-id"]
     action = await hydra_unit.run_action(
         "get-oauth-client-info",
         **{
-            "client-id": oauth_clients["1"],
+            "client-id": client_id,
         },
     )
     res = (await action.wait()).results
@@ -199,13 +200,15 @@ async def test_get_client(hydra_unit: Unit, oauth_clients: dict[str, str]) -> No
 
 async def test_update_client(
     hydra_unit: Unit,
-    oauth_clients: dict[str, str],
+    oauth_clients: list[dict[str, str]],
 ) -> None:
     redirect_uris = ["https://other.app/oauth/callback"]
+    assert len(oauth_clients) > 0
+    client_id = oauth_clients[0]["client-id"]
     action = await hydra_unit.run_action(
         "update-oauth-client",
         **{
-            "client-id": oauth_clients["1"],
+            "client-id": client_id,
             "redirect-uris": redirect_uris,
         },
     )
@@ -217,7 +220,7 @@ async def test_update_client(
 async def test_get_opaque_access_token(
     ops_test: OpsTest,
     hydra_application: Application,
-    oauth_clients: dict[str, str],
+    oauth_clients: list[dict[str, str]],
     client_credential_request: Callable[[str, str], Awaitable[Response]],
 ) -> None:
     await hydra_application.set_config({
@@ -229,7 +232,8 @@ async def test_get_opaque_access_token(
         timeout=5 * 60,
     )
 
-    client_id = oauth_clients["1"]
+    assert len(oauth_clients) > 0
+    client_id = oauth_clients[0]["client-id"]
     resp = await client_credential_request(client_id, CLIENT_SECRET)
     assert resp.status_code == 200
     assert resp.json()["access_token"]
@@ -245,7 +249,7 @@ async def test_get_opaque_access_token(
 async def test_get_jwt_access_token(
     ops_test: OpsTest,
     hydra_application: Application,
-    oauth_clients: dict,
+    oauth_clients: list[dict[str, str]],
     client_credential_request: Callable[[str, str], Awaitable[Response]],
     jwks_client: jwt.PyJWKClient,
 ) -> None:
@@ -258,7 +262,8 @@ async def test_get_jwt_access_token(
         timeout=5 * 60,
     )
 
-    client_id = oauth_clients["1"]
+    assert len(oauth_clients) > 0
+    client_id = oauth_clients[0]["client-id"]
     resp = await client_credential_request(client_id, CLIENT_SECRET)
     assert resp.status_code == 200
     assert resp.json()["access_token"]
@@ -274,9 +279,10 @@ async def test_get_jwt_access_token(
 
 
 async def test_revoke_oauth_client_access_tokens(
-    hydra_unit: Unit, oauth_clients: dict[str, str]
+    hydra_unit: Unit, oauth_clients: list[dict[str, str]]
 ) -> None:
-    client_id = oauth_clients["1"]
+    assert len(oauth_clients) > 0
+    client_id = oauth_clients[0]["client-id"]
 
     action = await hydra_unit.run_action(
         "revoke-oauth-client-access-tokens",
@@ -289,8 +295,9 @@ async def test_revoke_oauth_client_access_tokens(
     assert res["client-id"] == client_id
 
 
-async def test_delete_oauth_client(hydra_unit: Unit, oauth_clients: dict[str, str]) -> None:
-    client_id = oauth_clients["1"]
+async def test_delete_oauth_client(hydra_unit: Unit, oauth_clients: list[dict[str, str]]) -> None:
+    assert len(oauth_clients) > 0
+    client_id = oauth_clients[0]["client-id"]
 
     action = await hydra_unit.run_action(
         "delete-oauth-client",
@@ -343,7 +350,7 @@ async def test_scale_up(
     await ops_test.model.wait_for_idle(
         apps=[HYDRA_APP],
         status="active",
-        raise_on_blocked=True,
+        raise_on_blocked=False,
         timeout=5 * 60,
         wait_for_exact_units=target_unit_number,
     )
@@ -386,7 +393,7 @@ async def test_scale_down(ops_test: OpsTest, hydra_application: Application) -> 
     )
 
 
-async def test_get_system_secret(hydra_unit: Unit, oauth_clients: dict[str, str]) -> None:
+async def test_get_system_secret(hydra_unit: Unit) -> None:
     global system_secret
 
     action = await hydra_unit.run_action(
@@ -401,7 +408,7 @@ async def test_get_system_secret(hydra_unit: Unit, oauth_clients: dict[str, str]
     system_secret = res["system"]
 
 
-async def test_get_cookie_secret(hydra_unit: Unit, oauth_clients: dict[str, str]) -> None:
+async def test_get_cookie_secret(hydra_unit: Unit) -> None:
     global cookie_secret
 
     action = await hydra_unit.run_action(

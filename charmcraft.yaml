@@ -24,7 +24,7 @@ resources:
   oci-image:
     type: oci-image
     description: OCI image for hydra container
-    upstream-source: ghcr.io/canonical/hydra:2.3.0-canonical
+    upstream-source: ghcr.io/canonical/hydra:25.4.0
 
 requires:
   pg-database:
@@ -171,7 +171,7 @@ actions:
         description: A list of contacts for the client
         type: array
       metadata:
-        description: A comma-separated string of <key>=<value> with extra information relevant for the client, eg dept=IT
+        description: A space-separated string of <key>=<value> with extra information relevant for the client, eg "dept=IT team=alpha". Keys and values containing spaces should be quoted.
         type: string
       audience:
         description: A list with the allowed audience for the client
@@ -300,5 +300,5 @@ parts:
       - jsonschema
       - "setuptools>=70.0.0"
     build-packages:
-      - rustc
-      - cargo
+      - "rustc-1.85"
+      - "cargo-1.85"

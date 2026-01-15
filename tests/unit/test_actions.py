@@ -9,6 +9,7 @@ from ops.testing import ActionFailed, Harness
 from pytest_mock import MockerFixture
 
 from cli import OAuthClient
+from constants import WORKLOAD_CONTAINER
 from exceptions import MigrationError
 from integrations import DatabaseConfig
 
@@ -26,31 +27,42 @@ class TestRunMigrationAction:
     def mocked_cli(self, mocker: MockerFixture) -> MagicMock:
         return mocker.patch("charm.CommandLine.migrate")
 
-    def test_when_hydra_service_not_ready(
+    def test_when_not_leader_unit(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
         mocked_cli: MagicMock,
         peer_integration: int,
     ) -> None:
-        mocked_workload_service.is_running = False
         try:
             harness.run_action("run-migration")
         except ActionFailed as err:
-            assert (
-                "Service is not ready. Please re-run the action when the charm is active"
-                in err.message
-            )
+            assert "Only the leader unit can run the database migration" in err.message
+
+        mocked_cli.assert_not_called()
+
+    def test_when_container_not_connected(
+        self,
+        harness: Harness,
+        mocked_cli: MagicMock,
+        peer_integration: int,
+    ) -> None:
+        harness.set_leader(True)
+        harness.set_can_connect(WORKLOAD_CONTAINER, False)
+
+        try:
+            harness.run_action("run-migration")
+        except ActionFailed as err:
+            assert "Container is not connected yet" in err.message
 
         mocked_cli.assert_not_called()
 
     def test_when_peer_integration_not_exists(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
+        harness.set_leader(True)
+
         try:
             harness.run_action("run-migration")
         except ActionFailed as err:
@@ -61,11 +73,11 @@ class TestRunMigrationAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
         mocked_cli: MagicMock,
         peer_integration: int,
     ) -> None:
-        mocked_workload_service.is_running = True
+        harness.set_leader(True)
+
         with patch("charm.CommandLine.migrate", side_effect=MigrationError):
             try:
                 harness.run_action("run-migration")
@@ -84,7 +96,6 @@ class TestRunMigrationAction:
     ) -> None:
         harness.set_leader(True)
         mocked_workload_service.version = "1.0.0"
-        mocked_workload_service.is_running = True
 
         harness.run_action("run-migration")
 
@@ -100,13 +111,13 @@ class TestCreateOAuthClientAction:
             return_value=OAuthClient(**mocked_oauth_client_config),
         )
 
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = False
         try:
             harness.run_action(
                 "create-oauth-client",
@@ -126,9 +137,8 @@ class TestCreateOAuthClientAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
         with patch("charm.CommandLine.create_oauth_client", return_value=None):
             try:
                 harness.run_action(
@@ -146,11 +156,10 @@ class TestCreateOAuthClientAction:
     def test_when_action_succeeds(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
         mocked_oauth_client_config: dict,
     ) -> None:
-        mocked_workload_service.is_running = True
         output = harness.run_action(
             "create-oauth-client",
             {
@@ -175,13 +184,13 @@ class TestGetOAuthClientInfoAction:
             return_value=OAuthClient(**mocked_oauth_client_config),
         )
 
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
+        mocked_workload_service_is_running: MagicMock,
         harness: Harness,
-        mocked_workload_service: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = False
         try:
             harness.run_action("get-oauth-client-info", {"client-id": "client_id"})
         except ActionFailed as err:
@@ -195,9 +204,8 @@ class TestGetOAuthClientInfoAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
         try:
             harness.run_action("get-oauth-client-info", {"client-id": "client_id"})
         except ActionFailed as err:
@@ -206,12 +214,10 @@ class TestGetOAuthClientInfoAction:
     def test_when_action_succeeds(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
         mocked_oauth_client_config: dict,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         output = harness.run_action("get-oauth-client-info", {"client-id": "client_id"})
         mocked_cli.assert_called_once()
         assert output.results["redirect-uris"] == [mocked_oauth_client_config["redirect_uri"]]
@@ -237,14 +243,13 @@ class TestUpdateOAuthClientAction:
             return_value=OAuthClient(**mocked_oauth_client_config),
         )
 
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = False
-
         try:
             harness.run_action("update-oauth-client", {"client-id": "client_id"})
         except ActionFailed as err:
@@ -258,11 +263,9 @@ class TestUpdateOAuthClientAction:
     def test_when_oauth_client_not_exists(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         with patch("charm.CommandLine.get_oauth_client", return_value=None):
             try:
                 harness.run_action("update-oauth-client", {"client-id": "client_id"})
@@ -274,11 +277,9 @@ class TestUpdateOAuthClientAction:
     def test_when_oauth_client_managed_by_integration(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         with patch(
             "charm.CommandLine.get_oauth_client",
             return_value=OAuthClient(metadata={"integration-id": "id"}),
@@ -296,10 +297,8 @@ class TestUpdateOAuthClientAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         with patch("charm.CommandLine.update_oauth_client", return_value=None):
             try:
                 harness.run_action("update-oauth-client", {"client-id": "client_id"})
@@ -310,10 +309,11 @@ class TestUpdateOAuthClientAction:
                 )
 
     def test_when_action_succeeds(
-        self, harness: Harness, mocked_workload_service: MagicMock, mocked_cli: MagicMock
+        self,
+        harness: Harness,
+        mocked_workload_service_is_running: MagicMock,
+        mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         output = harness.run_action(
             "update-oauth-client",
             {
@@ -321,7 +321,7 @@ class TestUpdateOAuthClientAction:
                 "redirect-uris": ["https://example.ory.com"],
                 "contacts": ["test@canonical.com", "me@me.com"],
                 "client-uri": "https://example.com",
-                "metadata": "foo=bar,bar=foo",
+                "metadata": "foo=bar bar=foo",
                 "name": "test-client",
             },
         )
@@ -353,14 +353,13 @@ class TestDeleteOAuthClientAction:
     def mocked_cli(self, mocker: MockerFixture) -> MagicMock:
         return mocker.patch("charm.CommandLine.delete_oauth_client", return_value="client_id")
 
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = False
-
         try:
             harness.run_action("delete-oauth-client", {"client-id": "client_id"})
         except ActionFailed as err:
@@ -374,11 +373,9 @@ class TestDeleteOAuthClientAction:
     def test_when_oauth_client_not_exists(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         with patch("charm.CommandLine.get_oauth_client", return_value=None):
             try:
                 harness.run_action("delete-oauth-client", {"client-id": "client_id"})
@@ -390,11 +387,9 @@ class TestDeleteOAuthClientAction:
     def test_when_oauth_client_managed_by_integration(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         with patch(
             "charm.CommandLine.get_oauth_client",
             return_value=OAuthClient(metadata={"integration-id": "id"}),
@@ -412,10 +407,8 @@ class TestDeleteOAuthClientAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         with patch("charm.CommandLine.delete_oauth_client", return_value=None):
             try:
                 harness.run_action("delete-oauth-client", {"client-id": "client_id"})
@@ -426,10 +419,11 @@ class TestDeleteOAuthClientAction:
                 )
 
     def test_when_action_succeeds(
-        self, harness: Harness, mocked_workload_service: MagicMock, mocked_cli: MagicMock
+        self,
+        harness: Harness,
+        mocked_workload_service_is_running: MagicMock,
+        mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         output = harness.run_action("delete-oauth-client", {"client-id": "client_id"})
         assert "Successfully deleted the OAuth client client_id" in output.logs
 
@@ -445,14 +439,13 @@ class TestListOAuthClientsAction:
             return_value=[OAuthClient(**mocked_oauth_client_config, **{"client-id": "client_id"})],
         )
 
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = False
-
         try:
             harness.run_action("list-oauth-clients")
         except ActionFailed as err:
@@ -466,10 +459,8 @@ class TestListOAuthClientsAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         try:
             harness.run_action("list-oauth-clients")
         except ActionFailed as err:
@@ -478,14 +469,32 @@ class TestListOAuthClientsAction:
     def test_when_action_succeeds(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         output = harness.run_action("list-oauth-clients")
         mocked_cli.assert_called_once()
-        assert output.results == {"1": "client_id"}
+        assert output.results["clients"]
+        clients = output.results["clients"]
+
+        assert json.loads(clients) == [
+            {
+                "redirect-uris": ["https://example.oidc.client/callback"],
+                "token-endpoint-auth-method": "client_secret_basic",
+                "grant-types": [
+                    "authorization_code",
+                    "refresh_token",
+                    "client_credentials",
+                    "urn:ietf:params:oauth:grant-type:device_code",
+                ],
+                "metadata": {},
+                "audience": [],
+                "contacts": [],
+                "client-id": "client_id",
+                "response-types": ["code"],
+                "scope": ["openid", "email", "offline_access"],
+            }
+        ]
 
 
 class TestRevokeOAuthClientAccessTokenAction:
@@ -496,14 +505,13 @@ class TestRevokeOAuthClientAccessTokenAction:
             return_value="client_id",
         )
 
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = False
-
         try:
             harness.run_action("revoke-oauth-client-access-tokens", {"client-id": "client_id"})
         except ActionFailed as err:
@@ -517,10 +525,8 @@ class TestRevokeOAuthClientAccessTokenAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         try:
             harness.run_action("revoke-oauth-client-access-tokens", {"client-id": "client_id"})
         except ActionFailed as err:
@@ -532,11 +538,9 @@ class TestRevokeOAuthClientAccessTokenAction:
     def test_when_action_succeeds(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         output = harness.run_action(
             "revoke-oauth-client-access-tokens", {"client-id": "client_id"}
         )
@@ -556,14 +560,13 @@ class TestRotateKeyAction:
             return_value="key_id",
         )
 
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = False
-
         try:
             harness.run_action("rotate-key", {"algorithm": "RS256"})
         except ActionFailed as err:
@@ -577,10 +580,8 @@ class TestRotateKeyAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         with patch("charm.CommandLine.create_jwk", return_value=None):
             try:
                 harness.run_action("rotate-key", {"algorithm": "RS256"})
@@ -590,11 +591,9 @@ class TestRotateKeyAction:
     def test_when_action_succeeds(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = True
-
         output = harness.run_action("rotate-key", {"algorithm": "RS256"})
 
         mocked_cli.assert_called_once_with(algorithm="RS256")
@@ -613,11 +612,9 @@ class TestReconcileOauthClientsAction:
     def test_when_not_leader(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
     ) -> None:
-        mocked_workload_service.is_running = False
-
         try:
             harness.run_action("reconcile-oauth-clients")
         except ActionFailed as err:
@@ -625,14 +622,14 @@ class TestReconcileOauthClientsAction:
 
         mocked_cli.assert_not_called()
 
+    @patch("charm.WorkloadService.is_running", return_value=False)
     def test_when_hydra_service_not_ready(
         self,
-        harness: Harness,
         mocked_workload_service: MagicMock,
+        harness: Harness,
         mocked_cli: MagicMock,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = False
 
         try:
             harness.run_action("reconcile-oauth-clients")
@@ -647,10 +644,9 @@ class TestReconcileOauthClientsAction:
     def test_when_commandline_failed(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
 
         with patch("charm.CommandLine.create_jwk", return_value=None):
             try:
@@ -661,12 +657,11 @@ class TestReconcileOauthClientsAction:
     def test_when_action_succeeds(
         self,
         harness: Harness,
-        mocked_workload_service: MagicMock,
+        mocked_workload_service_is_running: MagicMock,
         mocked_cli: MagicMock,
         peer_integration: int,
     ) -> None:
         harness.set_leader(True)
-        mocked_workload_service.is_running = True
         harness.update_relation_data(
             peer_integration,
             "hydra",

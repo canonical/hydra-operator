@@ -33,10 +33,11 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from ops import StoredState
+from ops import PebbleCheckFailedEvent, PebbleCheckRecoveredEvent
 from ops.charm import (
     ActionEvent,
     CharmBase,
+    CollectStatusEvent,
     ConfigChangedEvent,
     HookEvent,
     RelationBrokenEvent,
@@ -61,6 +62,7 @@ from constants import (
     LOGGING_RELATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     OAUTH_INTEGRATION_NAME,
+    PEBBLE_READY_CHECK_NAME,
     PEER_INTEGRATION_NAME,
     PROMETHEUS_SCRAPE_INTEGRATION_NAME,
     PUBLIC_ROUTE_INTEGRATION_NAME,
@@ -86,20 +88,26 @@ from integrations import (
 from secret import HydraSecrets, Secrets
 from services import PebbleService, WorkloadService
 from utils import (
+    EVENT_DEFER_CONDITIONS,
+    NOOP_CONDITIONS,
     container_connectivity,
     database_integration_exists,
+    database_resource_is_created,
     leader_unit,
     login_ui_integration_exists,
+    login_ui_is_ready,
+    migration_is_ready,
     peer_integration_exists,
     public_route_integration_exists,
+    public_route_is_ready,
+    public_route_is_secure,
+    secrets_is_ready,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class HydraCharm(CharmBase):
-    _stored = StoredState()
-
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
 
@@ -110,7 +118,7 @@ class HydraCharm(CharmBase):
 
         self._container = self.unit.get_container(WORKLOAD_CONTAINER)
         self._workload_service = WorkloadService(self.unit)
-        self._pebble_service = PebbleService(self.unit, self._stored)
+        self._pebble_service = PebbleService(self.unit)
         self._cli = CommandLine(self._container)
 
         self.token_hook = HydraHookRequirer(
@@ -184,9 +192,14 @@ class HydraCharm(CharmBase):
         )
 
         self.framework.observe(self.on.hydra_pebble_ready, self._on_hydra_pebble_ready)
+        self.framework.observe(self.on.hydra_pebble_check_failed, self._on_pebble_check_failed)
+        self.framework.observe(
+            self.on.hydra_pebble_check_recovered, self._on_pebble_check_recovered
+        )
         self.framework.observe(self.on.update_status, self._holistic_handler)
         self.framework.observe(self.on.leader_elected, self._holistic_handler)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.on.collect_unit_status, self._on_collect_status)
 
         # secrets
         self.framework.observe(self.on.secret_changed, self._holistic_handler)
@@ -328,6 +341,9 @@ class HydraCharm(CharmBase):
         return self.charm_config["dev"]
 
     def _initialize_secrets(self) -> None:
+        if not self.unit.is_leader():
+            return
+
         if not (system_secrets := self.charm_config.get_system_secret()):
             self.hydra_secrets.add_secret_key(SYSTEM_SECRET, token_hex(16))
         else:
@@ -360,7 +376,6 @@ class HydraCharm(CharmBase):
         self._on_oauth_integration_created(event)
 
     def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
         self._on_internal_ingress_changed(event)
 
     def _on_internal_ingress_changed(self, event: RelationEvent) -> None:
@@ -370,6 +385,13 @@ class HydraCharm(CharmBase):
         self.internal_ingress._relation = event.relation
 
         if not self.internal_ingress.is_ready():
+            return
+        if event.relation.app is None:
+            # We need to defer the event as this is not handled in the holistic handler
+            # TODO(nsklikas): move this to the holistic handler and remove defer
+            # TODO2(nsklikas): Fix this in traefik_route lib, this is a bug and the lib should handle
+            # this in the `is_ready` method, like it does for the Provider side.
+            event.defer()
             return
 
         if self.unit.is_leader():
@@ -386,6 +408,14 @@ class HydraCharm(CharmBase):
         self.public_route._relation = event.relation
 
         if not self.public_route.is_ready():
+            return
+
+        if event.relation.app is None:
+            # We need to defer the event as this is not handled in the holistic handler
+            # TODO(nsklikas): move this to the holistic handler and remove defer
+            # TODO2(nsklikas): Fix this in traefik_route lib, this is a bug and the lib should handle
+            # this in the `is_ready` method, like it does for the Provider side.
+            event.defer()
             return
 
         if self.unit.is_leader():
@@ -451,6 +481,10 @@ class HydraCharm(CharmBase):
     def _on_database_integration_broken(self, event: RelationBrokenEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
+        try:
+            self._pebble_service.stop()
+        except PebbleServiceError as e:
+            logger.error(f"Failed to stop the service, please check the container logs: {e}")
 
     def _on_oauth_integration_created(self, event: RelationEvent) -> None:
         if not (public_url := PublicRouteData.load(self.public_route).url):
@@ -474,7 +508,7 @@ class HydraCharm(CharmBase):
 
     @leader_unit
     def _on_oauth_client_created(self, event: ClientCreatedEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             event.defer()
             return
@@ -506,7 +540,7 @@ class HydraCharm(CharmBase):
 
     @leader_unit
     def _on_oauth_client_changed(self, event: ClientChangedEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             self.unit.status = WaitingStatus("Waiting for Hydra service")
             event.defer()
             return
@@ -531,93 +565,108 @@ class HydraCharm(CharmBase):
 
     def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
         logger.error(f"Failed to patch resource constraints: {event.message}")
-        self.unit.status = BlockedStatus(event.message)
 
-    def _holistic_handler(self, event: HookEvent) -> None:  # noqa: C901
-        if not container_connectivity(self):
-            event.defer()
-            self.unit.status = WaitingStatus("Container is not connected yet")
-            return
-
-        if not peer_integration_exists(self):
-            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
-            return
-
-        if not database_integration_exists(self):
-            self.unit.status = BlockedStatus(f"Missing integration {DATABASE_INTEGRATION_NAME}")
-            return
-
-        if not public_route_integration_exists(self):
-            self.unit.status = BlockedStatus(
-                f"Missing required relation with {PUBLIC_ROUTE_INTEGRATION_NAME}"
-            )
-            return
-
-        if not login_ui_integration_exists(self):
-            self.unit.status = BlockedStatus(
-                f"Missing required relation with {LOGIN_UI_INTEGRATION_NAME}"
-            )
-            return
-
-        if not self.public_route.is_ready():
-            self.unit.status = WaitingStatus("Waiting for ingress to be ready")
-            return
-
-        public_route = PublicRouteData.load(self.public_route)
-        if not self.dev_mode and not public_route.secured:
-            self.unit.status = BlockedStatus(
-                "Requires a secure (HTTPS) public ingress. "
-                "Either enable HTTPS on public ingress or set 'dev' config to true for local development."
-            )
-            return
-
-        if not LoginUIEndpointData.load(self.login_ui_requirer).is_ready():
-            self.unit.status = WaitingStatus("Waiting for login UI to be ready")
-            return
-
-        if not self.database_requirer.is_resource_created():
-            self.unit.status = WaitingStatus("Waiting for database creation")
-            return
-
-        if self.migration_needed:
-            self.unit.status = WaitingStatus(
-                "Waiting for migration to run, try running the `run-migration` action"
-            )
-            return
-
+    def _holistic_handler(self, event: HookEvent) -> None:
         if not self.hydra_secrets.is_ready:
-            if self.unit.is_leader():
-                self._initialize_secrets()
-            else:
-                self.unit.status = WaitingStatus("Waiting for secrets creation")
-                return
+            self._initialize_secrets()
 
-        changed = self._pebble_service.update_config_file(
-            ConfigFile.from_sources(
-                self.hydra_secrets,
-                self.charm_config,
-                DatabaseConfig.load(self.database_requirer),
-                LoginUIEndpointData.load(self.login_ui_requirer),
-                public_route,
-                HydraHookData.load(self.token_hook),
-            ),
+        if not all(condition(self) for condition in NOOP_CONDITIONS):
+            return
+
+        if not all(condition(self) for condition in EVENT_DEFER_CONDITIONS):
+            event.defer()
+            return
+
+        config_file = ConfigFile.from_sources(
+            self.hydra_secrets,
+            self.charm_config,
+            DatabaseConfig.load(self.database_requirer),
+            LoginUIEndpointData.load(self.login_ui_requirer),
+            PublicRouteData.load(self.public_route),
+            HydraHookData.load(self.token_hook),
         )
 
         try:
-            self._pebble_service.plan(self._pebble_layer, changed)
+            self._pebble_service.plan(self._pebble_layer, config_file)
         except PebbleServiceError as e:
             logger.error(f"Failed to start the service, please check the container logs: {e}")
-            self.unit.status = BlockedStatus(
-                f"Failed to restart the service, please check the {WORKLOAD_CONTAINER} logs"
-            )
             return
 
         self._clean_up_oauth_relation_clients()
-        self.unit.status = ActiveStatus()
+
+    def _on_pebble_check_failed(self, event: PebbleCheckFailedEvent) -> None:
+        if event.info.name == PEBBLE_READY_CHECK_NAME:
+            logger.warning("The service is not running")
+
+    def _on_pebble_check_recovered(self, event: PebbleCheckRecoveredEvent) -> None:
+        if event.info.name == PEBBLE_READY_CHECK_NAME:
+            logger.info("The service is online again")
+
+    def _on_collect_status(self, event: CollectStatusEvent) -> None:  # noqa: C901
+        if not (can_connect := container_connectivity(self)):
+            event.add_status(WaitingStatus("Container is not connected yet"))
+
+        if not peer_integration_exists(self):
+            event.add_status(WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}"))
+
+        if not database_integration_exists(self):
+            event.add_status(BlockedStatus(f"Missing integration {DATABASE_INTEGRATION_NAME}"))
+
+        if not public_route_integration_exists(self):
+            event.add_status(
+                BlockedStatus(f"Missing required relation with {PUBLIC_ROUTE_INTEGRATION_NAME}")
+            )
+
+        if not login_ui_integration_exists(self):
+            event.add_status(
+                BlockedStatus(f"Missing required relation with {LOGIN_UI_INTEGRATION_NAME}")
+            )
+
+        if not public_route_is_ready(self):
+            event.add_status(WaitingStatus("Waiting for ingress to be ready"))
+
+        if public_route_is_ready(self) and not public_route_is_secure(self):
+            event.add_status(
+                BlockedStatus(
+                    "Requires a secure (HTTPS) public ingress. "
+                    "Either enable HTTPS on public ingress or set 'dev' config to true for local development."
+                )
+            )
+
+        if not login_ui_is_ready(self):
+            event.add_status(WaitingStatus("Waiting for login UI to be ready"))
+
+        if not database_resource_is_created(self):
+            event.add_status(WaitingStatus("Waiting for database creation"))
+
+        if not migration_is_ready(self):
+            event.add_status(
+                WaitingStatus(
+                    "Waiting for migration to run, try running the `run-migration` action"
+                )
+            )
+
+        if not secrets_is_ready(self):
+            event.add_status(WaitingStatus("Waiting for secrets creation"))
+
+        event.add_status(self.resources_patch.get_status())
+
+        if can_connect and self._workload_service.is_failing():
+            event.add_status(
+                BlockedStatus(
+                    f"Failed to start the service, please check the {WORKLOAD_CONTAINER} container logs"
+                )
+            )
+
+        event.add_status(ActiveStatus())
 
     def _on_run_migration(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
-            event.fail("Service is not ready. Please re-run the action when the charm is active")
+        if not self.unit.is_leader():
+            event.fail("Only the leader unit can run the database migration")
+            return
+
+        if not container_connectivity(self):
+            event.fail("Container is not connected yet")
             return
 
         if not peer_integration_exists(self):
@@ -642,7 +691,7 @@ class HydraCharm(CharmBase):
         self._holistic_handler(event)
 
     def _on_create_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -654,7 +703,7 @@ class HydraCharm(CharmBase):
         event.set_results(created_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_get_oauth_client_info_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -666,7 +715,7 @@ class HydraCharm(CharmBase):
         event.set_results(oauth_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_update_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -695,7 +744,7 @@ class HydraCharm(CharmBase):
         event.set_results(updated_oauth_client.model_dump(by_alias=True, exclude_none=True))
 
     def _on_delete_oauth_client_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -720,7 +769,7 @@ class HydraCharm(CharmBase):
         event.set_results({"client-id": res})
 
     def _on_list_oauth_clients_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -728,12 +777,17 @@ class HydraCharm(CharmBase):
             event.fail("Failed to list OAuth clients. Please check the juju logs")
             return
 
-        event.set_results({
-            str(idx): client.client_id for idx, client in enumerate(oauth_clients, start=1)
-        })
+        clients = [
+            client.model_dump(
+                by_alias=True, exclude_none=True, exclude={"client_secret"}, mode="json"
+            )
+            for client in oauth_clients
+        ]
+
+        event.set_results({"clients": json.dumps(clients)})
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -748,7 +802,7 @@ class HydraCharm(CharmBase):
         event.set_results({"client-id": res})
 
     def _on_rotate_key_action(self, event: ActionEvent) -> None:
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
@@ -764,7 +818,7 @@ class HydraCharm(CharmBase):
             event.fail("You need to run this action from the leader unit")
             return
 
-        if not self._workload_service.is_running:
+        if not self._workload_service.is_running():
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
