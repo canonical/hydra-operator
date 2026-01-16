@@ -1,6 +1,7 @@
 -r requirements.txt
-httpx
-juju
-PyJWT==2.10.1
+jubilant
 pytest
-pytest-operator==0.43.2
+requests
+tenacity
+PyJWT==2.10.1
+cryptography

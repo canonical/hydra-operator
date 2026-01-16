@@ -1,184 +1,251 @@
-# Copyright 2024 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import functools
 import json
 import os
 import re
+import secrets
 import ssl
-from contextlib import asynccontextmanager
+import subprocess
+from contextlib import suppress
 from pathlib import Path
-from typing import AsyncGenerator, Awaitable, Callable, Optional
+from typing import Callable, Generator
 
-import httpx
+import jubilant
 import pytest
-import pytest_asyncio
-import yaml
-from httpx import AsyncClient, Response
-from juju.application import Application
-from juju.unit import Unit
+import requests
+from integration.constants import (
+    DB_APP,
+    HYDRA_APP,
+    HYDRA_IMAGE,
+    LOGIN_UI_APP,
+    TRAEFIK_ADMIN_APP,
+    TRAEFIK_PUBLIC_APP,
+)
+from integration.utils import (
+    get_app_integration_data,
+    get_integration_data,
+    get_unit_address,
+    juju_model_factory,
+)
 from jwt import PyJWKClient
-from pytest_operator.plugin import OpsTest
 
-from constants import (
+from src.constants import (
     INTERNAL_ROUTE_INTEGRATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     PUBLIC_ROUTE_INTEGRATION_NAME,
 )
 
-METADATA = yaml.safe_load(Path("./charmcraft.yaml").read_text())
-HYDRA_APP = METADATA["name"]
-HYDRA_IMAGE = METADATA["resources"]["oci-image"]["upstream-source"]
-DB_APP = "postgresql-k8s"
-CA_APP = "self-signed-certificates"
-LOGIN_UI_APP = "identity-platform-login-ui-operator"
-TRAEFIK_CHARM = "traefik-k8s"
-TRAEFIK_ADMIN_APP = "traefik-admin"
-TRAEFIK_PUBLIC_APP = "traefik-public"
-CLIENT_SECRET = "secret"
-CLIENT_REDIRECT_URIS = ["https://example.com"]
-PUBLIC_INGRESS_DOMAIN = "public"
-ADMIN_INGRESS_DOMAIN = "admin"
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add custom command-line options for model management and deployment control.
+
+    This function adds the following options:
+    --keep-models, --no-teardown: Keep the Juju model after the test is finished.
+    --model: Specify the Juju model to run the tests on.
+    --no-deploy, --no-setup: Skip deployment of the charm.
+    """
+    parser.addoption(
+        "--keep-models",
+        "--no-teardown",
+        action="store_true",
+        dest="no_teardown",
+        default=False,
+        help="Keep the model after the test is finished.",
+    )
+    parser.addoption(
+        "--model",
+        action="store",
+        dest="model",
+        default=None,
+        help="The model to run the tests on.",
+    )
+    parser.addoption(
+        "--no-deploy",
+        "--no-setup",
+        action="store_true",
+        dest="no_setup",
+        default=False,
+        help="Skip deployment of the charm.",
+    )
 
 
-async def integrate_dependencies(ops_test: OpsTest) -> None:
-    await ops_test.model.integrate(HYDRA_APP, DB_APP)
-    await ops_test.model.integrate(
-        f"{HYDRA_APP}:{PUBLIC_ROUTE_INTEGRATION_NAME}", TRAEFIK_PUBLIC_APP
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers for test selection based on deployment and model management.
+
+    This function registers the following markers:
+    setup: Skip tests if the charm is already deployed.
+    teardown: Skip tests if the no_teardown option is set.
+    """
+    config.addinivalue_line("markers", "setup: tests that setup some parts of the environment")
+    config.addinivalue_line("markers", "upgrade: tests that upgrade the charm")
+    config.addinivalue_line(
+        "markers", "teardown: tests that teardown some parts of the environment."
     )
-    await ops_test.model.integrate(
-        f"{HYDRA_APP}:{INTERNAL_ROUTE_INTEGRATION_NAME}", TRAEFIK_ADMIN_APP
-    )
-    await ops_test.model.integrate(
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Modify collected test items based on command-line options.
+
+    This function skips tests with specific markers based on the provided command-line options:
+    - If no_setup is set, tests marked with "setup" are skipped.
+    - If no_teardown is set, tests marked with "teardown" are skipped.
+    """
+    skip_setup = pytest.mark.skip(reason="no_setup provided")
+    skip_teardown = pytest.mark.skip(reason="no_teardown provided")
+    for item in items:
+        if config.getoption("no_setup") and "setup" in item.keywords:
+            item.add_marker(skip_setup)
+        if config.getoption("no_teardown") and "teardown" in item.keywords:
+            item.add_marker(skip_teardown)
+
+
+@pytest.fixture(scope="module")
+def juju(request: pytest.FixtureRequest) -> Generator[jubilant.Juju, None, None]:
+    """Create a temporary Juju model for integration tests."""
+    model_name = request.config.getoption("--model")
+    if not model_name:
+        model_name = f"test-hydra-{secrets.token_hex(4)}"
+
+    juju_ = juju_model_factory(model_name)
+    juju_.wait_timeout = 10 * 60
+
+    try:
+        yield juju_
+    finally:
+        if request.session.testsfailed:
+            log = juju_.debug_log(limit=1000)
+            print(log, end="")
+
+        no_teardown = bool(request.config.getoption("--no-teardown"))
+        keep_model = no_teardown or request.session.testsfailed > 0
+        if not keep_model:
+            with suppress(jubilant.CLIError):
+                args = [
+                    "destroy-model",
+                    juju_.model,
+                    "--no-prompt",
+                    "--destroy-storage",
+                    "--force",
+                    "--timeout",
+                    "600s",
+                ]
+                juju_.cli(*args, include_model=False)
+
+
+@pytest.fixture(scope="session")
+def local_charm() -> Path:
+    """Get the path to the charm-under-test."""
+    # in GitHub CI, charms are built with charmcraftcache and uploaded to
+    charm: str | Path | None = os.getenv("CHARM_PATH")
+    if not charm:
+        subprocess.run(["charmcraft", "pack"], check=True)
+        if not (charms := list(Path(".").glob("*.charm"))):
+            raise RuntimeError("Charm not found and build failed")
+        charm = charms[0].absolute()
+    return Path(charm)
+
+
+@pytest.fixture
+def http_client() -> Generator[requests.Session, None, None]:
+    with requests.Session() as client:
+        client.verify = False
+        yield client
+
+
+def integrate_dependencies(juju: jubilant.Juju) -> None:
+    juju.integrate(HYDRA_APP, DB_APP)
+    juju.integrate(f"{HYDRA_APP}:{PUBLIC_ROUTE_INTEGRATION_NAME}", TRAEFIK_PUBLIC_APP)
+    juju.integrate(f"{HYDRA_APP}:{INTERNAL_ROUTE_INTEGRATION_NAME}", TRAEFIK_ADMIN_APP)
+    juju.integrate(
         f"{HYDRA_APP}:{LOGIN_UI_INTEGRATION_NAME}", f"{LOGIN_UI_APP}:{LOGIN_UI_INTEGRATION_NAME}"
     )
 
 
-async def get_unit_data(ops_test: OpsTest, unit_name: str) -> dict:
-    show_unit_cmd = (f"show-unit {unit_name}").split()
-    _, stdout, _ = await ops_test.juju(*show_unit_cmd)
-    cmd_output = yaml.safe_load(stdout)
-    return cmd_output[unit_name]
+@pytest.fixture
+def app_integration_data(juju: jubilant.Juju) -> Callable:
+    def _get_data(app_name: str, integration_name: str, unit_num: int = 0):
+        return get_app_integration_data(juju, app_name, integration_name, unit_num)
+
+    return _get_data
 
 
-async def get_integration_data(
-    ops_test: OpsTest, app_name: str, integration_name: str, unit_num: int = 0
-) -> Optional[dict]:
-    data = await get_unit_data(ops_test, f"{app_name}/{unit_num}")
-    return next(
-        (
-            integration
-            for integration in data["relation-info"]
-            if integration["endpoint"] == integration_name
-        ),
-        None,
-    )
+@pytest.fixture
+def login_ui_endpoint_integration_data(app_integration_data: Callable) -> dict | None:
+    return app_integration_data(HYDRA_APP, LOGIN_UI_INTEGRATION_NAME)
 
 
-async def get_app_integration_data(
-    ops_test: OpsTest,
-    app_name: str,
-    integration_name: str,
-    unit_num: int = 0,
-) -> Optional[dict]:
-    data = await get_integration_data(ops_test, app_name, integration_name, unit_num)
-    return data["application-data"] if data else None
+@pytest.fixture
+def leader_public_route_integration_data(app_integration_data: Callable) -> dict | None:
+    return app_integration_data(HYDRA_APP, PUBLIC_ROUTE_INTEGRATION_NAME)
 
 
-@pytest_asyncio.fixture
-async def app_integration_data(ops_test: OpsTest) -> Callable:
-    return functools.partial(get_app_integration_data, ops_test)
-
-
-@pytest_asyncio.fixture
-async def login_ui_endpoint_integration_data(app_integration_data: Callable) -> Optional[dict]:
-    return await app_integration_data(HYDRA_APP, LOGIN_UI_INTEGRATION_NAME)
-
-
-@pytest_asyncio.fixture
-async def leader_public_route_integration_data(app_integration_data: Callable) -> Optional[dict]:
-    return await app_integration_data(HYDRA_APP, PUBLIC_ROUTE_INTEGRATION_NAME)
-
-
-@pytest_asyncio.fixture
-async def leader_internal_ingress_integration_data(
+@pytest.fixture
+def leader_internal_ingress_integration_data(
     app_integration_data: Callable,
-) -> Optional[dict]:
-    return await app_integration_data(HYDRA_APP, INTERNAL_ROUTE_INTEGRATION_NAME)
+) -> dict | None:
+    return app_integration_data(HYDRA_APP, INTERNAL_ROUTE_INTEGRATION_NAME)
 
 
-@pytest_asyncio.fixture
-async def leader_peer_integration_data(app_integration_data: Callable) -> Optional[dict]:
-    return await app_integration_data(HYDRA_APP, HYDRA_APP)
+@pytest.fixture
+def leader_peer_integration_data(app_integration_data: Callable) -> dict | None:
+    return app_integration_data(HYDRA_APP, HYDRA_APP)
 
 
-async def unit_address(ops_test: OpsTest, *, app_name: str, unit_num: int = 0) -> str:
-    status = await ops_test.model.get_status()
-    return status["applications"][app_name]["units"][f"{app_name}/{unit_num}"]["address"]
+@pytest.fixture
+def public_address(juju: jubilant.Juju) -> str:
+    return get_unit_address(juju, app_name=TRAEFIK_PUBLIC_APP)
 
 
-@pytest_asyncio.fixture
-async def public_address() -> Callable[[OpsTest, int], Awaitable[str]]:
-    return functools.partial(unit_address, app_name=TRAEFIK_PUBLIC_APP)
+@pytest.fixture
+def admin_address(juju: jubilant.Juju) -> str:
+    return get_unit_address(juju, app_name=TRAEFIK_ADMIN_APP)
 
 
-@pytest_asyncio.fixture
-async def admin_address() -> Callable[[OpsTest, int], Awaitable[str]]:
-    return functools.partial(unit_address, app_name=TRAEFIK_ADMIN_APP)
-
-
-@pytest_asyncio.fixture
-async def http_client() -> AsyncGenerator[httpx.AsyncClient, None]:
-    async with httpx.AsyncClient(verify=False) as client:
-        yield client
-
-
-@pytest_asyncio.fixture
-async def get_hydra_jwks(
-    ops_test: OpsTest,
+@pytest.fixture
+def get_hydra_jwks(
+    juju: jubilant.Juju,
     request: pytest.FixtureRequest,
-    public_address: Callable,
-    admin_address: Callable,
-    http_client: AsyncClient,
-) -> Callable[[], Awaitable[Response]]:
-    address_func = admin_address if request.param == "admin" else public_address
-    scheme = "http" if request.param == "admin" else "https"
+    http_client: requests.Session,
+) -> Callable[[], requests.Response]:
+    # Use closures to access fixtures and params
+    def wrapper() -> requests.Response:
+        target = request.param
+        if target == "admin":
+            address = get_unit_address(juju, app_name=TRAEFIK_ADMIN_APP)
+            scheme = "http"
+        else:
+            address = get_unit_address(juju, app_name=TRAEFIK_PUBLIC_APP)
+            scheme = "https"
 
-    async def wrapper() -> Response:
-        address = await address_func(ops_test)
         url = f"{scheme}://{address}/.well-known/jwks.json"
-        return await http_client.get(url)
+        return http_client.get(url)
 
     return wrapper
 
 
-@pytest_asyncio.fixture
-async def get_openid_configuration(
-    ops_test: OpsTest, public_address: Callable, http_client: AsyncClient
-) -> Response:
-    address = await public_address(ops_test)
-    url = f"https://{address}/.well-known/openid-configuration"
-    return await http_client.get(url)
+@pytest.fixture
+def get_openid_configuration(
+    public_address: str, http_client: requests.Session
+) -> requests.Response:
+    url = f"https://{public_address}/.well-known/openid-configuration"
+    return http_client.get(url)
 
 
-@pytest_asyncio.fixture
-async def get_admin_clients(
-    ops_test: OpsTest, admin_address: Callable, http_client: AsyncClient
-) -> Response:
-    address = await admin_address(ops_test)
-    url = f"http://{address}/admin/clients"
-    return await http_client.get(url)
+@pytest.fixture
+def get_admin_clients(admin_address: str, http_client: requests.Session) -> requests.Response:
+    url = f"http://{admin_address}/admin/clients"
+    return http_client.get(url)
 
 
-@pytest_asyncio.fixture
-async def client_credential_request(
-    ops_test: OpsTest, public_address: Callable, http_client: AsyncClient
-) -> Callable[[str, str], Awaitable[Response]]:
-    async def wrapper(client_id: str, client_secret: str) -> Response:
-        address = await public_address(ops_test)
-        url = f"https://{address}/oauth2/token"
+@pytest.fixture
+def client_credential_request(
+    public_address: str, http_client: requests.Session
+) -> Callable[[str, str], requests.Response]:
+    def wrapper(client_id: str, client_secret: str) -> requests.Response:
+        url = f"https://{public_address}/oauth2/token"
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        return await http_client.post(
+        return http_client.post(
             url,
             headers=headers,
             auth=(client_id, client_secret),
@@ -198,76 +265,24 @@ def hydra_version() -> str:
 
 
 @pytest.fixture
-def migration_key(ops_test: OpsTest) -> str:
-    db_integration = next(
-        (
-            integration
-            for integration in ops_test.model.relations
-            if integration.matches(f"{HYDRA_APP}:pg-database", f"{DB_APP}:database")
-        ),
-        None,
-    )
-    return f"migration_version_{db_integration.entity_id}" if db_integration else ""
+def migration_key(juju: jubilant.Juju) -> str:
+    data = get_integration_data(juju, HYDRA_APP, "pg-database")
+    return f"migration_version_{data['relation-id']}" if data else ""
 
 
 @pytest.fixture
-def hydra_application(ops_test: OpsTest) -> Application:
-    return ops_test.model.applications[HYDRA_APP]
+def oauth_clients(juju: jubilant.Juju) -> list[dict[str, str]]:
+    action = juju.run(f"{HYDRA_APP}/0", "list-oauth-clients")
+    clients_json = action.results["clients"]
+    return json.loads(clients_json)
 
 
 @pytest.fixture
-def hydra_unit(hydra_application: Application) -> Unit:
-    return hydra_application.units[0]
-
-
-@pytest_asyncio.fixture
-async def oauth_clients(hydra_unit: Unit) -> list[dict[str, str]]:
-    action = await hydra_unit.run_action("list-oauth-clients")
-    results = (await action.wait()).results
-    return json.loads(results["clients"])
-
-
-@pytest_asyncio.fixture
-async def jwks_client(ops_test: OpsTest, public_address: Callable) -> PyJWKClient:
-    address = await public_address(ops_test)
-
+def jwks_client(public_address: str) -> PyJWKClient:
     ssl_ctx = ssl.create_default_context()
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
     return PyJWKClient(
-        f"https://{address}/.well-known/jwks.json",
+        f"https://{public_address}/.well-known/jwks.json",
         ssl_context=ssl_ctx,
     )
-
-
-@pytest_asyncio.fixture(scope="module")
-async def local_charm(ops_test: OpsTest) -> Path:
-    # in GitHub CI, charms are built with charmcraftcache and uploaded to $CHARM_PATH
-    charm = os.getenv("CHARM_PATH")
-    if not charm:
-        # fall back to build locally - required when run outside of GitHub CI
-        charm = await ops_test.build_charm(".")
-    return charm
-
-
-@asynccontextmanager
-async def remove_integration(
-    ops_test: OpsTest, remote_app_name: str, integration_name: str
-) -> AsyncGenerator[None, None]:
-    remove_integration_cmd = (
-        f"remove-relation {HYDRA_APP}:{integration_name} {remote_app_name}"
-    ).split()
-    await ops_test.juju(*remove_integration_cmd)
-    await ops_test.model.wait_for_idle(
-        apps=[remote_app_name],
-        status="active",
-    )
-
-    try:
-        yield
-    finally:
-        await ops_test.model.integrate(f"{HYDRA_APP}:{integration_name}", remote_app_name)
-        await ops_test.model.wait_for_idle(
-            apps=[HYDRA_APP, remote_app_name],
-            status="active",
-        )
