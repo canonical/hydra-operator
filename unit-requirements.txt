@@ -3,3 +3,4 @@ coverage[toml]
 jsonschema
 pytest
 pytest-mock
+ops[testing]

@@ -1,13 +1,13 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-from ops.pebble import Error, ExecError
+from ops import Container
+from ops.pebble import ExecError
 
 from cli import CommandLine, parse_kv_string
-from constants import CONFIG_FILE_NAME
 from exceptions import MigrationError
 
 
@@ -66,77 +66,89 @@ def test_key_value_parser_missing_equals() -> None:
 
 class TestCommandLine:
     @pytest.fixture
-    def command_line(self, mocked_container: MagicMock) -> CommandLine:
-        return CommandLine(mocked_container)
+    def container(self) -> MagicMock:
+        return MagicMock(spec=Container)
 
-    def test_get_admin_service_version(self, command_line: CommandLine) -> None:
-        expected = "v1.0.0"
-        with patch.object(
-            command_line,
-            "_run_cmd",
-            return_value=(
-                f"Version:    {expected}\n"
-                f"Git Hash:    e23751bbc5704efd58acc1132b987ff7fb0412ac\n"
-                f"Build Time:    2024-05-01T07:49:53Z"
-            ),
-        ) as run_cmd:
-            actual = command_line.get_hydra_service_version()
-            assert actual == expected
-            run_cmd.assert_called_with(["hydra", "version"])
+    @pytest.fixture
+    def mock_process(self, container: MagicMock) -> MagicMock:
+        process = MagicMock()
+        container.exec.return_value = process
+        return process
 
-    def test_migrate_with_dsn(self, command_line: CommandLine) -> None:
-        dsn = "postgres://user:password@localhost/db"
-        with patch.object(command_line, "_run_cmd") as run_cmd:
-            command_line.migrate(dsn)
+    @pytest.fixture
+    def command_line(self, container: MagicMock) -> CommandLine:
+        return CommandLine(container)
 
-        expected_cmd = ["hydra", "migrate", "sql", "-e", "--yes"]
-        expected_environments = {"DSN": dsn}
-        run_cmd.assert_called_once_with(
-            expected_cmd, timeout=60, environment=expected_environments
+    def test_get_admin_service_version(
+        self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
+    ) -> None:
+        mock_process.wait_output.return_value = (
+            "Version:    v1.0.0\nGit Hash:   43214dsfasdf431\nBuild Time: 2024-01-01T00:00:00Z",
+            None,
         )
 
-    def test_migrate_without_dsn(self, command_line: CommandLine) -> None:
-        with patch.object(command_line, "_run_cmd") as run_cmd:
+        expected = "v1.0.0"
+        actual = command_line.get_hydra_service_version()
+        assert actual == expected
+        container.exec.assert_called_with(["hydra", "version"], environment=None, timeout=20)
+
+    def test_migrate_with_dsn(
+        self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
+    ) -> None:
+        mock_process.wait_output.return_value = (None, None)
+
+        dsn = "postgres://user:password@localhost/db"
+        command_line.migrate(dsn)
+
+        container.exec.assert_called_with(
+            ["hydra", "migrate", "sql", "-e", "--yes"],
+            environment={"DSN": dsn},
+            timeout=60,
+        )
+
+    def test_migrate_without_dsn(
+        self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
+    ) -> None:
+        mock_process.wait_output.return_value = (None, None)
+
+        command_line.migrate()
+
+        container.exec.assert_called_with(
+            ["hydra", "migrate", "sql", "-e", "--yes", "--config", "/etc/config/hydra.yaml"],
+            environment=None,
+            timeout=60,
+        )
+
+    def test_migrate_failed(
+        self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
+    ) -> None:
+        mock_process.wait_output.side_effect = ExecError(["cmd"], 1, "error", "")
+
+        with pytest.raises(MigrationError):
             command_line.migrate()
 
-        expected_cmd = ["hydra", "migrate", "sql", "-e", "--yes", "--config", CONFIG_FILE_NAME]
-        run_cmd.assert_called_once_with(expected_cmd, timeout=60, environment=None)
+    def test_get_oauth_client_not_found(
+        self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
+    ) -> None:
+        mock_process.wait_output.side_effect = ExecError(
+            ["cmd"], 1, "Unable to locate the resource", ""
+        )
 
-    def test_migrate_failed(self, command_line: CommandLine) -> None:
-        with (
-            patch.object(command_line, "_run_cmd", side_effect=Error),
-            pytest.raises(MigrationError),
-        ):
-            command_line.migrate()
-
-    def test_get_oauth_client_not_found(self, command_line: CommandLine) -> None:
-        with patch.object(
-            command_line,
-            "_run_cmd",
-            side_effect=Error(
-                '{"error": "Unable to locate the resource", "error_description": ""}'
-            ),
-        ):
-            actual = command_line.get_oauth_client("a945ef38-76fc-41ee-8364-12a70fa6c398")
-
+        actual = command_line.get_oauth_client("client_id")
         assert actual is None
 
-    def test_run_cmd(self, mocked_container: MagicMock, command_line: CommandLine) -> None:
-        cmd, expected = ["cmd"], "stdout"
+    def test_run_cmd(
+        self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
+    ) -> None:
+        mock_process.wait_output.return_value = ("out", None)
 
-        mocked_process = MagicMock(wait_output=MagicMock(return_value=(expected, "")))
-        mocked_container.exec.return_value = mocked_process
+        actual = command_line._run_cmd(["cmd"])
+        assert actual == "out"
 
-        actual = command_line._run_cmd(cmd)
-
-        assert actual == expected
-        mocked_container.exec.assert_called_once_with(cmd, timeout=20, environment=None)
-
-    def test_run_cmd_failed(self, mocked_container: MagicMock, command_line: CommandLine) -> None:
-        cmd = ["cmd"]
-
-        mocked_process = MagicMock(wait_output=MagicMock(side_effect=ExecError(cmd, 1, "", "")))
-        mocked_container.exec.return_value = mocked_process
+    def test_run_cmd_failed(
+        self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
+    ) -> None:
+        mock_process.wait_output.side_effect = ExecError(["cmd"], 1, "", "")
 
         with pytest.raises(ExecError):
-            command_line._run_cmd(cmd)
+            command_line._run_cmd(["cmd"])

@@ -20,7 +20,7 @@ Before implementing code, you **MUST** consult the relevant specialist file. The
 - **Source of Truth**: `tox` defines the standard.
   - `tox -e fmt`: Apply standard formatting.
   - `tox -e lint`: Check compliance.
-  - `tox -e unit`: Run Scenario tests.
+  - `tox -e unit`: Run Unit tests (Scenario & Pure Mock).
   - `tox -e integration`: Run Jubilant tests.
 
 ## 4. Juju Status Mapping
