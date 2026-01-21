@@ -181,7 +181,11 @@ class TestHydraUpgrade:
         assert secrets["cookie"]
 
     def test_restore_secrets(
-        self, juju: jubilant.Juju, local_charm: Path, http_client: requests.Session, secrets: dict[str, str]
+        self,
+        juju: jubilant.Juju,
+        local_charm: Path,
+        http_client: requests.Session,
+        secrets: dict[str, str],
     ) -> None:
         """Restore the secret keys after deleting Hydra."""
         juju.remove_application(self.hydra_app_name)
