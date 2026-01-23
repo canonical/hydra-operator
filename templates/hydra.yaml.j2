@@ -39,6 +39,9 @@ oauth2:
             value: {{ token_hook_auth_value }}
             in: {{ token_hook_auth_in }}
     {%- endif %}
+  allowed_top_level_claims:
+    - groups
+  mirror_top_level_claims: false
   {%- endif %}
 
 strategies:
