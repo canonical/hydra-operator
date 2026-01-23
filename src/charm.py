@@ -13,7 +13,6 @@ from typing import Any
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
-    DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
@@ -33,13 +32,12 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from ops import PebbleCheckFailedEvent, PebbleCheckRecoveredEvent
+from ops import EventBase, PebbleCheckFailedEvent, PebbleCheckRecoveredEvent
 from ops.charm import (
     ActionEvent,
     CharmBase,
     CollectStatusEvent,
     ConfigChangedEvent,
-    HookEvent,
     RelationBrokenEvent,
     RelationEvent,
     RelationJoinedEvent,
@@ -196,32 +194,32 @@ class HydraCharm(CharmBase):
         self.framework.observe(
             self.on.hydra_pebble_check_recovered, self._on_pebble_check_recovered
         )
-        self.framework.observe(self.on.update_status, self._holistic_handler)
-        self.framework.observe(self.on.leader_elected, self._holistic_handler)
+        self.framework.observe(self.on.update_status, self._on_holistic_handler)
+        self.framework.observe(self.on.leader_elected, self._on_holistic_handler)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.collect_unit_status, self._on_collect_status)
 
         # secrets
-        self.framework.observe(self.on.secret_changed, self._holistic_handler)
+        self.framework.observe(self.on.secret_changed, self._on_holistic_handler)
 
         # peers
         self.framework.observe(
-            self.on[PEER_INTEGRATION_NAME].relation_created, self._holistic_handler
+            self.on[PEER_INTEGRATION_NAME].relation_created, self._on_holistic_handler
         )
         self.framework.observe(
-            self.on[PEER_INTEGRATION_NAME].relation_changed, self._holistic_handler
+            self.on[PEER_INTEGRATION_NAME].relation_changed, self._on_holistic_handler
         )
 
         # hooks
-        self.framework.observe(self.token_hook.on.ready, self._holistic_handler)
-        self.framework.observe(self.token_hook.on.unavailable, self._holistic_handler)
+        self.framework.observe(self.token_hook.on.ready, self._on_holistic_handler)
+        self.framework.observe(self.token_hook.on.unavailable, self._on_holistic_handler)
 
         # database
         self.framework.observe(
             self.database_requirer.on.database_created, self._on_database_created
         )
         self.framework.observe(
-            self.database_requirer.on.endpoints_changed, self._on_database_changed
+            self.database_requirer.on.endpoints_changed, self._on_holistic_handler
         )
         self.framework.observe(
             self.on[DATABASE_INTEGRATION_NAME].relation_broken,
@@ -259,11 +257,11 @@ class HydraCharm(CharmBase):
         # login-ui
         self.framework.observe(
             self.on[LOGIN_UI_INTEGRATION_NAME].relation_changed,
-            self._holistic_handler,
+            self._on_holistic_handler,
         )
         self.framework.observe(
             self.on[LOGIN_UI_INTEGRATION_NAME].relation_broken,
-            self._holistic_handler,
+            self._on_holistic_handler,
         )
 
         # hydra-endpoints
@@ -474,10 +472,6 @@ class HydraCharm(CharmBase):
         self.peer_data[migration_version] = self._workload_service.version
         self._holistic_handler(event)
 
-    def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
-        self._holistic_handler(event)
-
     def _on_database_integration_broken(self, event: RelationBrokenEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
@@ -486,7 +480,7 @@ class HydraCharm(CharmBase):
         except PebbleServiceError as e:
             logger.error(f"Failed to stop the service, please check the container logs: {e}")
 
-    def _on_oauth_integration_created(self, event: RelationEvent) -> None:
+    def _on_oauth_integration_created(self, event: EventBase) -> None:
         if not (public_url := PublicRouteData.load(self.public_route).url):
             event.defer()
             logger.info("Public route URL is not available. Deferring the event.")
@@ -566,7 +560,17 @@ class HydraCharm(CharmBase):
     def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
         logger.error(f"Failed to patch resource constraints: {event.message}")
 
-    def _holistic_handler(self, event: HookEvent) -> None:
+    def _on_holistic_handler(self, event: EventBase) -> None:
+        """Centralized handler for most events.
+
+        This method is called by most event handlers to centralize the logic for handling.
+        It defers the logic to the `_holistic_handler` method. The reason for this indirection
+        is to make unit testing easier (we can't mock a handler method directly).
+        """
+        self.unit.status = MaintenanceStatus("Configuring resources")
+        self._holistic_handler(event)
+
+    def _holistic_handler(self, event: EventBase) -> None:
         if not self.hydra_secrets.is_ready:
             self._initialize_secrets()
 
