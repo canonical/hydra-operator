@@ -17,14 +17,15 @@ from typing import List, Optional
 
 from ops import (
     CharmBase,
+    EventBase,
     EventSource,
+    Handle,
     Object,
     ObjectEvents,
     Relation,
     RelationBrokenEvent,
     RelationChangedEvent,
     RelationCreatedEvent,
-    RelationEvent,
 )
 from pydantic import (
     BaseModel,
@@ -34,7 +35,7 @@ from pydantic import (
 
 LIBID = "b2e5e865f0bc43638f1e4a0a63e899a9"
 LIBAPI = 0
-LIBPATCH = 1
+LIBPATCH = 2
 
 PYDEPS = ["pydantic"]
 
@@ -73,12 +74,68 @@ class ProviderData(BaseModel):
         )
 
 
-class ReadyEvent(RelationEvent):
+class ReadyEvent(EventBase):
     """An event when the integration is ready."""
 
+    def __init__(
+        self,
+        handle: Handle,
+        relation: Relation,
+    ) -> None:
+        super().__init__(handle)
+        self.relation = relation
 
-class UnavailableEvent(RelationEvent):
+    def snapshot(self) -> dict:
+        """Save event."""
+        return {
+            "relation_name": self.relation.name,
+            "relation_id": self.relation.id,
+        }
+
+    def restore(self, snapshot: dict) -> None:
+        """Restore event."""
+        relation = self.framework.model.get_relation(
+            snapshot["relation_name"], snapshot["relation_id"]
+        )
+        if relation is None:
+            raise ValueError(
+                "Unable to restore {}: relation {} (id={}) not found.".format(
+                    self, snapshot["relation_name"], snapshot["relation_id"]
+                )
+            )
+        self.relation = relation
+
+
+class UnavailableEvent(EventBase):
     """An event when the integration is unavailable."""
+
+    def __init__(
+        self,
+        handle: Handle,
+        relation: Relation,
+    ) -> None:
+        super().__init__(handle)
+        self.relation = relation
+
+    def snapshot(self) -> dict:
+        """Save event."""
+        return {
+            "relation_name": self.relation.name,
+            "relation_id": self.relation.id,
+        }
+
+    def restore(self, snapshot: dict) -> None:
+        """Restore event."""
+        relation = self.framework.model.get_relation(
+            snapshot["relation_name"], snapshot["relation_id"]
+        )
+        if relation is None:
+            raise ValueError(
+                "Unable to restore {}: relation {} (id={}) not found.".format(
+                    self, snapshot["relation_name"], snapshot["relation_id"]
+                )
+            )
+        self.relation = relation
 
 
 class RelationEvents(ObjectEvents):

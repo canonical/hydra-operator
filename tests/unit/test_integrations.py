@@ -1,6 +1,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 from dataclasses import asdict
 from unittest.mock import MagicMock, create_autospec, mock_open, patch
 
@@ -15,7 +16,6 @@ from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
 )
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from ops.testing import Harness
 from yarl import URL
 
 from constants import ADMIN_PORT, POSTGRESQL_DSN_TEMPLATE, PUBLIC_PORT
@@ -32,39 +32,69 @@ from integrations import (
 
 class TestPeerData:
     @pytest.fixture
-    def peer_data(self, harness: Harness) -> PeerData:
-        data = PeerData(harness.model)
-        data["key"] = "val"
+    def mocked_model(self) -> MagicMock:
+        model = MagicMock()
+        model.app = MagicMock()
+        return model
+
+    @pytest.fixture
+    def peer_relation(self, mocked_model: MagicMock) -> MagicMock:
+        relation = MagicMock()
+        relation.data = {mocked_model.app: {}}
+        return relation
+
+    @pytest.fixture
+    def peer_data(self, mocked_model: MagicMock, peer_relation: MagicMock) -> PeerData:
+        mocked_model.get_relation.return_value = peer_relation
+        data = PeerData(mocked_model)
         return data
 
-    def test_without_peer_integration(self, peer_data: PeerData) -> None:
-        assert peer_data["key"] == {}
+    def test_without_peer_integration(self, mocked_model: MagicMock) -> None:
+        mocked_model.get_relation.return_value = None
+        data = PeerData(mocked_model)
+        assert data["key"] == {}
 
-    def test_with_wrong_key(self, peer_integration: int, peer_data: PeerData) -> None:
+    def test_with_wrong_key(
+        self, peer_data: PeerData, mocked_model: MagicMock, peer_relation: MagicMock
+    ) -> None:
+        peer_relation.data[mocked_model.app] = {}
         assert peer_data["wrong_key"] == {}
 
-    def test_get(self, peer_integration: int, peer_data: PeerData) -> None:
+    def test_get(
+        self, peer_data: PeerData, mocked_model: MagicMock, peer_relation: MagicMock
+    ) -> None:
+        peer_relation.data[mocked_model.app]["key"] = json.dumps("val")
         assert peer_data["key"] == "val"
 
-    def test_pop_without_peer_integration(
-        self, harness: Harness, peer_integration: int, peer_data: PeerData
-    ) -> None:
-        harness.remove_relation(peer_integration)
-        assert peer_data.pop("key") == {}
+    def test_pop_without_peer_integration(self, mocked_model: MagicMock) -> None:
+        mocked_model.get_relation.return_value = None
+        data = PeerData(mocked_model)
+        assert data.pop("key") == {}
 
-    def test_pop_with_wrong_key(self, peer_integration: int, peer_data: PeerData) -> None:
+    def test_pop_with_wrong_key(
+        self, peer_data: PeerData, mocked_model: MagicMock, peer_relation: MagicMock
+    ) -> None:
+        peer_relation.data[mocked_model.app]["key"] = json.dumps("val")
         assert peer_data.pop("wrong_key") == {}
         assert peer_data["key"] == "val"
 
-    def test_pop(self, peer_integration: int, peer_data: PeerData) -> None:
+    def test_pop(
+        self, peer_data: PeerData, mocked_model: MagicMock, peer_relation: MagicMock
+    ) -> None:
+        peer_relation.data[mocked_model.app]["key"] = json.dumps("val")
         assert peer_data.pop("key") == "val"
         assert peer_data["key"] == {}
 
-    def test_keys(self, peer_integration: int, peer_data: PeerData) -> None:
+    def test_keys(
+        self, peer_data: PeerData, mocked_model: MagicMock, peer_relation: MagicMock
+    ) -> None:
+        peer_relation.data[mocked_model.app]["key"] = json.dumps("val")
         assert tuple(peer_data.keys()) == ("key",)
 
-    def test_keys_without_peer_integration(self, peer_data: PeerData) -> None:
-        assert not tuple(peer_data.keys())
+    def test_keys_without_peer_integration(self, mocked_model: MagicMock) -> None:
+        mocked_model.get_relation.return_value = None
+        data = PeerData(mocked_model)
+        assert not tuple(data.keys())
 
 
 class TestDatabaseConfig:
@@ -230,7 +260,6 @@ class TestPublicRouteData:
         self,
         mocked_requirer: MagicMock,
         ingress_template: str,
-        public_route_integration_data: None,
     ) -> None:
         with patch("builtins.open", mock_open(read_data=ingress_template)):
             actual = PublicRouteData.load(mocked_requirer)

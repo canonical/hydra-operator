@@ -56,7 +56,7 @@ def parse_kv_string(kv_str: str) -> dict[str, str]:
 
 
 class OAuthClient(BaseModel):
-    redirect_uris: Optional[list[str]] = Field(
+    redirect_uris: list[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("redirect-uris", "redirect_uris", "redirect_uri"),
         serialization_alias="redirect-uris",
@@ -106,7 +106,7 @@ class OAuthClient(BaseModel):
 
     @property
     def managed_by_integration(self) -> bool:
-        return "integration-id" in self.metadata
+        return bool(self.metadata) and "integration-id" in self.metadata
 
     @field_validator("redirect_uris", mode="before")
     @classmethod
@@ -360,7 +360,7 @@ class CommandLine:
             stdout = self._run_cmd(cmd)
         except ExecError as err:
             logger.error("Failed to delete an OAuth client: %s", err)
-            if "Unable to locate the resource" in err.stderr:
+            if err.stderr and "Unable to locate the resource" in err.stderr:
                 raise ClientDoesNotExistError()
             raise CommandExecError() from err
 

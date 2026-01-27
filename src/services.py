@@ -24,7 +24,7 @@ from exceptions import PebbleServiceError
 
 logger = logging.getLogger(__name__)
 
-PEBBLE_LAYER_DICT = {
+PEBBLE_LAYER_DICT: LayerDict = {
     "summary": "hydra-operator layer",
     "description": "pebble config layer for hydra-operator",
     "services": {
@@ -40,6 +40,7 @@ PEBBLE_LAYER_DICT = {
             "override": "replace",
             "level": "ready",
             "http": {"url": f"http://localhost:{ADMIN_PORT}/health/ready"},
+            "threshold": 3,
         },
         "alive": {
             "override": "replace",

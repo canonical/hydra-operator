@@ -1,18 +1,20 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from typing import Any, Generator, List
+from typing import Any
 
 import pytest
+import yaml
 from charms.hydra.v0.hydra_token_hook import (
+    AuthIn,
     HydraHookProvider,
     ProviderData,
-    ReadyEvent,
     UnavailableEvent,
 )
 from ops.charm import CharmBase
 from ops.framework import EventBase
-from ops.testing import Harness
+from ops.testing import Context, Relation
+from unit.conftest import create_state
 
 METADATA = """
 name: provider-tester
@@ -21,71 +23,70 @@ provides:
     interface: hydra_token_hook
 """
 
-data = ProviderData(
+provider_data = ProviderData(
     url="https://path/to/hook",
-    auth_type="api_key",
     auth_config_name="Authorization",
     auth_config_value="token",
-    auth_config_in="header",
+    auth_config_in=AuthIn.header,
 )
 
 
 class HydraTokenHookProviderCharm(CharmBase):
-    def __init__(self, *args: Any, data: ProviderData = data) -> None:
+    def __init__(self, *args: Any) -> None:
         super().__init__(*args)
+        self.provider_data = provider_data
         self.token_hook = HydraHookProvider(self)
-        self.events: List = []
-        self.data = data
 
         self.framework.observe(self.token_hook.on.ready, self._on_ready)
-        self.framework.observe(self.token_hook.on.unavailable, self._record_event)
 
     def _on_ready(self, event: EventBase) -> None:
-        self.token_hook.update_relations_app_data(self.data)
-        self._record_event(event)
-
-    def _record_event(self, event: EventBase) -> None:
-        self.events.append(event)
+        self.token_hook.update_relations_app_data(self.provider_data)
 
 
-@pytest.fixture()
-def harness() -> Generator:
-    harness = Harness(HydraTokenHookProviderCharm, meta=METADATA)
-    harness.set_leader(True)
-    harness.begin()
-    yield harness
-    harness.cleanup()
+class NoAuthHydraTokenHookProviderCharm(HydraTokenHookProviderCharm):
+    def __init__(self, *args: Any) -> None:
+        super().__init__(*args)
+        self.provider_data = ProviderData(url="https://path/to/hook")
 
 
-def test_provider_info_in_relation_databag(harness: Harness) -> None:
-    relation_id = harness.add_relation("hydra-token-hook", "requirer")
-
-    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
-
-    assert relation_data["url"] == "https://path/to/hook"
-
-    assert isinstance(harness.charm.events[0], ReadyEvent)
-    assert relation_data == {
-        "url": "https://path/to/hook",
-        "auth_config_name": "Authorization",
-        "auth_config_value": "token",
-        "auth_config_in": "header",
-    }
+@pytest.fixture
+def context() -> Context:
+    return Context(HydraTokenHookProviderCharm, meta=yaml.safe_load(METADATA))
 
 
-def test_provider_info_in_relation_databag_with_no_auth(harness: Harness) -> None:
-    harness.charm.data = ProviderData(url="https://path/to/hook")
-    relation_id = harness.add_relation("hydra-token-hook", "requirer")
-
-    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
-
-    assert isinstance(harness.charm.events[0], ReadyEvent)
-    assert relation_data == {"url": "https://path/to/hook"}
+@pytest.fixture
+def context_no_auth() -> Context:
+    return Context(NoAuthHydraTokenHookProviderCharm, meta=yaml.safe_load(METADATA))
 
 
-def test_unavailable_event_emitted_when_relation_removed(harness: Harness) -> None:
-    relation_id = harness.add_relation("hydra-token-hook", "requirer")
-    harness.add_relation_unit(relation_id, "requirer/0")
-    harness.remove_relation(relation_id)
+def test_provider_info_in_relation_databag(context: Context) -> None:
+    relation = Relation("hydra-token-hook")
+    state = create_state(leader=True, relations=[relation], containers=[])
 
-    assert any(isinstance(e, UnavailableEvent) for e in harness.charm.events)
+    with context(context.on.relation_created(relation), state) as mgr:
+        state_out = mgr.run()
+        assert state_out.get_relation(relation.id).local_app_data["url"] == "https://path/to/hook"
+        assert (
+            state_out.get_relation(relation.id).local_app_data["auth_config_name"]
+            == "Authorization"
+        )
+
+
+def test_provider_info_in_relation_databag_with_no_auth(context_no_auth: Context) -> None:
+    relation = Relation("hydra-token-hook")
+    state = create_state(leader=True, relations=[relation], containers=[])
+
+    with context_no_auth(context_no_auth.on.relation_created(relation), state) as mgr:
+        state_out = mgr.run()
+        relation_data = state_out.get_relation(relation.id).local_app_data
+        assert relation_data["url"] == "https://path/to/hook"
+        assert "auth_config_name" not in relation_data
+
+
+def test_unavailable_event_emitted_when_relation_removed(context: Context) -> None:
+    relation = Relation("hydra-token-hook")
+    state = create_state(leader=True, relations=[relation], containers=[])
+
+    with context(context.on.relation_broken(relation), state) as mgr:
+        mgr.run()
+        assert any(isinstance(e, UnavailableEvent) for e in context.emitted_events)

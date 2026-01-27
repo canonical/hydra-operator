@@ -4,14 +4,16 @@
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
+from ops import Model
 from ops.pebble import PathError
-from ops.testing import Harness
 
 from configs import CharmConfig, ConfigFile, ServiceConfigSource
 from constants import DEFAULT_OAUTH_SCOPES
 
 
 class TestCharmConfig:
+    """Tests for the CharmConfig class."""
+
     @pytest.mark.parametrize(
         "config, expected",
         [
@@ -25,10 +27,10 @@ class TestCharmConfig:
             ),
         ],
     )
-    def test_to_service_configs(self, harness: Harness, config: dict, expected: dict) -> None:
-        harness.update_config(config)
-        actual = CharmConfig(harness.charm.config, harness.model).to_service_configs()
-
+    def test_to_service_configs(self, config: dict, expected: dict) -> None:
+        """Test that charm configuration is correctly converted to service configs."""
+        mock_model = MagicMock(spec=Model)
+        actual = CharmConfig(config, mock_model).to_service_configs()
         assert actual == expected
 
     @pytest.mark.parametrize(
@@ -44,19 +46,27 @@ class TestCharmConfig:
             ),
         ],
     )
-    def test_to_env_vars(self, harness: Harness, config: dict, expected: dict) -> None:
-        harness.update_config(config)
-        actual = CharmConfig(harness.charm.config, harness.model).to_env_vars()
-
+    def test_to_env_vars(self, config: dict, expected: dict) -> None:
+        """Test that charm configuration is correctly converted to environment variables."""
+        mock_model = MagicMock(spec=Model)
+        actual = CharmConfig(config, mock_model).to_env_vars()
         assert actual == expected
 
 
 class TestConfigFile:
+    """Tests for the ConfigFile class."""
+
     @pytest.fixture
     def config_template(self) -> str:
         return "{{ supported_scopes }} and {{ key1 }} and {{ key2 }}"
 
     def test_from_sources(self, config_template: str) -> None:
+        """Test creating a ConfigFile from multiple sources.
+
+        Verifies that:
+        - Defaults are applied.
+        - Values from sources are substituted into the template.
+        """
         source = MagicMock(spec=ServiceConfigSource)
         source.to_service_configs.return_value = {"key1": "value1"}
 
@@ -69,16 +79,18 @@ class TestConfigFile:
         assert str(config_file) == f"{DEFAULT_OAUTH_SCOPES} and value1 and value2"
 
     def test_from_workload_container(self, mocked_container: MagicMock) -> None:
+        """Test creating a ConfigFile from a workload container file."""
         mocked_file = MagicMock()
         mocked_file.__enter__.return_value.read.return_value = "config file"
-        mocked_container.pull.return_value = mocked_file
+        mocked_container.pull = MagicMock(return_value=mocked_file)
 
         config_file = ConfigFile.from_workload_container(mocked_container)
 
         assert config_file.content == "config file"
 
     def test_from_workload_container_non_existing_file(self, mocked_container: MagicMock) -> None:
-        mocked_container.pull.side_effect = PathError(kind="", message="")
+        """Test behavior when the config file does not exist in the workload container."""
+        mocked_container.pull = MagicMock(side_effect=PathError(kind="", message=""))
 
         config_file = ConfigFile.from_workload_container(mocked_container)
 

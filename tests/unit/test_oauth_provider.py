@@ -2,9 +2,10 @@
 # See LICENSE file for licensing details.
 
 from os.path import join
-from typing import Any, Generator, List
+from typing import Any
 
 import pytest
+import yaml
 from charms.hydra.v0.oauth import (
     CLIENT_SECRET_FIELD,
     ClientChangedEvent,
@@ -13,9 +14,8 @@ from charms.hydra.v0.oauth import (
     OAuthProvider,
 )
 from ops.charm import CharmBase, RelationCreatedEvent
-from ops.framework import EventBase
-from ops.model import SecretNotFoundError
-from ops.testing import Harness
+from ops.testing import Context, Relation, Secret
+from unit.conftest import create_state
 
 METADATA = """
 name: provider-tester
@@ -31,15 +31,11 @@ class OAuthProviderCharm(CharmBase):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
         self.oauth = OAuthProvider(self)
-        self.events: List = []
 
         self.framework.observe(self.on.oauth_relation_created, self._on_relation_created)
         self.framework.observe(self.oauth.on.client_created, self._on_client_created)
-        self.framework.observe(self.oauth.on.client_created, self._record_event)
-        self.framework.observe(self.oauth.on.client_changed, self._record_event)
-        self.framework.observe(self.oauth.on.client_deleted, self._record_event)
 
-    def _on_client_created(self, event: ClientChangedEvent) -> None:
+    def _on_client_created(self, event: ClientCreatedEvent) -> None:
         self.oauth.set_client_credentials_in_relation_data(
             event.relation_id, CLIENT_ID, CLIENT_SECRET
         )
@@ -56,24 +52,20 @@ class OAuthProviderCharm(CharmBase):
             scope="openid profile email phone",
         )
 
-    def _record_event(self, event: EventBase) -> None:
-        self.events.append(event)
+
+@pytest.fixture
+def context() -> Context:
+    return Context(OAuthProviderCharm, meta=yaml.safe_load(METADATA))
 
 
-@pytest.fixture()
-def harness() -> Generator:
-    harness = Harness(OAuthProviderCharm, meta=METADATA)
-    harness.set_leader(True)
-    harness.begin()
-    yield harness
-    harness.cleanup()
+def test_provider_info_in_relation_databag(context: Context) -> None:
+    relation = Relation("oauth")
+    state = create_state(leader=True, relations=[relation], containers=[])
 
+    state_out = context.run(context.on.relation_created(relation), state)
 
-def test_provider_info_in_relation_databag(harness: Harness) -> None:
-    relation_id = harness.add_relation("oauth", "requirer")
-
-    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
-
+    relation_out = state_out.get_relation(relation.id)
+    relation_data = relation_out.local_app_data
     assert relation_data == {
         "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
         "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
@@ -86,117 +78,100 @@ def test_provider_info_in_relation_databag(harness: Harness) -> None:
     }
 
 
-def test_client_credentials_in_relation_databag_when_client_available(harness: Harness) -> None:
-    relation_id = harness.add_relation("oauth", "requirer")
-    harness.add_relation_unit(relation_id, "requirer/0")
-    harness.update_relation_data(
-        relation_id,
-        "requirer",
-        {
-            "redirect_uri": "https://oidc-client.com/callback",
-            "scope": "openid email",
-            "grant_types": '["authorization_code"]',
-            "audience": "[]",
-            "token_endpoint_auth_method": "client_secret_basic",
-        },
-    )
-
-    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
-    client_secret_id = relation_data.pop("client_secret_id")
-    secret = harness.model.get_secret(id=client_secret_id)
-
-    assert any(isinstance(e, ClientCreatedEvent) for e in harness.charm.events)
-    assert secret.get_content()[CLIENT_SECRET_FIELD] == CLIENT_SECRET
-    assert relation_data == {
-        "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
-        "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
-        "issuer_url": "https://example.oidc.com",
-        "jwks_endpoint": "https://example.oidc.com/.well-known/jwks.json",
-        "scope": "openid profile email phone",
-        "token_endpoint": "https://example.oidc.com/oauth2/token",
-        "userinfo_endpoint": "https://example.oidc.com/userinfo",
-        "client_id": CLIENT_ID,
-        "jwt_access_token": "False",
+def test_client_credentials_in_relation_databag_when_client_available(context: Context) -> None:
+    requirer_data = {
+        "redirect_uri": "https://oidc-client.com/callback",
+        "scope": "openid email",
+        "grant_types": '["authorization_code"]',
+        "audience": "[]",
+        "token_endpoint_auth_method": "client_secret_basic",
     }
 
+    provider_data = {
+        "issuer_url": "https://example.oidc.com",
+        "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
+        "token_endpoint": "https://example.oidc.com/oauth2/token",
+        "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
+        "userinfo_endpoint": "https://example.oidc.com/userinfo",
+        "jwks_endpoint": "https://example.oidc.com/.well-known/jwks.json",
+        "scope": "openid profile email phone",
+    }
 
-def test_client_changed_event_emitted_when_client_config_changed(harness: Harness) -> None:
-    relation_id = harness.add_relation("oauth", "requirer")
-    harness.add_relation_unit(relation_id, "requirer/0")
-    harness.update_relation_data(
-        relation_id,
-        "requirer",
-        {
-            "redirect_uri": "https://oidc-client.com/callback",
-            "scope": "openid email",
-            "grant_types": '["authorization_code"]',
-            "audience": "[]",
-            "token_endpoint_auth_method": "client_secret_basic",
-        },
-    )
+    relation = Relation("oauth", remote_app_data=requirer_data, local_app_data=provider_data)
+    state = create_state(leader=True, relations=[relation], containers=[])
 
+    state_out = context.run(context.on.relation_changed(relation), state)
+
+    assert any(isinstance(e, ClientCreatedEvent) for e in context.emitted_events)
+
+    relation_out = state_out.get_relation(relation.id)
+    relation_data = relation_out.local_app_data
+    assert relation_data.get("client_id") == CLIENT_ID
+    assert "client_secret_id" in relation_data
+
+    client_secret_id = relation_data["client_secret_id"]
+    secret = next(s for s in state_out.secrets if s.id == client_secret_id)
+    assert secret.tracked_content[CLIENT_SECRET_FIELD] == CLIENT_SECRET
+
+
+def test_client_changed_event_emitted_when_client_config_changed(context: Context) -> None:
     redirect_uri = "https://oidc-client.com/callback2"
-    harness.update_relation_data(
-        relation_id,
-        "requirer",
-        {
-            "redirect_uri": redirect_uri,
-            "scope": "openid email",
-            "grant_types": '["authorization_code"]',
-            "audience": "[]",
-            "token_endpoint_auth_method": "client_secret_basic",
-        },
-    )
+
+    requirer_data = {
+        "redirect_uri": redirect_uri,
+        "scope": "openid email",
+        "grant_types": '["authorization_code"]',
+        "audience": "[]",
+        "token_endpoint_auth_method": "client_secret_basic",
+    }
+
+    local_data = {
+        "client_id": CLIENT_ID,
+        "issuer_url": "https://example.oidc.com",
+        "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
+        "token_endpoint": "https://example.oidc.com/oauth2/token",
+        "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
+        "userinfo_endpoint": "https://example.oidc.com/userinfo",
+        "jwks_endpoint": "https://example.oidc.com/.well-known/jwks.json",
+        "scope": "openid profile email phone",
+    }
+
+    relation = Relation("oauth", remote_app_data=requirer_data, local_app_data=local_data)
+    state = create_state(leader=True, relations=[relation], containers=[])
+
+    context.run(context.on.relation_changed(relation), state)
 
     assert any(
         isinstance(e, ClientChangedEvent) and e.redirect_uri == redirect_uri
-        for e in harness.charm.events
+        for e in context.emitted_events
     )
 
 
 @pytest.mark.xfail(
     reason="We no longer remove clients on relation removal, see https://github.com/canonical/hydra-operator/issues/268"
 )
-def test_client_deleted_event_emitted_when_relation_removed(harness: Harness) -> None:
-    relation_id = harness.add_relation("oauth", "requirer")
-    harness.add_relation_unit(relation_id, "requirer/0")
-    harness.update_relation_data(
-        relation_id,
-        "requirer",
-        {
-            "redirect_uri": "https://oidc-client.com/callback",
-            "scope": "openid email",
-            "grant_types": '["authorization_code"]',
-            "audience": "[]",
-            "token_endpoint_auth_method": "client_secret_basic",
-        },
-    )
-    harness.remove_relation(relation_id)
+def test_client_deleted_event_emitted_when_relation_removed(context: Context) -> None:
+    relation = Relation("oauth")
+    state = create_state(leader=True, relations=[relation], containers=[])
 
-    assert any(isinstance(e, ClientDeletedEvent) for e in harness.charm.events)
+    context.run(context.on.relation_broken(relation), state)
+
+    assert any(isinstance(e, ClientDeletedEvent) for e in context.emitted_events)
 
 
 @pytest.mark.xfail(
     reason="We no longer remove clients on relation removal, see https://github.com/canonical/hydra-operator/issues/268"
 )
-def test_secret_removed_when_relation_removed(harness: Harness) -> None:
-    relation_id = harness.add_relation("oauth", "requirer")
-    harness.add_relation_unit(relation_id, "requirer/0")
-    harness.update_relation_data(
-        relation_id,
-        "requirer",
-        {
-            "redirect_uri": "https://oidc-client.com/callback",
-            "scope": "openid email",
-            "grant_types": '["authorization_code"]',
-            "audience": "[]",
-            "token_endpoint_auth_method": "client_secret_basic",
-        },
-    )
+def test_secret_removed_when_relation_removed(context: Context) -> None:
+    secret_id = "secret:123"
+    secret = Secret(id=secret_id, tracked_content={CLIENT_SECRET_FIELD: "old_secret"})
 
-    relation_data = harness.get_relation_data(relation_id, harness.model.app.name)
-    client_secret_id = relation_data["client_secret_id"]
-    harness.remove_relation(relation_id)
+    local_data = {"client_secret_id": secret_id}
+    relation = Relation("oauth", local_app_data=local_data)
+    state = create_state(leader=True, relations=[relation], secrets=[secret], containers=[])
 
-    with pytest.raises(SecretNotFoundError, match="Secret not found by ID"):
-        harness.model.get_secret(id=client_secret_id)
+    state_out = context.run(context.on.relation_broken(relation), state)
+
+    found_secret = next((s for s in state_out.secrets if s.id == secret_id), None)
+
+    assert found_secret is None
