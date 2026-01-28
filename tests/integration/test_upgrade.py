@@ -19,7 +19,14 @@ from integration.constants import (
     PUBLIC_INGRESS_DOMAIN,
     TRAEFIK_CHARM,
 )
-from integration.utils import all_active, all_waiting, any_error, get_unit_address
+from integration.utils import (
+    all_active,
+    all_maintenance,
+    all_waiting,
+    any_error,
+    get_unit_address,
+    or_,
+)
 
 from src.constants import (
     INTERNAL_ROUTE_INTEGRATION_NAME,
@@ -136,7 +143,10 @@ class TestHydraUpgrade:
         )
 
         juju.wait(
-            ready=all_waiting(self.hydra_app_name),
+            ready=or_(
+                all_waiting(self.hydra_app_name),
+                all_maintenance(self.hydra_app_name)
+            ),
             error=any_error(self.hydra_app_name),
             timeout=15 * 60,
         )

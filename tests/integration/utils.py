@@ -103,6 +103,10 @@ def all_waiting(*apps: str) -> StatusPredicate:
     return lambda status: jubilant.all_waiting(status, *apps)
 
 
+def all_maintenance(*apps: str) -> StatusPredicate:
+    return lambda status: jubilant.all_maintenance(status, *apps)
+
+
 def any_error(*apps: str) -> StatusPredicate:
     return lambda status: jubilant.any_error(status, *apps)
 
