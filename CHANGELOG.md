@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/canonical/hydra-operator/compare/v3.0.0...v3.0.1) (2026-01-29)
+
+
+### Bug Fixes
+
+* Adjust terraform module to remove offer ([#498](https://github.com/canonical/hydra-operator/issues/498)) ([dde067f](https://github.com/canonical/hydra-operator/commit/dde067f71e7d895d55639d22e882cceb40dbec78))
+
 ## [3.0.0](https://github.com/canonical/hydra-operator/compare/v2.0.0...v3.0.0) (2026-01-27)
 
 
