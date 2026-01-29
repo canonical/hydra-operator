@@ -20,10 +20,3 @@ resource "juju_application" "application" {
   }
   model_uuid = var.model
 }
-
-resource "juju_offer" "oauth_offer" {
-  name             = "oauth-offer"
-  application_name = juju_application.application.name
-  endpoints        = ["oauth"]
-  model_uuid       = var.model
-}
