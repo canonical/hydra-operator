@@ -3,5 +3,5 @@ jubilant
 pytest
 requests
 tenacity
-PyJWT==2.10.1
+PyJWT==2.11.0
 cryptography
