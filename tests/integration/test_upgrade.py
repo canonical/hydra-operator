@@ -143,10 +143,7 @@ class TestHydraUpgrade:
         )
 
         juju.wait(
-            ready=or_(
-                all_waiting(self.hydra_app_name),
-                all_maintenance(self.hydra_app_name)
-            ),
+            ready=or_(all_waiting(self.hydra_app_name), all_maintenance(self.hydra_app_name)),
             error=any_error(self.hydra_app_name),
             timeout=15 * 60,
         )
