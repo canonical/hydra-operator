@@ -13,6 +13,7 @@ from typing import Any
 
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
+    DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
@@ -219,7 +220,7 @@ class HydraCharm(CharmBase):
             self.database_requirer.on.database_created, self._on_database_created
         )
         self.framework.observe(
-            self.database_requirer.on.endpoints_changed, self._on_holistic_handler
+            self.database_requirer.on.endpoints_changed, self._on_database_changed
         )
         self.framework.observe(
             self.on[DATABASE_INTEGRATION_NAME].relation_broken,
@@ -470,6 +471,10 @@ class HydraCharm(CharmBase):
 
         migration_version = DatabaseConfig.load(self.database_requirer).migration_version
         self.peer_data[migration_version] = self._workload_service.version
+        self._holistic_handler(event)
+
+    def _on_database_changed(self, event: DatabaseEndpointsChangedEvent) -> None:
+        self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
 
     def _on_database_integration_broken(self, event: RelationBrokenEvent) -> None:
