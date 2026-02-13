@@ -2,14 +2,13 @@
 # See LICENSE file for licensing details.
 
 import json
-from dataclasses import replace
 from typing import cast
 from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
 from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
-from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
+from ops import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.testing import Container, Context, PeerRelation, Relation, Secret
 from pytest_mock import MockerFixture
 from unit.conftest import create_state
