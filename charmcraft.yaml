@@ -8,7 +8,7 @@ description: |
 summary: |
   OAuth 2.0 and OpenID Connect 1.0 Provider
 links:
-  documentation: https://discourse.charmhub.io/t/hydra-docs-index/12158
+  documentation: https://canonical-identity.readthedocs-hosted.com/reference/charms/hydra
   source: https://github.com/canonical/hydra-operator
   issues: https://github.com/canonical/hydra-operator/issues
 
