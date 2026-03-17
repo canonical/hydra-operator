@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.2](https://github.com/canonical/hydra-operator/compare/v3.0.1...v3.0.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* update charm dependent libs ([ef182ce](https://github.com/canonical/hydra-operator/commit/ef182ce59b7edb41f937851303902de5fbef31f5))
+
 ## [3.0.1](https://github.com/canonical/hydra-operator/compare/v3.0.0...v3.0.1) (2026-01-29)
 
 
