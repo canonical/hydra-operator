@@ -211,8 +211,8 @@ class HydraCharm(CharmBase):
         )
 
         # hooks
-        self.framework.observe(self.token_hook.on.ready, self._on_holistic_handler)
-        self.framework.observe(self.token_hook.on.unavailable, self._on_holistic_handler)
+        self.framework.observe(self.token_hook.on.ready, self._on_token_hook_changed)
+        self.framework.observe(self.token_hook.on.unavailable, self._on_token_hook_changed)
 
         # database
         self.framework.observe(
@@ -487,6 +487,8 @@ class HydraCharm(CharmBase):
             return
 
         internal_endpoints = InternalIngressData.load(self.internal_ingress)
+        hook_data = HydraHookData.load(self.token_hook)
+        groups_claim = "groups" if hook_data.is_ready and "groups" in hook_data.claims else None
         self.oauth_provider.set_provider_info_in_relation_data(
             issuer_url=str(public_url),
             authorization_endpoint=str(public_url / "oauth2/auth"),
@@ -497,6 +499,7 @@ class HydraCharm(CharmBase):
             userinfo_endpoint=str(public_url / "userinfo"),
             jwks_endpoint=str(public_url / ".well-known/jwks.json"),
             scope=" ".join(DEFAULT_OAUTH_SCOPES),
+            groups=groups_claim,
             jwt_access_token=self.config.get("jwt_access_tokens", True),
         )
 
@@ -556,6 +559,10 @@ class HydraCharm(CharmBase):
             str(internal_endpoints.admin_endpoint),
             str(internal_endpoints.public_endpoint),
         )
+
+    def _on_token_hook_changed(self, event: EventBase) -> None:
+        self._on_holistic_handler(event)
+        self._on_oauth_integration_created(event)
 
     def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
         logger.error(f"Failed to patch resource constraints: {event.message}")
