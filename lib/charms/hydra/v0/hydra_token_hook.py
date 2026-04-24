@@ -11,6 +11,7 @@ config.
 """
 
 import enum
+import json
 import logging
 from functools import cached_property
 from typing import List, Optional
@@ -31,11 +32,13 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    field_serializer,
+    field_validator,
 )
 
 LIBID = "b2e5e865f0bc43638f1e4a0a63e899a9"
 LIBAPI = 0
-LIBPATCH = 2
+LIBPATCH = 3
 
 PYDEPS = ["pydantic"]
 
@@ -61,6 +64,19 @@ class ProviderData(BaseModel):
         default_factory=lambda data: AuthIn.header if data["auth_config_value"] else None,
         validate_default=True,
     )
+    # TODO: Remove the default once all providers have been updated to send enabled_claims.
+    enabled_claims: List[str] = Field(default_factory=lambda: ["groups"])
+
+    @field_validator("enabled_claims", mode="before")
+    @classmethod
+    def _deserialize_enabled_claims(cls, v: object) -> List[str]:
+        if isinstance(v, str):
+            return json.loads(v)
+        return v  # type: ignore[return-value]
+
+    @field_serializer("enabled_claims")
+    def _serialize_enabled_claims(self, v: List[str]) -> str:
+        return json.dumps(v)
 
     @cached_property
     def auth_enabled(self) -> bool:

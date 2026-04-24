@@ -407,6 +407,7 @@ class TestOAuthIntegrationCreatedEvent:
             userinfo_endpoint=f"{expected_public_url}/userinfo",
             jwks_endpoint=f"{expected_public_url}/.well-known/jwks.json",
             scope="openid profile email phone",
+            groups=None,
             jwt_access_token=True,
         )
 

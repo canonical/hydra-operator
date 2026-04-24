@@ -350,6 +350,7 @@ class TestHydraHookData:
             auth_name=mocked_data.auth_config_name,
             auth_value=mocked_data.auth_config_value,
             auth_in=mocked_data.auth_config_in,
+            claims=["groups"],
         )
 
     def test_load_when_integration_ready_without_auth(
@@ -364,6 +365,7 @@ class TestHydraHookData:
         assert actual == HydraHookData(
             is_ready=True,
             url=data.url,
+            claims=["groups"],
         )
 
     def test_load_when_integration_not_ready(self, mocked_requirer: MagicMock) -> None:

@@ -182,6 +182,7 @@ class HydraHookData:
     auth_name: Optional[str] = None
     auth_value: Optional[str] = None
     auth_in: Optional[str] = None
+    claims: list[str] = field(default_factory=list)
 
     def to_service_configs(self) -> ServiceConfigs:
         if not self.is_ready:
@@ -197,6 +198,8 @@ class HydraHookData:
                 "token_hook_auth_value": self.auth_value,
                 "token_hook_auth_in": self.auth_in,
             })
+        if self.claims:
+            r["token_hook_claims"] = self.claims
         return r
 
     @classmethod
@@ -210,6 +213,7 @@ class HydraHookData:
             is_ready=is_ready,
             url=data.url,
             auth_enabled=data.auth_enabled,
+            claims=data.enabled_claims,
         )
         if c.auth_enabled:
             c.auth_type = "api_key"
