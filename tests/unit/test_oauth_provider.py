@@ -114,6 +114,38 @@ def test_client_credentials_in_relation_databag_when_client_available(context: C
     assert secret.tracked_content[CLIENT_SECRET_FIELD] == CLIENT_SECRET
 
 
+def test_client_created_when_redirect_uri_missing_for_non_auth_code_grant(
+    context: Context,
+) -> None:
+    requirer_data = {
+        "scope": "openid email",
+        "grant_types": '["client_credentials"]',
+        "audience": "[]",
+        "token_endpoint_auth_method": "client_secret_basic",
+    }
+
+    provider_data = {
+        "issuer_url": "https://example.oidc.com",
+        "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
+        "token_endpoint": "https://example.oidc.com/oauth2/token",
+        "introspection_endpoint": "https://example.oidc.com/admin/oauth2/introspect",
+        "userinfo_endpoint": "https://example.oidc.com/userinfo",
+        "jwks_endpoint": "https://example.oidc.com/.well-known/jwks.json",
+        "scope": "openid profile email phone",
+    }
+
+    relation = Relation("oauth", remote_app_data=requirer_data, local_app_data=provider_data)
+    state = create_state(leader=True, relations=[relation], containers=[])
+
+    state_out = context.run(context.on.relation_changed(relation), state)
+
+    assert any(isinstance(e, ClientCreatedEvent) for e in context.emitted_events)
+
+    relation_out = state_out.get_relation(relation.id)
+    relation_data = relation_out.local_app_data
+    assert relation_data.get("client_id") == CLIENT_ID
+
+
 def test_client_changed_event_emitted_when_client_config_changed(context: Context) -> None:
     redirect_uri = "https://oidc-client.com/callback2"
 
