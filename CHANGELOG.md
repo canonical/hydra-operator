@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.3](https://github.com/canonical/hydra-operator/compare/v3.0.2...v3.0.3) (2026-05-14)
+
+
+### Bug Fixes
+
+* make redirect_uri optional ([0ac595a](https://github.com/canonical/hydra-operator/commit/0ac595a176594815b8a356d3d83b483da7b1d80d))
+* update charm dependent libs ([adb0c8e](https://github.com/canonical/hydra-operator/commit/adb0c8e3432ef682b47234bb187afa61bced0936))
+
 ## [3.0.2](https://github.com/canonical/hydra-operator/compare/v3.0.1...v3.0.2) (2026-04-25)
 
 
