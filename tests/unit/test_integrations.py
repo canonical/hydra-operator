@@ -405,7 +405,7 @@ class TestInternalIngressData:
         self, mocked_requirer: MagicMock, ingress_template: str
     ) -> None:
         with patch("builtins.open", mock_open(read_data=ingress_template)):
-            actual = InternalIngressData.load(mocked_requirer)
+            actual = InternalIngressData.load(mocked_requirer, use_ingress_for_relations=True)
 
         expected_ingress_config = {
             "model": "model",
@@ -417,6 +417,25 @@ class TestInternalIngressData:
         assert actual == InternalIngressData(
             public_endpoint=URL("http://external.hydra.com"),
             admin_endpoint=URL("http://external.hydra.com"),
+            config=expected_ingress_config,
+        )
+
+    def test_load_with_external_host_and_no_use_ingress_for_relations(
+        self, mocked_requirer: MagicMock, ingress_template: str
+    ) -> None:
+        with patch("builtins.open", mock_open(read_data=ingress_template)):
+            actual = InternalIngressData.load(mocked_requirer, use_ingress_for_relations=False)
+
+        expected_ingress_config = {
+            "model": "model",
+            "app": "app",
+            "public_port": PUBLIC_PORT,
+            "admin_port": ADMIN_PORT,
+            "external_host": "external.hydra.com",
+        }
+        assert actual == InternalIngressData(
+            public_endpoint=URL(f"http://app.model.svc.cluster.local:{PUBLIC_PORT}"),
+            admin_endpoint=URL(f"http://app.model.svc.cluster.local:{ADMIN_PORT}"),
             config=expected_ingress_config,
         )
 

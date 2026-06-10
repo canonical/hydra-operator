@@ -52,6 +52,29 @@ class TestCharmConfig:
         actual = CharmConfig(config, mock_model).to_env_vars()
         assert actual == expected
 
+    @pytest.mark.parametrize(
+        "config, expected",
+        [
+            (
+                {"use_ingress_for_relations": True},
+                True,
+            ),
+            (
+                {"use_ingress_for_relations": False},
+                False,
+            ),
+            (
+                {},
+                False,
+            ),
+        ],
+    )
+    def test_use_ingress_for_relations(self, config: dict, expected: bool) -> None:
+        """Test that use_ingress_for_relations config property behaves as expected."""
+        mock_model = MagicMock(spec=Model)
+        actual = CharmConfig(config, mock_model).use_ingress_for_relations
+        assert actual == expected
+
 
 class TestConfigFile:
     """Tests for the ConfigFile class."""

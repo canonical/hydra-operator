@@ -12,6 +12,7 @@ from ops import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.testing import Container, Context, PeerRelation, Relation, Secret
 from pytest_mock import MockerFixture
 from unit.conftest import create_state
+from yarl import URL
 
 from charm import HydraCharm
 from cli import OAuthClient
@@ -107,6 +108,27 @@ class TestConfigChangeEvent:
 
         mocked_holistic_handler.assert_called_once()
 
+    def test_when_config_changed_updates_hydra_endpoints(
+        self,
+        context: Context,
+        mocked_internal_ingress_data: MagicMock,
+        hydra_endpoint_relation: Relation,
+        mocked_holistic_handler: MagicMock,
+    ) -> None:
+        """Test that configuration changes trigger hydra endpoints update."""
+        state = create_state(
+            leader=True,
+            relations=[hydra_endpoint_relation],
+            config={"use_ingress_for_relations": False},
+        )
+
+        with patch("charm.HydraEndpointsProvider.send_endpoint_relation_data") as mocked_send:
+            context.run(context.on.config_changed(), state)
+            mocked_send.assert_called_once_with(
+                str(mocked_internal_ingress_data.admin_endpoint),
+                str(mocked_internal_ingress_data.public_endpoint),
+            )
+
 
 class TestHydraEndpointsReadyEvent:
     """Tests for the internal Hydra Endpoints Ready event."""
@@ -126,6 +148,32 @@ class TestHydraEndpointsReadyEvent:
                 str(mocked_internal_ingress_data.admin_endpoint),
                 str(mocked_internal_ingress_data.public_endpoint),
             )
+
+    def test_when_event_emitted_and_use_ingress_for_relations_disabled(
+        self,
+        context: Context,
+        mocker: MockerFixture,
+        hydra_endpoint_relation: Relation,
+    ) -> None:
+        """Test that endpoints respect use_ingress_for_relations=False."""
+        state = create_state(
+            leader=True,
+            relations=[hydra_endpoint_relation],
+            config={"use_ingress_for_relations": False},
+        )
+
+        with patch("charm.InternalIngressData.load") as mocked_load:
+            mocked_load.return_value = InternalIngressData(
+                public_endpoint=URL("http://app.model.svc.cluster.local:4444"),
+                admin_endpoint=URL("http://app.model.svc.cluster.local:4445"),
+            )
+            with patch("charm.HydraEndpointsProvider.send_endpoint_relation_data") as mocked_send:
+                context.run(context.on.relation_created(hydra_endpoint_relation), state)
+                mocked_load.assert_called_with(mocker.ANY, False)
+                mocked_send.assert_called_once_with(
+                    "http://app.model.svc.cluster.local:4445",
+                    "http://app.model.svc.cluster.local:4444",
+                )
 
 
 class TestPublicRouteJoinedEvent:
