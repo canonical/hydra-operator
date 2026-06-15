@@ -63,7 +63,7 @@ class TestPebbleReadyEvent:
         mocked_holistic_handler: MagicMock,
     ) -> None:
         """Test the successful handling of the Pebble Ready event."""
-        state = create_state()
+        state = create_state(containers={container})
 
         state_out = context.run(context.on.pebble_ready(container), state)
 
