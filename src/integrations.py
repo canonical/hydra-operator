@@ -223,6 +223,20 @@ class HydraHookData:
         return c
 
 
+def get_external_host_and_scheme(requirer: TraefikRouteRequirer, relation_name: str) -> tuple[str, str]:
+    """Extract external_host and scheme from a Traefik route relation.
+
+    If the relation or the remote application data is not available,
+    returns empty strings as default values.
+    """
+    if not (relation := requirer._charm.model.get_relation(relation_name)):
+        return "", ""
+    if not relation.app:
+        return "", ""
+    data = relation.data[relation.app]
+    return data.get("external_host", ""), data.get("scheme", "")
+
+
 @dataclass(frozen=True, slots=True)
 class InternalIngressData:
     """The data source from the internal-ingress integration."""
@@ -232,26 +246,11 @@ class InternalIngressData:
     config: dict = field(default_factory=dict)
 
     @classmethod
-    def _external_host(cls, requirer: TraefikRouteRequirer) -> str:
-        if not (relation := requirer._charm.model.get_relation(INTERNAL_ROUTE_INTEGRATION_NAME)):
-            return
-        if not relation.app:
-            return
-        return relation.data[relation.app].get("external_host", "")
-
-    @classmethod
-    def _scheme(cls, requirer: TraefikRouteRequirer) -> str:
-        if not (relation := requirer._charm.model.get_relation(INTERNAL_ROUTE_INTEGRATION_NAME)):
-            return
-        if not relation.app:
-            return
-        return relation.data[relation.app].get("scheme", "")
-
-    @classmethod
-    def load(cls, requirer: TraefikRouteRequirer) -> "InternalIngressData":
+    def load(
+        cls, requirer: TraefikRouteRequirer, use_ingress_for_relations: bool = False
+    ) -> "InternalIngressData":
         model, app = requirer._charm.model.name, requirer._charm.app.name
-        external_host = cls._external_host(requirer)
-        scheme = cls._scheme(requirer)
+        external_host, scheme = get_external_host_and_scheme(requirer, INTERNAL_ROUTE_INTEGRATION_NAME)
 
         external_endpoint = f"{scheme}://{external_host}"
 
@@ -270,12 +269,12 @@ class InternalIngressData:
 
         public_endpoint = URL(
             external_endpoint
-            if external_host
+            if external_host and use_ingress_for_relations
             else f"http://{app}.{model}.svc.cluster.local:{PUBLIC_PORT}"
         )
         admin_endpoint = URL(
             external_endpoint
-            if external_host
+            if external_host and use_ingress_for_relations
             else f"http://{app}.{model}.svc.cluster.local:{ADMIN_PORT}"
         )
 
@@ -297,31 +296,14 @@ class PublicRouteData:
         return bool(self.url)
 
     @classmethod
-    def _external_host(cls, requirer: TraefikRouteRequirer) -> str:
-        if not (relation := requirer._charm.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME)):
-            return
-        if not relation.app:
-            return
-        return relation.data[relation.app].get("external_host", "")
-
-    @classmethod
-    def _scheme(cls, requirer: TraefikRouteRequirer) -> str:
-        if not (relation := requirer._charm.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME)):
-            return
-        if not relation.app:
-            return
-        return relation.data[relation.app].get("scheme", "")
-
-    @classmethod
     def load(cls, requirer: TraefikRouteRequirer) -> "PublicRouteData":
         model, app = requirer._charm.model.name, requirer._charm.app.name
-        external_host = cls._external_host(requirer)
+        external_host, scheme = get_external_host_and_scheme(requirer, PUBLIC_ROUTE_INTEGRATION_NAME)
 
         if not external_host:
             logger.error("External hostname is not set on the ingress provider")
             return cls()
 
-        scheme = cls._scheme(requirer)
         external_endpoint = f"{scheme}://{external_host}"
 
         # template could have use PathPrefixRegexp but going for a simple one right now

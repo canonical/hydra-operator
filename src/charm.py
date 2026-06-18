@@ -266,7 +266,7 @@ class HydraCharm(CharmBase):
 
         # hydra-endpoints
         self.framework.observe(
-            self.hydra_endpoints_provider.on.ready, self._on_hydra_endpoints_ready
+            self.hydra_endpoints_provider.on.ready, self._update_hydra_endpoints
         )
 
         # oauth
@@ -371,6 +371,7 @@ class HydraCharm(CharmBase):
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
+        self._update_hydra_endpoints(event)
         self._on_oauth_integration_created(event)
 
     def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
@@ -393,10 +394,12 @@ class HydraCharm(CharmBase):
             return
 
         if self.unit.is_leader():
-            internal_ingress_config = InternalIngressData.load(self.internal_ingress).config
+            internal_ingress_config = InternalIngressData.load(
+                self.internal_ingress, self.charm_config.use_ingress_for_relations
+            ).config
             self.internal_ingress.submit_to_traefik(internal_ingress_config)
 
-        self._on_hydra_endpoints_ready(event)
+        self._update_hydra_endpoints(event)
         self._on_oauth_integration_created(event)
 
     def _on_public_route_changed(self, event: RelationEvent) -> None:
@@ -421,7 +424,7 @@ class HydraCharm(CharmBase):
             self.public_route.submit_to_traefik(public_route_config)
 
         self._holistic_handler(event)
-        self._on_hydra_endpoints_ready(event)
+        self._update_hydra_endpoints(event)
         self._on_oauth_integration_created(event)
 
     def _on_public_route_broken(self, event: RelationBrokenEvent) -> None:
@@ -486,7 +489,9 @@ class HydraCharm(CharmBase):
             logger.info("Public route URL is not available. Deferring the event.")
             return
 
-        internal_endpoints = InternalIngressData.load(self.internal_ingress)
+        internal_endpoints = InternalIngressData.load(
+            self.internal_ingress, self.charm_config.use_ingress_for_relations
+        )
         hook_data = HydraHookData.load(self.token_hook)
         groups_claim = "groups" if hook_data.is_ready and "groups" in hook_data.claims else None
         self.oauth_provider.set_provider_info_in_relation_data(
@@ -553,8 +558,10 @@ class HydraCharm(CharmBase):
             )
             event.defer()
 
-    def _on_hydra_endpoints_ready(self, event: RelationEvent) -> None:
-        internal_endpoints = InternalIngressData.load(self.internal_ingress)
+    def _update_hydra_endpoints(self, event: EventBase) -> None:
+        internal_endpoints = InternalIngressData.load(
+            self.internal_ingress, self.charm_config.use_ingress_for_relations
+        )
         self.hydra_endpoints_provider.send_endpoint_relation_data(
             str(internal_endpoints.admin_endpoint),
             str(internal_endpoints.public_endpoint),
