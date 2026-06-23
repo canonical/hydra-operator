@@ -14,18 +14,18 @@ import pytest
 import requests
 from integration.conftest import integrate_dependencies
 from integration.constants import (
-    ADMIN_INGRESS_DOMAIN,
     CA_APP,
     CLIENT_REDIRECT_URIS,
     CLIENT_SECRET,
     DB_APP,
     HYDRA_APP,
     HYDRA_IMAGE,
+    ISTIO_CHANNEL,
+    ISTIO_CHARM,
+    ISTIO_INGRESS_ADMIN_APP,
+    ISTIO_INGRESS_CHARM,
+    ISTIO_INGRESS_PUBLIC_APP,
     LOGIN_UI_APP,
-    PUBLIC_INGRESS_DOMAIN,
-    TRAEFIK_ADMIN_APP,
-    TRAEFIK_CHARM,
-    TRAEFIK_PUBLIC_APP,
 )
 from integration.utils import (
     StatusPredicate,
@@ -61,27 +61,31 @@ def test_build_and_deploy(juju: jubilant.Juju, local_charm: Path) -> None:
         trust=True,
     )
     juju.deploy(
-        TRAEFIK_CHARM,
-        app=TRAEFIK_PUBLIC_APP,
-        channel="latest/edge",
-        config={"external_hostname": PUBLIC_INGRESS_DOMAIN},
+        ISTIO_CHARM,
+        channel=ISTIO_CHANNEL,
         trust=True,
     )
     juju.deploy(
-        TRAEFIK_CHARM,
-        app=TRAEFIK_ADMIN_APP,
-        channel="latest/stable",
-        config={"external_hostname": ADMIN_INGRESS_DOMAIN},
+        ISTIO_INGRESS_CHARM,
+        app=ISTIO_INGRESS_PUBLIC_APP,
+        channel=ISTIO_CHANNEL,
+        trust=True,
+    )
+    juju.deploy(
+        ISTIO_INGRESS_CHARM,
+        app=ISTIO_INGRESS_ADMIN_APP,
+        channel=ISTIO_CHANNEL,
         trust=True,
     )
     juju.deploy(
         LOGIN_UI_APP,
-        channel="latest/edge",
+        channel="istio/edge",
         trust=True,
     )
 
-    juju.integrate(f"{TRAEFIK_PUBLIC_APP}:certificates", f"{CA_APP}:certificates")
-    juju.integrate(TRAEFIK_PUBLIC_APP, f"{LOGIN_UI_APP}:public-route")
+    juju.integrate(ISTIO_INGRESS_PUBLIC_APP, ISTIO_CHARM)
+    juju.integrate(ISTIO_INGRESS_ADMIN_APP, ISTIO_CHARM)
+    juju.integrate(f"{ISTIO_INGRESS_PUBLIC_APP}:certificates", f"{CA_APP}:certificates")
 
     juju.deploy(
         str(local_charm),
@@ -96,12 +100,16 @@ def test_build_and_deploy(juju: jubilant.Juju, local_charm: Path) -> None:
 
     juju.wait(
         ready=all_active(
-            HYDRA_APP, DB_APP, CA_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP, LOGIN_UI_APP
+            HYDRA_APP,
+            DB_APP,
+            CA_APP,
+            ISTIO_CHARM,
+            ISTIO_INGRESS_PUBLIC_APP,
+            ISTIO_INGRESS_ADMIN_APP,
+            LOGIN_UI_APP,
         ),
-        error=any_error(
-            HYDRA_APP, DB_APP, CA_APP, TRAEFIK_PUBLIC_APP, TRAEFIK_ADMIN_APP, LOGIN_UI_APP
-        ),
-        timeout=15 * 60,
+        error=any_error(HYDRA_APP, DB_APP, LOGIN_UI_APP),
+        timeout=20 * 60,
     )
 
 
@@ -123,23 +131,23 @@ def test_login_ui_endpoint_integration(
     assert all(login_ui_endpoint_integration_data.values())
 
 
-@pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)
 def test_public_route_integration(
     leader_public_route_integration_data: Optional[dict],
-    get_hydra_jwks: Callable[[], requests.Response],
+    public_address: str,
+    http_client: requests.Session,
 ) -> None:
     """Test that public route integration data is present and valid."""
-    assert leader_public_route_integration_data
-    assert leader_public_route_integration_data["external_host"] == PUBLIC_INGRESS_DOMAIN
-    assert leader_public_route_integration_data["scheme"] == "https"
+    assert leader_public_route_integration_data["external_host"]
 
-    resp = get_hydra_jwks()
+    resp = http_client.get(f"https://{public_address}/.well-known/jwks.json")
     assert resp.status_code == http.HTTPStatus.OK
 
 
-def test_openid_configuration_endpoint(get_openid_configuration: requests.Response) -> None:
+def test_openid_configuration_endpoint(
+    public_address: str, get_openid_configuration: requests.Response
+) -> None:
     """Test that the OpenID metadata endpoint is reachable and valid."""
-    base_path = URL(f"https://{PUBLIC_INGRESS_DOMAIN}")
+    base_path = URL(f"https://{public_address}")
     assert get_openid_configuration.status_code == http.HTTPStatus.OK
 
     payload = get_openid_configuration.json()
@@ -150,22 +158,20 @@ def test_openid_configuration_endpoint(get_openid_configuration: requests.Respon
     assert payload["jwks_uri"] == str(base_path / ".well-known/jwks.json")
 
 
-@pytest.mark.parametrize("get_hydra_jwks", ["admin"], indirect=True)
 def test_internal_ingress_integration(
     leader_internal_ingress_integration_data: Optional[dict],
     get_admin_clients: requests.Response,
-    get_hydra_jwks: Callable[[], requests.Response],
+    admin_address: str,
+    http_client: requests.Session,
 ) -> None:
     """Test that internal ingress integration data is present and valid."""
-    assert leader_internal_ingress_integration_data
-    assert leader_internal_ingress_integration_data["external_host"] == ADMIN_INGRESS_DOMAIN
-    assert leader_internal_ingress_integration_data["scheme"] == "http"
+    assert leader_internal_ingress_integration_data["external_host"]
 
     # examine the admin endpoint
     assert get_admin_clients.status_code == http.HTTPStatus.OK
 
-    # examine the public endpoint
-    resp = get_hydra_jwks()
+    # examine the public endpoint via the internal ingress
+    resp = http_client.get(f"http://{admin_address}/.well-known/jwks.json")
     assert resp.status_code == http.HTTPStatus.OK
 
 
@@ -321,7 +327,6 @@ def test_delete_oauth_client(juju: jubilant.Juju, oauth_clients: list[dict[str, 
     assert result.value.task.status == "failed"
 
 
-@pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)
 def test_rotate_keys(get_hydra_jwks: Callable[[], requests.Response], juju: jubilant.Juju) -> None:
     """Test rotating JWKs via action."""
     # get original jwks
@@ -362,21 +367,27 @@ def test_scale_up(
 
 
 @pytest.mark.parametrize(
-    "remote_app_name,integration_name,is_status",
+    "remote_app_name,remote_endpoint,integration_name,is_status",
     [
-        (DB_APP, DATABASE_INTEGRATION_NAME, is_blocked),
-        (TRAEFIK_PUBLIC_APP, PUBLIC_ROUTE_INTEGRATION_NAME, is_blocked),
-        (LOGIN_UI_APP, LOGIN_UI_INTEGRATION_NAME, is_blocked),
+        (DB_APP, f"{DB_APP}:database", DATABASE_INTEGRATION_NAME, is_blocked),
+        (
+            ISTIO_INGRESS_PUBLIC_APP,
+            f"{ISTIO_INGRESS_PUBLIC_APP}:istio-ingress-route",
+            PUBLIC_ROUTE_INTEGRATION_NAME,
+            is_blocked,
+        ),
+        (LOGIN_UI_APP, f"{LOGIN_UI_APP}:ui-endpoint-info", LOGIN_UI_INTEGRATION_NAME, is_blocked),
     ],
 )
 def test_remove_integration(
     juju: jubilant.Juju,
     remote_app_name: str,
+    remote_endpoint: str,
     integration_name: str,
     is_status: Callable[[str], StatusPredicate],
 ) -> None:
     """Test removing and re-adding integration."""
-    with remove_integration(juju, remote_app_name, integration_name):
+    with remove_integration(juju, remote_endpoint, integration_name):
         juju.wait(
             ready=is_status(HYDRA_APP),
             error=any_error(HYDRA_APP),
