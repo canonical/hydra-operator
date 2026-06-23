@@ -11,6 +11,7 @@ import logging
 from secrets import token_hex
 from typing import Any
 
+from charmlibs.interfaces.istio_ingress_route import IstioIngressRouteRequirer
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
     DatabaseRequires,
@@ -31,7 +32,6 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
 )
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
-from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
 from ops import EventBase, PebbleCheckFailedEvent, PebbleCheckRecoveredEvent
 from ops.charm import (
     ActionEvent,
@@ -40,7 +40,6 @@ from ops.charm import (
     ConfigChangedEvent,
     RelationBrokenEvent,
     RelationEvent,
-    RelationJoinedEvent,
     WorkloadEvent,
 )
 from ops.main import main
@@ -131,20 +130,16 @@ class HydraCharm(CharmBase):
             extra_user_roles="SUPERUSER",
         )
 
-        # ingress via raw traefik routing configuration
-        self.internal_ingress = TraefikRouteRequirer(
+        # ingress via istio routing configuration
+        self.internal_ingress = IstioIngressRouteRequirer(
             self,
-            self.model.get_relation(INTERNAL_ROUTE_INTEGRATION_NAME),
-            INTERNAL_ROUTE_INTEGRATION_NAME,
-            raw=True,
+            relation_name=INTERNAL_ROUTE_INTEGRATION_NAME,
         )
 
-        # public route via raw traefik routing configuration
-        self.public_route = TraefikRouteRequirer(
+        # public route via istio routing configuration
+        self.public_route = IstioIngressRouteRequirer(
             self,
-            self.model.get_relation(PUBLIC_ROUTE_INTEGRATION_NAME),
-            PUBLIC_ROUTE_INTEGRATION_NAME,
-            raw=True,
+            relation_name=PUBLIC_ROUTE_INTEGRATION_NAME,
         )
 
         self.oauth_provider = OAuthProvider(self)
@@ -228,30 +223,14 @@ class HydraCharm(CharmBase):
 
         # internal ingress
         self.framework.observe(
-            self.on[INTERNAL_ROUTE_INTEGRATION_NAME].relation_joined,
-            self._on_internal_ingress_joined,
-        )
-        self.framework.observe(
-            self.on[INTERNAL_ROUTE_INTEGRATION_NAME].relation_changed,
-            self._on_internal_ingress_changed,
-        )
-        self.framework.observe(
-            self.on[INTERNAL_ROUTE_INTEGRATION_NAME].relation_broken,
-            self._on_internal_ingress_changed,
+            self.internal_ingress.on.ready,
+            self._on_internal_ingress_ready,
         )
 
         # public route
         self.framework.observe(
-            self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_joined,
-            self._on_public_route_changed,
-        )
-        self.framework.observe(
-            self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_changed,
-            self._on_public_route_changed,
-        )
-        self.framework.observe(
-            self.on[PUBLIC_ROUTE_INTEGRATION_NAME].relation_broken,
-            self._on_public_route_broken,
+            self.public_route.on.ready,
+            self._on_public_route_ready,
         )
 
         # login-ui
@@ -374,66 +353,16 @@ class HydraCharm(CharmBase):
         self._update_hydra_endpoints(event)
         self._on_oauth_integration_created(event)
 
-    def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
-        self._on_internal_ingress_changed(event)
-
-    def _on_internal_ingress_changed(self, event: RelationEvent) -> None:
+    def _on_internal_ingress_ready(self, event: RelationEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
-
-        # needed due to how traefik_route lib is handling the event
-        self.internal_ingress._relation = event.relation
-
-        if not self.internal_ingress.is_ready():
-            return
-        if event.relation.app is None:
-            # We need to defer the event as this is not handled in the holistic handler
-            # TODO(nsklikas): move this to the holistic handler and remove defer
-            # TODO2(nsklikas): Fix this in traefik_route lib, this is a bug and the lib should handle
-            # this in the `is_ready` method, like it does for the Provider side.
-            event.defer()
-            return
-
-        if self.unit.is_leader():
-            internal_ingress_config = InternalIngressData.load(
-                self.internal_ingress, self.charm_config.use_ingress_for_relations
-            ).config
-            self.internal_ingress.submit_to_traefik(internal_ingress_config)
-
+        self._holistic_handler(event)
         self._update_hydra_endpoints(event)
-        self._on_oauth_integration_created(event)
 
-    def _on_public_route_changed(self, event: RelationEvent) -> None:
+    def _on_public_route_ready(self, event: RelationEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
-
-        # needed due to how traefik_route lib is handling the event
-        self.public_route._relation = event.relation
-
-        if not self.public_route.is_ready():
-            return
-
-        if event.relation.app is None:
-            # We need to defer the event as this is not handled in the holistic handler
-            # TODO(nsklikas): move this to the holistic handler and remove defer
-            # TODO2(nsklikas): Fix this in traefik_route lib, this is a bug and the lib should handle
-            # this in the `is_ready` method, like it does for the Provider side.
-            event.defer()
-            return
-
-        if self.unit.is_leader():
-            public_route_config = PublicRouteData.load(self.public_route).config
-            self.public_route.submit_to_traefik(public_route_config)
-
         self._holistic_handler(event)
         self._update_hydra_endpoints(event)
         self._on_oauth_integration_created(event)
-
-    def _on_public_route_broken(self, event: RelationBrokenEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
-
-        # needed due to how traefik_route lib is handling the event
-        self.public_route._relation = event.relation
-
-        self._holistic_handler(event)
 
     def _resource_reqs_from_config(self) -> ResourceRequirements:
         limits = {"cpu": self.model.config.get("cpu"), "memory": self.model.config.get("memory")}
@@ -587,6 +516,16 @@ class HydraCharm(CharmBase):
     def _holistic_handler(self, event: EventBase) -> None:
         if not self.hydra_secrets.is_ready:
             self._initialize_secrets()
+
+        if self.unit.is_leader() and self.public_route.is_ready():
+            public_route_config = PublicRouteData.load(self.public_route).config
+            self.public_route.submit_config(public_route_config)
+
+        if self.unit.is_leader() and self.internal_ingress.is_ready():
+            internal_ingress_config = InternalIngressData.load(
+                self.internal_ingress, self.charm_config.use_ingress_for_relations
+            ).config
+            self.internal_ingress.submit_config(internal_ingress_config)
 
         if not all(condition(self) for condition in NOOP_CONDITIONS):
             return

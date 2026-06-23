@@ -45,14 +45,14 @@ requires:
     description: |
       Provides traces to COS Tempo instance
   internal-route:
-    interface: traefik_route
+    interface: istio_ingress_route
     limit: 1
     optional: true
     description: |
       Allows the charm to be exposed cross-cluster communication, needed for where network topology is more complex
       than just one k8s cluster
   public-route:
-    interface: traefik_route
+    interface: istio_ingress_route
     optional: false
     description: |
       Allows the charm to be exposed to the public internet

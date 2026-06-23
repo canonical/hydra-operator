@@ -1,3 +1,4 @@
+charmlibs-interfaces-istio-ingress-route==1.0.2
 cosl
 dacite
 jinja2
