@@ -318,7 +318,7 @@ def public_route_relation() -> Relation:
 def public_route_relation_ready() -> Relation:
     return Relation(
         PUBLIC_ROUTE_INTEGRATION_NAME,
-        remote_app_data={"external_host": "example.com", "scheme": "https"},
+        remote_app_data={"external_host": "example.com", "tls_enabled": "True"},
     )
 
 
@@ -331,7 +331,7 @@ def internal_route_relation() -> Relation:
 def internal_route_relation_ready() -> Relation:
     return Relation(
         INTERNAL_ROUTE_INTEGRATION_NAME,
-        remote_app_data={"external_host": "internal.com", "scheme": "https"},
+        remote_app_data={"external_host": "internal.com", "tls_enabled": "True"},
     )
 
 
