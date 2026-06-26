@@ -18,14 +18,13 @@ from integration.constants import (
     DB_APP,
     HYDRA_APP,
     HYDRA_IMAGE,
+    ISTIO_INGRESS_ADMIN_APP,
+    ISTIO_INGRESS_PUBLIC_APP,
     LOGIN_UI_APP,
-    TRAEFIK_ADMIN_APP,
-    TRAEFIK_PUBLIC_APP,
 )
 from integration.utils import (
     get_app_integration_data,
     get_integration_data,
-    get_unit_address,
     juju_model_factory,
 )
 from jwt import PyJWKClient
@@ -155,8 +154,14 @@ def http_client() -> Generator[requests.Session, None, None]:
 
 def integrate_dependencies(juju: jubilant.Juju) -> None:
     juju.integrate(HYDRA_APP, DB_APP)
-    juju.integrate(f"{HYDRA_APP}:{PUBLIC_ROUTE_INTEGRATION_NAME}", TRAEFIK_PUBLIC_APP)
-    juju.integrate(f"{HYDRA_APP}:{INTERNAL_ROUTE_INTEGRATION_NAME}", TRAEFIK_ADMIN_APP)
+    juju.integrate(
+        f"{HYDRA_APP}:{PUBLIC_ROUTE_INTEGRATION_NAME}",
+        f"{ISTIO_INGRESS_PUBLIC_APP}:istio-ingress-route",
+    )
+    juju.integrate(
+        f"{HYDRA_APP}:{INTERNAL_ROUTE_INTEGRATION_NAME}",
+        f"{ISTIO_INGRESS_ADMIN_APP}:istio-ingress-route",
+    )
     juju.integrate(
         f"{HYDRA_APP}:{LOGIN_UI_INTEGRATION_NAME}", f"{LOGIN_UI_APP}:{LOGIN_UI_INTEGRATION_NAME}"
     )
@@ -194,31 +199,37 @@ def leader_peer_integration_data(app_integration_data: Callable) -> dict | None:
 
 @pytest.fixture
 def public_address(juju: jubilant.Juju) -> str:
-    return get_unit_address(juju, app_name=TRAEFIK_PUBLIC_APP)
+    """Get the public address published by istio-ingress-k8s."""
+    app_data = get_app_integration_data(juju, HYDRA_APP, PUBLIC_ROUTE_INTEGRATION_NAME)
+
+    if app_data and (external_host := app_data.get("external_host")):
+        return external_host
+
+    raise ValueError(
+        f"Could not find 'external_host' in the '{PUBLIC_ROUTE_INTEGRATION_NAME}' relation data for {HYDRA_APP}"
+    )
 
 
 @pytest.fixture
 def admin_address(juju: jubilant.Juju) -> str:
-    return get_unit_address(juju, app_name=TRAEFIK_ADMIN_APP)
+    """Get the admin address published by istio-ingress-k8s."""
+    app_data = get_app_integration_data(juju, HYDRA_APP, INTERNAL_ROUTE_INTEGRATION_NAME)
+
+    if app_data and (external_host := app_data.get("external_host")):
+        return external_host
+
+    raise ValueError(
+        f"Could not find 'external_host' in the '{INTERNAL_ROUTE_INTEGRATION_NAME}' relation data for {HYDRA_APP}"
+    )
 
 
 @pytest.fixture
 def get_hydra_jwks(
-    juju: jubilant.Juju,
-    request: pytest.FixtureRequest,
+    public_address: str,
     http_client: requests.Session,
 ) -> Callable[[], requests.Response]:
-    # Use closures to access fixtures and params
     def wrapper() -> requests.Response:
-        target = request.param
-        if target == "admin":
-            address = get_unit_address(juju, app_name=TRAEFIK_ADMIN_APP)
-            scheme = "http"
-        else:
-            address = get_unit_address(juju, app_name=TRAEFIK_PUBLIC_APP)
-            scheme = "https"
-
-        url = f"{scheme}://{address}/.well-known/jwks.json"
+        url = f"https://{public_address}/.well-known/jwks.json"
         return http_client.get(url)
 
     return wrapper

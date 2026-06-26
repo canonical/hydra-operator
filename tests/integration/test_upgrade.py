@@ -10,14 +10,14 @@ import jubilant
 import pytest
 import requests
 from integration.constants import (
-    ADMIN_INGRESS_DOMAIN,
     CA_APP,
     DB_APP,
     HYDRA_APP,
     HYDRA_IMAGE,
+    ISTIO_CHANNEL,
+    ISTIO_CHARM,
+    ISTIO_INGRESS_CHARM,
     LOGIN_UI_APP,
-    PUBLIC_INGRESS_DOMAIN,
-    TRAEFIK_CHARM,
 )
 from integration.utils import (
     all_active,
@@ -43,8 +43,8 @@ class TestHydraUpgrade:
     hydra_app_name = "hydra-upgrade"
     postgresql_app_name = "postgresql-upgrade"
     ca_app_name = "self-signed-certificates-upgrade"
-    traefik_public_app_name = "traefik-public-upgrade"
-    traefik_admin_app_name = "traefik-admin-upgrade"
+    istio_public_app_name = "istio-public-upgrade"
+    istio_admin_app_name = "istio-admin-upgrade"
     login_ui_app_name = "identity-platform-login-ui-operator-upgrade"
 
     @pytest.fixture(scope="class")
@@ -54,11 +54,14 @@ class TestHydraUpgrade:
 
     def integrate_dependencies(self, juju: jubilant.Juju) -> None:
         juju.integrate(self.hydra_app_name, self.postgresql_app_name)
+
         juju.integrate(
-            f"{self.hydra_app_name}:{PUBLIC_ROUTE_INTEGRATION_NAME}", self.traefik_public_app_name
+            f"{self.hydra_app_name}:{PUBLIC_ROUTE_INTEGRATION_NAME}",
+            f"{self.istio_public_app_name}:istio-ingress-route"
         )
         juju.integrate(
-            f"{self.hydra_app_name}:{INTERNAL_ROUTE_INTEGRATION_NAME}", self.traefik_admin_app_name
+            f"{self.hydra_app_name}:{INTERNAL_ROUTE_INTEGRATION_NAME}",
+            f"{self.istio_admin_app_name}:istio-ingress-route"
         )
         juju.integrate(
             f"{self.hydra_app_name}:{LOGIN_UI_INTEGRATION_NAME}",
@@ -67,7 +70,7 @@ class TestHydraUpgrade:
 
     @pytest.mark.setup
     def test_deploy_hydra_from_charmhub(self, juju: jubilant.Juju) -> None:
-        """Deploy the charm-under-test."""
+        """Deploy the charm-under-test and its Istio network topology."""
         juju.deploy(
             DB_APP,
             app=self.postgresql_app_name,
@@ -80,18 +83,25 @@ class TestHydraUpgrade:
             channel="latest/stable",
             trust=True,
         )
+
+        # Deploy Istio Gateways instead of Traefik
+        # This test is expected to pass after hydra support for istio is released to latest/edge
         juju.deploy(
-            TRAEFIK_CHARM,
-            app=self.traefik_public_app_name,
-            channel="latest/edge",
-            config={"external_hostname": PUBLIC_INGRESS_DOMAIN},
+            ISTIO_CHARM,
+            channel=ISTIO_CHANNEL,
+            trust=True,
+        )
+
+        juju.deploy(
+            ISTIO_INGRESS_CHARM,
+            app=self.istio_public_app_name,
+            channel=ISTIO_CHANNEL,
             trust=True,
         )
         juju.deploy(
-            TRAEFIK_CHARM,
-            app=self.traefik_admin_app_name,
-            channel="latest/stable",
-            config={"external_hostname": ADMIN_INGRESS_DOMAIN},
+            ISTIO_INGRESS_CHARM,
+            app=self.istio_admin_app_name,
+            channel=ISTIO_CHANNEL,
             trust=True,
         )
         juju.deploy(
@@ -101,10 +111,15 @@ class TestHydraUpgrade:
             trust=True,
         )
 
+        juju.integrate(self.istio_public_app_name, ISTIO_CHARM)
+        juju.integrate(self.istio_admin_app_name, ISTIO_CHARM)
+        juju.integrate(f"{self.istio_public_app_name}:certificates", f"{self.ca_app_name}:certificates")
+
+        # Cross-integrate Login UI with the public Istio routing fabric cleanly
         juju.integrate(
-            f"{self.traefik_public_app_name}:certificates", f"{self.ca_app_name}:certificates"
+            f"{self.login_ui_app_name}:public-route",
+            f"{self.istio_public_app_name}:istio-ingress-route"
         )
-        juju.integrate(self.traefik_public_app_name, f"{self.login_ui_app_name}:public-route")
 
         juju.deploy(
             HYDRA_APP,
@@ -119,16 +134,16 @@ class TestHydraUpgrade:
                 self.hydra_app_name,
                 self.postgresql_app_name,
                 self.ca_app_name,
-                self.traefik_public_app_name,
-                self.traefik_admin_app_name,
+                self.istio_public_app_name,
+                self.istio_admin_app_name,
                 self.login_ui_app_name,
             ),
             error=any_error(
                 self.hydra_app_name,
                 self.postgresql_app_name,
                 self.ca_app_name,
-                self.traefik_public_app_name,
-                self.traefik_admin_app_name,
+                self.istio_public_app_name,
+                self.istio_admin_app_name,
                 self.login_ui_app_name,
             ),
             timeout=15 * 60,
@@ -160,8 +175,8 @@ class TestHydraUpgrade:
         )
 
     def test_verify_action(self, juju: jubilant.Juju, http_client: requests.Session) -> None:
-        """Verify that hydra is functional after the upgrade."""
-        address = get_unit_address(juju, app_name=self.traefik_public_app_name)
+        """Verify that hydra is functional after the upgrade via Istio."""
+        address = get_unit_address(juju, app_name=self.istio_public_app_name)
         url = f"https://{address}/.well-known/jwks.json"
 
         resp = http_client.get(url)
@@ -233,7 +248,7 @@ class TestHydraUpgrade:
             timeout=5 * 60,
         )
 
-        address = get_unit_address(juju, app_name=self.traefik_public_app_name)
+        address = get_unit_address(juju, app_name=self.istio_public_app_name)
         url = f"https://{address}/.well-known/jwks.json"
 
         resp = http_client.get(url)

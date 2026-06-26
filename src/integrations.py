@@ -8,25 +8,34 @@ from typing import Any, KeysView, Optional, Type, TypeAlias, Union
 from urllib.parse import urlparse
 
 import dacite
+from charmlibs.interfaces.istio_ingress_route import (
+    BackendRef,
+    HTTPPathMatch,
+    HTTPPathMatchType,
+    HTTPRoute,
+    HTTPRouteMatch,
+    IstioIngressRouteConfig,
+    IstioIngressRouteRequirer,
+    Listener,
+    ProtocolType,
+)
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
 from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
-from charms.traefik_k8s.v0.traefik_route import TraefikRouteRequirer
-from jinja2 import Template
 from ops.model import Model
 from yarl import URL
 
 from configs import ServiceConfigs
 from constants import (
     ADMIN_PORT,
-    INTERNAL_ROUTE_INTEGRATION_NAME,
+    INGRESS_HTTP_PORT,
+    INGRESS_HTTPS_PORT,
     PEER_INTEGRATION_NAME,
     POSTGRESQL_DSN_TEMPLATE,
     PUBLIC_PORT,
-    PUBLIC_ROUTE_INTEGRATION_NAME,
 )
 from env_vars import EnvVars
 
@@ -223,18 +232,10 @@ class HydraHookData:
         return c
 
 
-def get_external_host_and_scheme(requirer: TraefikRouteRequirer, relation_name: str) -> tuple[str, str]:
-    """Extract external_host and scheme from a Traefik route relation.
-
-    If the relation or the remote application data is not available,
-    returns empty strings as default values.
-    """
-    if not (relation := requirer._charm.model.get_relation(relation_name)):
-        return "", ""
-    if not relation.app:
-        return "", ""
-    data = relation.data[relation.app]
-    return data.get("external_host", ""), data.get("scheme", "")
+def get_external_host_and_scheme(requirer: IstioIngressRouteRequirer) -> tuple[str, str]:
+    """Extract external_host and scheme from an istio ingress route requirer."""
+    scheme = "https" if requirer.tls_enabled else "http"
+    return requirer.external_host, scheme
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,30 +244,68 @@ class InternalIngressData:
 
     public_endpoint: URL
     admin_endpoint: URL
-    config: dict = field(default_factory=dict)
+    config: Optional[IstioIngressRouteConfig] = None
 
     @classmethod
     def load(
-        cls, requirer: TraefikRouteRequirer, use_ingress_for_relations: bool = False
+        cls, requirer: IstioIngressRouteRequirer, use_ingress_for_relations: bool = False
     ) -> "InternalIngressData":
         model, app = requirer._charm.model.name, requirer._charm.app.name
-        external_host, scheme = get_external_host_and_scheme(requirer, INTERNAL_ROUTE_INTEGRATION_NAME)
+        external_host, scheme = get_external_host_and_scheme(requirer)
 
-        external_endpoint = f"{scheme}://{external_host}"
+        ingress_port = INGRESS_HTTPS_PORT if requirer.tls_enabled else INGRESS_HTTP_PORT
+        listener = Listener(port=ingress_port, protocol=ProtocolType.HTTP)
 
-        with open("templates/internal-route.json.j2", "r") as file:
-            template = Template(file.read())
-
-        ingress_config = json.loads(
-            template.render(
-                model=model,
-                app=app,
-                public_port=PUBLIC_PORT,
-                admin_port=ADMIN_PORT,
-                external_host=external_host,
-            )
+        ingress_config = IstioIngressRouteConfig(
+            model=model,
+            listeners=[listener],
+            http_routes=[
+                HTTPRoute(
+                    name=f"{app}-admin",
+                    listener=listener,
+                    matches=[
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(
+                                type=HTTPPathMatchType.PathPrefix, value="/admin/oauth2"
+                            )
+                        ),
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(
+                                type=HTTPPathMatchType.PathPrefix, value="/admin/clients"
+                            )
+                        ),
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(
+                                type=HTTPPathMatchType.PathPrefix, value="/admin/trust"
+                            )
+                        ),
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(
+                                type=HTTPPathMatchType.PathPrefix, value="/admin/keys"
+                            )
+                        ),
+                    ],
+                    backends=[BackendRef(service=app, port=ADMIN_PORT)],
+                ),
+                HTTPRoute(
+                    name=f"{app}-internal-public",
+                    listener=listener,
+                    matches=[
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(type=HTTPPathMatchType.PathPrefix, value="/oauth2")
+                        ),
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(
+                                type=HTTPPathMatchType.Exact, value="/.well-known/jwks.json"
+                            )
+                        ),
+                    ],
+                    backends=[BackendRef(service=app, port=PUBLIC_PORT)],
+                ),
+            ],
         )
 
+        external_endpoint = f"{scheme}://{external_host}"
         public_endpoint = URL(
             external_endpoint
             if external_host and use_ingress_for_relations
@@ -290,37 +329,61 @@ class PublicRouteData:
     """The data source from the public-route integration."""
 
     url: URL = URL()
-    config: dict = field(default_factory=dict)
+    config: Optional[IstioIngressRouteConfig] = None
 
     def is_ready(self) -> bool:
         return bool(self.url)
 
     @classmethod
-    def load(cls, requirer: TraefikRouteRequirer) -> "PublicRouteData":
+    def load(cls, requirer: IstioIngressRouteRequirer) -> "PublicRouteData":
         model, app = requirer._charm.model.name, requirer._charm.app.name
-        external_host, scheme = get_external_host_and_scheme(requirer, PUBLIC_ROUTE_INTEGRATION_NAME)
+        external_host, scheme = get_external_host_and_scheme(requirer)
+
+        ingress_port = INGRESS_HTTPS_PORT if requirer.tls_enabled else INGRESS_HTTP_PORT
+        listener = Listener(port=ingress_port, protocol=ProtocolType.HTTP)
+        ingress_config = IstioIngressRouteConfig(
+            model=model,
+            listeners=[listener],
+            http_routes=[
+                HTTPRoute(
+                    name=f"{app}-public",
+                    listener=listener,
+                    matches=[
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(type=HTTPPathMatchType.PathPrefix, value="/oauth2")
+                        ),
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(
+                                type=HTTPPathMatchType.Exact, value="/.well-known/jwks.json"
+                            )
+                        ),
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(
+                                type=HTTPPathMatchType.Exact,
+                                value="/.well-known/openid-configuration",
+                            )
+                        ),
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(
+                                type=HTTPPathMatchType.Exact,
+                                value="/.well-known/oauth-authorization-server",
+                            )
+                        ),
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(type=HTTPPathMatchType.Exact, value="/userinfo")
+                        ),
+                    ],
+                    backends=[BackendRef(service=app, port=PUBLIC_PORT)],
+                )
+            ],
+        )
 
         if not external_host:
             logger.error("External hostname is not set on the ingress provider")
-            return cls()
-
-        external_endpoint = f"{scheme}://{external_host}"
-
-        # template could have use PathPrefixRegexp but going for a simple one right now
-        with open("templates/public-route.json.j2", "r") as file:
-            template = Template(file.read())
-
-        ingress_config = json.loads(
-            template.render(
-                model=model,
-                app=app,
-                public_port=PUBLIC_PORT,
-                external_host=external_host,
-            )
-        )
+            return cls(config=ingress_config)
 
         return cls(
-            url=URL(external_endpoint),
+            url=URL(f"{scheme}://{external_host}"),
             config=ingress_config,
         )
 

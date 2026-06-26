@@ -157,3 +157,8 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# openspec: track config, specs, active changes (for PR review) and archived design decisions and proposals
+# Ignore archived changes specs since they are redundant - their rationale is merged into openspec/specs/
+# on `openspec archive`, which is the single source of truth.
+openspec/changes/archive/*/specs/

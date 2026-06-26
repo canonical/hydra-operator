@@ -177,7 +177,7 @@ class TestHydraEndpointsReadyEvent:
 
 
 class TestPublicRouteJoinedEvent:
-    """Tests for the Public Route Joined event."""
+    """Tests for the Public Route Joined event (via relation_changed, which triggers on.ready)."""
 
     def test_when_event_emitted(
         self,
@@ -194,7 +194,7 @@ class TestPublicRouteJoinedEvent:
             ) as mocked_endpoints_provider,
             patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider,
         ):
-            context.run(context.on.relation_joined(public_route_relation_ready), state)
+            context.run(context.on.relation_changed(public_route_relation_ready), state)
 
         mocked_endpoints_provider.assert_called_once()
         mocked_provider.assert_called_once()
@@ -295,7 +295,7 @@ class TestDatabaseCreatedEvent:
         """Test that migration is skipped if 'migration_needed' is False."""
         public_route = Relation(
             PUBLIC_ROUTE_INTEGRATION_NAME,
-            remote_app_data={"external_host": "example.com", "scheme": "https"},
+            remote_app_data={"external_host": "example.com", "tls_enabled": "True"},
         )
         state = create_state(
             relations=[
@@ -772,7 +772,7 @@ class TestOAuthClientDeletedEvent:
 
     @pytest.fixture(autouse=True)
     def mocked_public_route_ready(self, mocker: MockerFixture) -> MagicMock:
-        return mocker.patch("charm.TraefikRouteRequirer.is_ready", return_value=True)
+        return mocker.patch("charm.IstioIngressRouteRequirer.is_ready", return_value=True)
 
     @pytest.fixture(autouse=True)
     def migration_needed(self, mocker: MockerFixture) -> None:
