@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.0.0](https://github.com/canonical/hydra-operator/compare/v3.0.2...v4.0.0) (2026-06-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* replace `traefik-route` relation with `istio-ingress-route` ([#569](https://github.com/canonical/hydra-operator/issues/569))
+* replace traefik with istio
+
+### Features
+
+* add flag to prefer in-cluster URLs to cross-cluster when internal-route is enabled ([a866a5e](https://github.com/canonical/hydra-operator/commit/a866a5e055d23150845aa6b6304e3906b7ef4d49))
+* replace `traefik-route` relation with `istio-ingress-route` ([#569](https://github.com/canonical/hydra-operator/issues/569)) ([0b501c7](https://github.com/canonical/hydra-operator/commit/0b501c7e05dbca4845db9419a94f86934861aede))
+* replace traefik with istio ([7eb8b52](https://github.com/canonical/hydra-operator/commit/7eb8b523aa0cbeaf02047a23168c7640561faec5))
+
+
+### Bug Fixes
+
+* make redirect_uri optional ([0ac595a](https://github.com/canonical/hydra-operator/commit/0ac595a176594815b8a356d3d83b483da7b1d80d))
+* update charm dependent libs ([adb0c8e](https://github.com/canonical/hydra-operator/commit/adb0c8e3432ef682b47234bb187afa61bced0936))
+
 ## [3.0.2](https://github.com/canonical/hydra-operator/compare/v3.0.1...v3.0.2) (2026-04-25)
 
 
