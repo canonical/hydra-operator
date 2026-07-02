@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.1.0](https://github.com/canonical/hydra-operator/compare/v3.0.2...v3.1.0) (2026-06-30)
+
+
+### Features
+
+* add flag to prefer in-cluster URLs to cross-cluster when internal-route is enabled ([a866a5e](https://github.com/canonical/hydra-operator/commit/a866a5e055d23150845aa6b6304e3906b7ef4d49))
+
+
+### Bug Fixes
+
+* make redirect_uri optional ([0ac595a](https://github.com/canonical/hydra-operator/commit/0ac595a176594815b8a356d3d83b483da7b1d80d))
+* update charm dependent libs ([adb0c8e](https://github.com/canonical/hydra-operator/commit/adb0c8e3432ef682b47234bb187afa61bced0936))
+
 ## [3.0.2](https://github.com/canonical/hydra-operator/compare/v3.0.1...v3.0.2) (2026-04-25)
 
 
