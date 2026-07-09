@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/canonical/hydra-operator/compare/v3.1.0...v3.1.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* update canonical/identity-team action to v1.14.2 ([cdec100](https://github.com/canonical/hydra-operator/commit/cdec1009b03d59b7d3e2b7615d2751ef8cdbd2bd))
+
 ## [3.1.0](https://github.com/canonical/hydra-operator/compare/v3.0.2...v3.1.0) (2026-07-06)
 
 
