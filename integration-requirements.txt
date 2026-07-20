@@ -1,7 +1,0 @@
--r requirements.txt
-jubilant
-pytest
-requests
-tenacity
-PyJWT==2.13.0
-cryptography

@@ -1,8 +1,0 @@
-cosl
-dacite
-jinja2
-ops==3.8.0
-pydantic~=2.13.1
-lightkube~=0.22.0
-lightkube-models~=1.35.0.8
-yarl
