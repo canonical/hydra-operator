@@ -13,7 +13,7 @@ dependencies = [
     "dacite",
     "jinja2",
     "jsonschema",
-    "ops==3.8.0",
+    "ops==3.8.1",
     "pydantic~=2.13.1",
     "lightkube~=0.22.0",
     "lightkube-models~=1.36.3.8",
