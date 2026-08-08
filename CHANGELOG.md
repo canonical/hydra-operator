@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.2.0](https://github.com/canonical/hydra-operator/compare/v3.1.1...v3.2.0) (2026-08-08)
+
+
+### Features
+
+* support 26.04 base ([5a6f20c](https://github.com/canonical/hydra-operator/commit/5a6f20ce2d404bad8ae3449ceb6e77a3a5c59a0e))
+* support 26.04 base ([#595](https://github.com/canonical/hydra-operator/issues/595)) ([f7e000b](https://github.com/canonical/hydra-operator/commit/f7e000b01f1c748ef0b632e0aca3ab227d20a68f))
+
+
+### Bug Fixes
+
+* **deps:** update dependency lightkube to v1 ([9996dbf](https://github.com/canonical/hydra-operator/commit/9996dbf72888a938d9eced7b512009122a9057c7))
+* **deps:** update dependency lightkube to v1 ([#600](https://github.com/canonical/hydra-operator/issues/600)) ([e629051](https://github.com/canonical/hydra-operator/commit/e6290510196cce30d6d2d3e35de60c336edd90d6))
+* **deps:** update dependency lightkube-models to ~=1.36.3.8 ([3eda8a1](https://github.com/canonical/hydra-operator/commit/3eda8a12b6c4952e6aea30b851d18385373317ed))
+* **deps:** update dependency lightkube-models to ~=1.36.3.8 ([#588](https://github.com/canonical/hydra-operator/issues/588)) ([6930e47](https://github.com/canonical/hydra-operator/commit/6930e470f5ae6882794425ad2c3f56edc8ac1a6f))
+* **deps:** update dependency ops to v3.8.1 ([d9bdb86](https://github.com/canonical/hydra-operator/commit/d9bdb86aed84057a1f5b6d2b0e59c7213b304c36))
+* **deps:** update dependency ops to v3.8.1 ([#592](https://github.com/canonical/hydra-operator/issues/592)) ([1f1bc83](https://github.com/canonical/hydra-operator/commit/1f1bc8328debe2be7a19b8e9986ce4a0352c495a))
+
 ## [3.1.1](https://github.com/canonical/hydra-operator/compare/v3.1.0...v3.1.1) (2026-07-09)
 
 
