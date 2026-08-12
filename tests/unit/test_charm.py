@@ -2,20 +2,18 @@
 # See LICENSE file for licensing details.
 
 import json
-from typing import cast
 from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
-from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
+from charms.hydra.v0.oauth import OAuthProvider
 from ops import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.testing import Container, Context, PeerRelation, Relation, Secret
+from ops.testing import Container, Context, PeerRelation, Relation
 from pytest_mock import MockerFixture
 from unit.conftest import create_state
 from yarl import URL
 
 from charm import HydraCharm
-from cli import OAuthClient
 from configs import ConfigFile
 from constants import (
     DATABASE_INTEGRATION_NAME,
@@ -188,16 +186,12 @@ class TestPublicRouteJoinedEvent:
         """Test that joining a public route integration triggers all dependent handlers."""
         state = create_state(relations=[public_route_relation_ready])
 
-        with (
-            patch(
-                "charm.HydraEndpointsProvider.send_endpoint_relation_data"
-            ) as mocked_endpoints_provider,
-            patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider,
-        ):
+        with patch(
+            "charm.HydraEndpointsProvider.send_endpoint_relation_data"
+        ) as mocked_endpoints_provider:
             context.run(context.on.relation_joined(public_route_relation_ready), state)
 
         mocked_endpoints_provider.assert_called_once()
-        mocked_provider.assert_called_once()
         mocked_holistic_handler.assert_called_once()
 
 
@@ -213,16 +207,12 @@ class TestPublicRouteChangedEvent:
         """Test that changes in public route integration data trigger all dependent handlers."""
         state = create_state(relations=[public_route_relation_ready])
 
-        with (
-            patch(
-                "charm.HydraEndpointsProvider.send_endpoint_relation_data"
-            ) as mocked_endpoints_provider,
-            patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider,
-        ):
+        with patch(
+            "charm.HydraEndpointsProvider.send_endpoint_relation_data"
+        ) as mocked_endpoints_provider:
             context.run(context.on.relation_changed(public_route_relation_ready), state)
 
         mocked_endpoints_provider.assert_called_once()
-        mocked_provider.assert_called_once()
         mocked_holistic_handler.assert_called_once()
 
 
@@ -443,7 +433,12 @@ class TestOAuthIntegrationCreatedEvent:
         expected_public_url = str(mocked_public_route_data.url)
         expected_admin_url = str(mocked_internal_ingress_data.admin_endpoint)
 
-        with patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider:
+        with (
+            patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
+            patch("charm.NOOP_CONDITIONS", new=[]),
+            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
+            patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider,
+        ):
             context.run(context.on.relation_created(oauth_relation), state)
 
         mocked_provider.assert_called_once()
@@ -457,302 +452,6 @@ class TestOAuthIntegrationCreatedEvent:
             scope="openid profile email phone",
             groups=None,
             jwt_access_token=True,
-        )
-
-
-class TestOAuthClientCreatedEvent:
-    """Tests for the OAuth Client Created event."""
-
-    @pytest.fixture
-    def client_created_event(
-        self,
-        context: Context,
-        mocked_oauth_client_config: dict,
-        oauth_relation: Relation,
-    ) -> ClientCreatedEvent:
-        return cast(
-            ClientCreatedEvent,
-            context.on.custom(
-                OAuthProvider.on.client_created,
-                mocked_oauth_client_config["redirect_uri"],
-                mocked_oauth_client_config["scope"],
-                mocked_oauth_client_config["grant_types"],
-                mocked_oauth_client_config["audience"],
-                mocked_oauth_client_config["token_endpoint_auth_method"],
-                oauth_relation.id,
-            ),
-        )
-
-    def test_when_hydra_service_not_ready(
-        self,
-        context: Context,
-        peer_relation_ready: PeerRelation,
-        public_route_relation_ready: Relation,
-        login_ui_relation_ready: Relation,
-        db_relation_ready: Relation,
-        oauth_relation: Relation,
-        hydra_secrets: list[Secret],
-        client_created_event: ClientCreatedEvent,
-    ) -> None:
-        """Test waiting status if Hydra service is not running when client is created."""
-        state = create_state(
-            leader=True,
-            relations=[
-                peer_relation_ready,
-                public_route_relation_ready,
-                login_ui_relation_ready,
-                db_relation_ready,
-                oauth_relation,
-            ],
-            secrets=hydra_secrets,
-            hydra_is_running=False,
-        )
-        state_out = context.run(client_created_event, state)
-
-        assert len(state_out.deferred) == 1
-
-    def test_when_peer_integration_not_exists(
-        self,
-        context: Context,
-        public_route_relation: Relation,
-        login_ui_relation_ready: Relation,
-        db_relation_ready: Relation,
-        oauth_relation: Relation,
-        hydra_secrets: list[Secret],
-        client_created_event: ClientCreatedEvent,
-    ) -> None:
-        """Test waiting status if peer integration is missing during client creation."""
-        state = create_state(
-            leader=True,
-            relations=[
-                public_route_relation,
-                login_ui_relation_ready,
-                db_relation_ready,
-                oauth_relation,
-            ],
-            secrets=hydra_secrets,
-            hydra_is_running=True,
-        )
-
-        state_out = context.run(client_created_event, state)
-
-        assert state_out.unit_status == WaitingStatus(
-            f"Missing integration {PEER_INTEGRATION_NAME}"
-        )
-
-    def test_when_oauth_client_creation_failed(
-        self,
-        context: Context,
-        peer_relation_ready: PeerRelation,
-        public_route_relation: Relation,
-        login_ui_relation_ready: Relation,
-        db_relation_ready: Relation,
-        oauth_relation: Relation,
-        hydra_secrets: list[Secret],
-        client_created_event: ClientCreatedEvent,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        """Test handling of client creation failure (logs error)."""
-        state = create_state(
-            leader=True,
-            relations=[
-                peer_relation_ready,
-                public_route_relation,
-                login_ui_relation_ready,
-                db_relation_ready,
-                oauth_relation,
-            ],
-            secrets=hydra_secrets,
-            hydra_is_running=True,
-        )
-
-        with (
-            caplog.at_level("ERROR"),
-            patch(
-                "charm.CommandLine.create_oauth_client",
-                return_value=None,
-            ),
-            patch(
-                "charm.OAuthProvider.set_client_credentials_in_relation_data"
-            ) as mocked_provider,
-        ):
-            state_out = context.run(client_created_event, state)
-
-        assert "Failed to create the OAuth client bound with the oauth integration" in caplog.text
-
-        peer_out = state_out.get_relation(peer_relation_ready.id)
-        assert not any(k.startswith(f"oauth_{oauth_relation.id}") for k in peer_out.local_app_data)
-
-        mocked_provider.assert_not_called()
-
-    def test_when_succeeds(
-        self,
-        context: Context,
-        peer_relation_ready: PeerRelation,
-        public_route_relation: Relation,
-        login_ui_relation_ready: Relation,
-        db_relation_ready: Relation,
-        oauth_relation: Relation,
-        hydra_secrets: list[Secret],
-        client_created_event: ClientCreatedEvent,
-    ) -> None:
-        """Test successful creation of OAuth client and distribution of credentials."""
-        state = create_state(
-            leader=True,
-            relations=[
-                peer_relation_ready,
-                public_route_relation,
-                login_ui_relation_ready,
-                db_relation_ready,
-                oauth_relation,
-            ],
-            secrets=hydra_secrets,
-            hydra_is_running=True,
-        )
-
-        with (
-            patch(
-                "charm.CommandLine.create_oauth_client",
-                return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
-            ),
-            patch(
-                "charm.OAuthProvider.set_client_credentials_in_relation_data"
-            ) as mocked_provider,
-        ):
-            state_out = context.run(client_created_event, state)
-
-        peer_out = state_out.get_relation(peer_relation_ready.id)
-        key = f"oauth_{oauth_relation.id}"
-        assert key in peer_out.local_app_data
-        mocked_provider.assert_called_once_with(oauth_relation.id, "client_id", "client_secret")
-
-    def test_client_created_emitted_twice(
-        self,
-        context: Context,
-        peer_relation_ready: PeerRelation,
-        public_route_relation: Relation,
-        login_ui_relation_ready: Relation,
-        db_relation_ready: Relation,
-        oauth_relation: Relation,
-        hydra_secrets: list[Secret],
-        client_created_event: ClientCreatedEvent,
-    ) -> None:
-        """Test idempotency when client created event matches idempotency."""
-        state = create_state(
-            leader=True,
-            relations=[
-                peer_relation_ready,
-                public_route_relation,
-                login_ui_relation_ready,
-                db_relation_ready,
-                oauth_relation,
-            ],
-            secrets=hydra_secrets,
-            hydra_is_running=True,
-        )
-
-        with patch(
-            "charm.CommandLine.create_oauth_client",
-            return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
-        ) as create_oauth_client:
-            state_out = context.run(client_created_event, state)
-            state_out = context.run(client_created_event, state_out)
-
-        create_oauth_client.assert_called_once()
-
-
-class TestOAuthClientChangedEvent:
-    """Tests for the OAuth Client Changed event."""
-
-    @pytest.fixture
-    def client_id(self) -> str:
-        return "client_id_12345"
-
-    @pytest.fixture
-    def client_changed_event(
-        self,
-        context: Context,
-        mocked_oauth_client_config: dict,
-        oauth_relation: Relation,
-        client_id: str,
-    ) -> ClientChangedEvent:
-        return cast(
-            ClientChangedEvent,
-            context.on.custom(
-                OAuthProvider.on.client_changed,
-                mocked_oauth_client_config["redirect_uri"],
-                mocked_oauth_client_config["scope"],
-                mocked_oauth_client_config["grant_types"],
-                mocked_oauth_client_config["audience"],
-                mocked_oauth_client_config["token_endpoint_auth_method"],
-                oauth_relation.id,
-                client_id,
-            ),
-        )
-
-    def test_when_hydra_service_not_ready(
-        self,
-        context: Context,
-        peer_relation_ready: PeerRelation,
-        public_route_relation_ready: Relation,
-        login_ui_relation_ready: Relation,
-        db_relation_ready: Relation,
-        oauth_relation: Relation,
-        hydra_secrets: list[Secret],
-        client_changed_event: ClientChangedEvent,
-    ) -> None:
-        """Test waiting status if Hydra service is not running when client config changes."""
-        state = create_state(
-            leader=True,
-            relations=[
-                peer_relation_ready,
-                public_route_relation_ready,
-                login_ui_relation_ready,
-                db_relation_ready,
-                oauth_relation,
-            ],
-            secrets=hydra_secrets,
-            hydra_is_running=False,
-        )
-        state_out = context.run(client_changed_event, state)
-
-        assert len(state_out.deferred) == 1
-
-    def test_when_oauth_client_update_failed(
-        self,
-        context: Context,
-        peer_relation_ready: PeerRelation,
-        public_route_relation_ready: Relation,
-        login_ui_relation_ready: Relation,
-        db_relation_ready: Relation,
-        oauth_relation: Relation,
-        hydra_secrets: list[Secret],
-        caplog: pytest.LogCaptureFixture,
-        client_changed_event: ClientChangedEvent,
-    ) -> None:
-        """Test handling of client update failure."""
-        state = create_state(
-            leader=True,
-            relations=[
-                peer_relation_ready,
-                public_route_relation_ready,
-                login_ui_relation_ready,
-                db_relation_ready,
-                oauth_relation,
-            ],
-            secrets=hydra_secrets,
-        )
-
-        with (
-            caplog.at_level("ERROR"),
-            patch("charm.CommandLine.update_oauth_client", return_value=None) as mocked_cli,
-        ):
-            context.run(client_changed_event, state)
-
-        mocked_cli.assert_called_once()
-        assert (
-            f"Failed to update the OAuth client bound with the oauth integration: {oauth_relation.id}"
-            in caplog.text
         )
 
 
@@ -1135,3 +834,49 @@ class TestHolisticHandler:
             state_out = context.run(context.on.update_status(), state)
 
         assert state_out.unit_status == ActiveStatus()
+
+    def test_does_not_publish_oauth_provider_info_when_not_ready(
+        self,
+        context: Context,
+        public_route_relation_ready: Relation,
+        oauth_relation: Relation,
+    ) -> None:
+        """Test that a blocked charm does not advertise endpoints it cannot serve."""
+        state = create_state(relations=[public_route_relation_ready, oauth_relation])
+
+        with patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider:
+            state_out = context.run(context.on.update_status(), state)
+
+        assert isinstance(state_out.unit_status, BlockedStatus)
+        mocked_provider.assert_not_called()
+
+    def test_publishes_oauth_provider_info_when_ready(
+        self,
+        context: Context,
+        public_route_relation_ready: Relation,
+        login_ui_relation_ready: Relation,
+        db_relation_ready: Relation,
+        peer_relation_ready: PeerRelation,
+        oauth_relation: Relation,
+    ) -> None:
+        """Test that provider info is published once every readiness condition is met."""
+        state = create_state(
+            relations=[
+                peer_relation_ready,
+                db_relation_ready,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+                oauth_relation,
+            ]
+        )
+
+        with (
+            patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
+            patch("charm.NOOP_CONDITIONS", new=[]),
+            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
+            patch("charm.WorkloadService.is_running", return_value=True),
+            patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider,
+        ):
+            context.run(context.on.update_status(), state)
+
+        mocked_provider.assert_called_once()

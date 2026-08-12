@@ -277,7 +277,7 @@ actions:
         default: RS256
         enumerate: [RS256, RS512, ES256, ES512, EdDSA]
   reconcile-oauth-clients:
-    description: Clean up clients that were created by the oauth relation
+    description: Synchronize the oauth clients with the oauth integrations, creating or updating the clients of active integrations, re-registering clients that were removed from Hydra out of band, and deleting the clients of removed integrations
   get-secret-keys:
     description: Get all the system or cookie secret keys used by hydra to encrypt sensitive data
     params:

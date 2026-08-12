@@ -370,6 +370,20 @@ def oauth_relation() -> Relation:
 
 
 @pytest.fixture
+def oauth_relation_ready(mocked_oauth_client_config: dict) -> Relation:
+    return Relation(
+        OAUTH_INTEGRATION_NAME,
+        remote_app_data={
+            "redirect_uri": mocked_oauth_client_config["redirect_uri"],
+            "scope": mocked_oauth_client_config["scope"],
+            "grant_types": dumps(mocked_oauth_client_config["grant_types"]),
+            "audience": dumps(mocked_oauth_client_config["audience"]),
+            "token_endpoint_auth_method": mocked_oauth_client_config["token_endpoint_auth_method"],
+        },
+    )
+
+
+@pytest.fixture
 def hydra_endpoint_relation() -> Relation:
     return Relation("hydra-endpoint-info")
 

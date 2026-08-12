@@ -6,12 +6,12 @@ from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from ops.testing import ActionFailed, Context, PeerRelation
+from ops.testing import ActionFailed, Context, PeerRelation, Relation
 from pytest_mock import MockerFixture
 from unit.conftest import create_state
 
 from cli import OAuthClient
-from exceptions import CommandExecError, MigrationError
+from exceptions import ClientDoesNotExistError, CommandExecError, MigrationError
 from integrations import DatabaseConfig
 
 
@@ -202,6 +202,21 @@ class TestGetOAuthClientInfoAction:
                 context.run(
                     context.on.action("get-oauth-client-info", {"client-id": "client_id"}), state
                 )
+
+    @pytest.mark.parametrize(
+        "action",
+        ["get-oauth-client-info", "update-oauth-client", "delete-oauth-client"],
+    )
+    def test_when_client_does_not_exist(
+        self,
+        context: Context,
+        action: str,
+    ) -> None:
+        """A client Hydra does not have gets a precise message, not a pointer to the logs."""
+        with patch("charm.CommandLine.get_oauth_client", side_effect=ClientDoesNotExistError):
+            state = create_state()
+            with pytest.raises(ActionFailed, match="The OAuth client client_id does not exist"):
+                context.run(context.on.action(action, {"client-id": "client_id"}), state)
 
     def test_when_action_succeeds(
         self,
@@ -648,3 +663,144 @@ class TestReconcileOauthClientsAction:
         context.run(context.on.action("reconcile-oauth-clients"), state)
 
         assert mocked_cli.call_count == 3
+
+    def test_action_reconciles_active_integrations(
+        self,
+        context: Context,
+        peer_relation_ready: PeerRelation,
+        public_route_relation_ready: Relation,
+        oauth_relation_ready: Relation,
+    ) -> None:
+        state = create_state(
+            leader=True,
+            relations=[peer_relation_ready, public_route_relation_ready, oauth_relation_ready],
+        )
+
+        with (
+            patch(
+                "charm.CommandLine.create_oauth_client",
+                return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
+            ) as create_oauth_client,
+            patch("charm.OAuthProvider.set_client_credentials_in_relation_data"),
+        ):
+            context.run(context.on.action("reconcile-oauth-clients"), state)
+
+        create_oauth_client.assert_called_once()
+
+    def test_action_reapplies_clients_whose_fingerprint_is_unchanged(
+        self,
+        context: Context,
+        peer_relation_ready: PeerRelation,
+        public_route_relation_ready: Relation,
+        oauth_relation_ready: Relation,
+    ) -> None:
+        """The action is the documented repair tool, so it must not trust the peer record."""
+        create_state_relations = [
+            public_route_relation_ready,
+            replace(
+                peer_relation_ready,
+                local_app_data={
+                    **peer_relation_ready.local_app_data,
+                    f"oauth_{oauth_relation_ready.id}": json.dumps({"client_id": "client_id"}),
+                },
+            ),
+            oauth_relation_ready,
+        ]
+        state = create_state(leader=True, relations=create_state_relations)
+
+        # Converge first so the recorded fingerprint matches the requirer data exactly.
+        with patch(
+            "charm.CommandLine.update_oauth_client",
+            return_value=OAuthClient(client_id="client_id"),
+        ):
+            state = context.run(context.on.action("reconcile-oauth-clients"), state)
+
+        with patch(
+            "charm.CommandLine.update_oauth_client",
+            return_value=OAuthClient(client_id="client_id"),
+        ) as update_oauth_client:
+            context.run(context.on.action("reconcile-oauth-clients"), state)
+
+        update_oauth_client.assert_called_once()
+
+    def test_when_reconciliation_fails(
+        self,
+        context: Context,
+        peer_relation_ready: PeerRelation,
+        public_route_relation_ready: Relation,
+        oauth_relation_ready: Relation,
+    ) -> None:
+        """The documented repair tool must not report success when it repaired nothing."""
+        state = create_state(
+            leader=True,
+            relations=[peer_relation_ready, public_route_relation_ready, oauth_relation_ready],
+        )
+
+        with patch("charm.CommandLine.create_oauth_client", return_value=None):
+            with pytest.raises(ActionFailed) as excinfo:
+                context.run(context.on.action("reconcile-oauth-clients"), state)
+
+        assert "Failed to reconcile the oauth integrations" in excinfo.value.message
+
+    def test_when_peer_integration_missing(
+        self,
+        context: Context,
+        mocked_cli: MagicMock,
+        oauth_relation_ready: Relation,
+    ) -> None:
+        """Without a peer integration nothing can be recorded, so nothing was reconciled."""
+        state = create_state(leader=True, relations=[oauth_relation_ready])
+
+        with pytest.raises(ActionFailed) as excinfo:
+            context.run(context.on.action("reconcile-oauth-clients"), state)
+
+        assert "Peer integration is not ready yet" in excinfo.value.message
+        mocked_cli.assert_not_called()
+
+    def test_when_public_route_not_ready(
+        self,
+        context: Context,
+        mocked_cli: MagicMock,
+        peer_relation_ready: PeerRelation,
+        oauth_relation_ready: Relation,
+    ) -> None:
+        """Credentials must not be published into a databag that carries no provider info."""
+        state = create_state(leader=True, relations=[peer_relation_ready, oauth_relation_ready])
+
+        with pytest.raises(ActionFailed) as excinfo:
+            context.run(context.on.action("reconcile-oauth-clients"), state)
+
+        assert "Public route is not ready" in excinfo.value.message
+        mocked_cli.assert_not_called()
+
+    def test_action_publishes_provider_info_before_credentials(
+        self,
+        context: Context,
+        peer_relation_ready: PeerRelation,
+        public_route_relation_ready: Relation,
+        oauth_relation_ready: Relation,
+    ) -> None:
+        """Credentials in a databag with no provider info fail the schema on the next hook."""
+        state = create_state(
+            leader=True,
+            relations=[peer_relation_ready, public_route_relation_ready, oauth_relation_ready],
+        )
+
+        calls = []
+        with (
+            patch(
+                "charm.OAuthProvider.set_provider_info_in_relation_data",
+                side_effect=lambda **_: calls.append("provider_info"),
+            ),
+            patch(
+                "charm.CommandLine.create_oauth_client",
+                return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
+            ),
+            patch(
+                "charm.OAuthProvider.set_client_credentials_in_relation_data",
+                side_effect=lambda *_: calls.append("credentials"),
+            ),
+        ):
+            context.run(context.on.action("reconcile-oauth-clients"), state)
+
+        assert calls == ["provider_info", "credentials"]
