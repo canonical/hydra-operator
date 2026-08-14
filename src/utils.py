@@ -1,8 +1,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Optional, TypeVar
+from typing import TYPE_CHECKING, Callable, TypeVar
 
 from ops.charm import CharmBase
 
@@ -19,22 +18,8 @@ from integrations import LoginUIEndpointData, PublicRouteData
 if TYPE_CHECKING:
     from charm import HydraCharm
 
-CharmEventHandler = TypeVar("CharmEventHandler", bound=Callable[..., Any])
 CharmType = TypeVar("CharmType", bound=CharmBase)
 Condition = Callable[[CharmType], bool]
-
-
-def leader_unit(func: CharmEventHandler) -> CharmEventHandler:
-    """A decorator, applied to any event hook handler, to validate juju unit leadership."""
-
-    @wraps(func)
-    def wrapper(charm: CharmBase, *args: Any, **kwargs: Any) -> Optional[Any]:
-        if not charm.unit.is_leader():
-            return None
-
-        return func(charm, *args, **kwargs)
-
-    return wrapper  # type: ignore[return-value]
 
 
 def integration_existence(integration_name: str) -> Condition:

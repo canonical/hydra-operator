@@ -18,7 +18,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
-from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
+from charms.hydra.v0.oauth import OAuthProvider
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
@@ -70,7 +70,6 @@ from constants import (
 )
 from exceptions import (
     ClientDoesNotExistError,
-    CommandExecError,
     MigrationError,
     PebbleServiceError,
 )
@@ -83,6 +82,7 @@ from integrations import (
     PublicRouteData,
     TracingData,
 )
+from oauth import OAuthReconciler
 from secret import HydraSecrets, Secrets
 from services import PebbleService, WorkloadService
 from utils import (
@@ -91,7 +91,6 @@ from utils import (
     container_connectivity,
     database_integration_exists,
     database_resource_is_created,
-    leader_unit,
     login_ui_integration_exists,
     login_ui_is_ready,
     migration_is_ready,
@@ -148,6 +147,9 @@ class HydraCharm(CharmBase):
         )
 
         self.oauth_provider = OAuthProvider(self)
+        self._oauth_reconciler = OAuthReconciler(
+            self.model, self.peer_data, self.oauth_provider, self._cli
+        )
 
         self.login_ui_requirer = LoginUIEndpointsRequirer(
             self, relation_name=LOGIN_UI_INTEGRATION_NAME
@@ -211,8 +213,8 @@ class HydraCharm(CharmBase):
         )
 
         # hooks
-        self.framework.observe(self.token_hook.on.ready, self._on_token_hook_changed)
-        self.framework.observe(self.token_hook.on.unavailable, self._on_token_hook_changed)
+        self.framework.observe(self.token_hook.on.ready, self._on_holistic_handler)
+        self.framework.observe(self.token_hook.on.unavailable, self._on_holistic_handler)
 
         # database
         self.framework.observe(
@@ -270,16 +272,12 @@ class HydraCharm(CharmBase):
         )
 
         # oauth
-        self.framework.observe(self.on.oauth_relation_created, self._on_oauth_integration_created)
         self.framework.observe(
-            self.oauth_provider.on.client_created, self._on_oauth_client_created
+            self.on[OAUTH_INTEGRATION_NAME].relation_created, self._on_holistic_handler
         )
         self.framework.observe(
-            self.oauth_provider.on.client_changed, self._on_oauth_client_changed
+            self.on[OAUTH_INTEGRATION_NAME].relation_changed, self._on_holistic_handler
         )
-        # self.framework.observe(
-        #     self.oauth_provider.on.client_deleted, self._on_oauth_client_deleted
-        # )
 
         # tracing
         self.framework.observe(self.tracing_requirer.on.endpoint_changed, self._on_config_changed)
@@ -313,7 +311,7 @@ class HydraCharm(CharmBase):
         )
         self.framework.observe(self.on.rotate_key_action, self._on_rotate_key_action)
         self.framework.observe(
-            self.on.reconcile_oauth_clients_action, self._reconcile_oauth_clients_action
+            self.on.reconcile_oauth_clients_action, self._on_reconcile_oauth_clients_action
         )
         self.framework.observe(self.on.get_secret_keys_action, self._on_get_secret_keys_action)
         self.framework.observe(self.on.add_secret_key_action, self._on_add_secret_key_action)
@@ -372,7 +370,6 @@ class HydraCharm(CharmBase):
         self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
         self._update_hydra_endpoints(event)
-        self._on_oauth_integration_created(event)
 
     def _on_internal_ingress_joined(self, event: RelationJoinedEvent) -> None:
         self._on_internal_ingress_changed(event)
@@ -400,7 +397,7 @@ class HydraCharm(CharmBase):
             self.internal_ingress.submit_to_traefik(internal_ingress_config)
 
         self._update_hydra_endpoints(event)
-        self._on_oauth_integration_created(event)
+        self._holistic_handler(event)
 
     def _on_public_route_changed(self, event: RelationEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
@@ -425,7 +422,6 @@ class HydraCharm(CharmBase):
 
         self._holistic_handler(event)
         self._update_hydra_endpoints(event)
-        self._on_oauth_integration_created(event)
 
     def _on_public_route_broken(self, event: RelationBrokenEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
@@ -483,10 +479,14 @@ class HydraCharm(CharmBase):
         except PebbleServiceError as e:
             logger.error(f"Failed to stop the service, please check the container logs: {e}")
 
-    def _on_oauth_integration_created(self, event: EventBase) -> None:
+    def _update_oauth_provider_info(self) -> None:
+        """Publish Hydra's OIDC endpoints to every `oauth` integration.
+
+        Assumes the public route is ready. Every caller reaches this past a
+        `public_route_is_ready` check, so the guard below should never fire.
+        """
         if not (public_url := PublicRouteData.load(self.public_route).url):
-            event.defer()
-            logger.info("Public route URL is not available. Deferring the event.")
+            logger.info("Public route URL is not available, skipping the provider info update")
             return
 
         internal_endpoints = InternalIngressData.load(
@@ -508,55 +508,16 @@ class HydraCharm(CharmBase):
             jwt_access_token=self.config.get("jwt_access_tokens", True),
         )
 
-    @leader_unit
-    def _on_oauth_client_created(self, event: ClientCreatedEvent) -> None:
-        if not self._workload_service.is_running():
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            event.defer()
-            return
-
+    def _reconcile_oauth_clients(self, force: bool = False) -> list[int]:
         if not peer_integration_exists(self):
-            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
-            event.defer()
-            return
+            logger.info("Peer integration is missing, skipping the OAuth client reconciliation")
+            return []
 
-        if self.peer_data[f"oauth_{event.relation_id}"]:
-            logger.info("Got client_created event, but client already exists. Ignoring event")
-            return
-
-        target_oauth_client = OAuthClient(
-            **event.snapshot(),
-            **{"metadata": {"integration-id": str(event.relation_id)}},
-        )
-        if not (oauth_client := self._cli.create_oauth_client(target_oauth_client)):
-            logger.error("Failed to create the OAuth client bound with the oauth integration")
-            event.defer()
-            return
-
-        self.peer_data[f"oauth_{event.relation_id}"] = {"client_id": oauth_client.client_id}
-        self.oauth_provider.set_client_credentials_in_relation_data(
-            event.relation_id,
-            oauth_client.client_id,  # type: ignore[arg-type]
-            oauth_client.client_secret,  # type: ignore[arg-type]
-        )
-
-    @leader_unit
-    def _on_oauth_client_changed(self, event: ClientChangedEvent) -> None:
         if not self._workload_service.is_running():
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            event.defer()
-            return
+            logger.info("Hydra service is not running, skipping the OAuth client reconciliation")
+            return []
 
-        target_oauth_client = OAuthClient(
-            **event.snapshot(),
-            **{"metadata": {"integration-id": str(event.relation_id)}},
-        )
-        if not self._cli.update_oauth_client(target_oauth_client):
-            logger.error(
-                "Failed to update the OAuth client bound with the oauth integration: %d",
-                event.relation_id,
-            )
-            event.defer()
+        return self._oauth_reconciler.reconcile(force)
 
     def _update_hydra_endpoints(self, event: EventBase) -> None:
         internal_endpoints = InternalIngressData.load(
@@ -566,10 +527,6 @@ class HydraCharm(CharmBase):
             str(internal_endpoints.admin_endpoint),
             str(internal_endpoints.public_endpoint),
         )
-
-    def _on_token_hook_changed(self, event: EventBase) -> None:
-        self._on_holistic_handler(event)
-        self._on_oauth_integration_created(event)
 
     def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
         logger.error(f"Failed to patch resource constraints: {event.message}")
@@ -610,7 +567,9 @@ class HydraCharm(CharmBase):
             logger.error(f"Failed to start the service, please check the container logs: {e}")
             return
 
-        self._clean_up_oauth_relation_clients()
+        self._update_oauth_provider_info()
+        self._oauth_reconciler.garbage_collect()
+        self._reconcile_oauth_clients()
 
     def _on_pebble_check_failed(self, event: PebbleCheckFailedEvent) -> None:
         if event.info.name == PEBBLE_READY_CHECK_NAME:
@@ -726,7 +685,13 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+        try:
+            oauth_client = self._cli.get_oauth_client(client_id)
+        except ClientDoesNotExistError:
+            event.fail(f"The OAuth client {client_id} does not exist")
+            return
+
+        if not oauth_client:
             event.fail("Failed to get the OAuth client. Please check the juju logs")
             return
 
@@ -738,7 +703,13 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+        try:
+            oauth_client = self._cli.get_oauth_client(client_id)
+        except ClientDoesNotExistError:
+            event.fail(f"The OAuth client {client_id} does not exist")
+            return
+
+        if not oauth_client:
             event.fail(f"Failed to get the OAuth client {client_id}. Please check the juju logs")
             return
 
@@ -767,7 +738,13 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+        try:
+            oauth_client = self._cli.get_oauth_client(client_id)
+        except ClientDoesNotExistError:
+            event.fail(f"The OAuth client {client_id} does not exist")
+            return
+
+        if not oauth_client:
             event.fail(f"Failed to get the OAuth client {client_id}. Please check the juju logs")
             return
 
@@ -831,7 +808,7 @@ class HydraCharm(CharmBase):
         event.log("Successfully rotated the JWK")
         event.set_results({"new-key-id": jwk_id})
 
-    def _reconcile_oauth_clients_action(self, event: ActionEvent) -> None:
+    def _on_reconcile_oauth_clients_action(self, event: ActionEvent) -> None:
         if not self.unit.is_leader():
             event.fail("You need to run this action from the leader unit")
             return
@@ -840,9 +817,27 @@ class HydraCharm(CharmBase):
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
-        deleted = self._clean_up_oauth_relation_clients()
+        if not peer_integration_exists(self):
+            event.fail("Peer integration is not ready yet")
+            return
 
+        deleted = self._oauth_reconciler.garbage_collect()
         event.log(f"Successfully deleted {deleted} clients")
+
+        # Publishing credentials into a databag that carries no provider info yet leaves it
+        # failing the provider schema, which errors the next oauth hook on both sides of the
+        # integration. Deleting clients needs no provider info, hence the guard sits here.
+        if self.model.relations[OAUTH_INTEGRATION_NAME] and not public_route_is_ready(self):
+            event.fail("Public route is not ready. Please re-run the action once it is")
+            return
+
+        self._update_oauth_provider_info()
+
+        if failed := self._reconcile_oauth_clients(force=True):
+            event.fail(f"Failed to reconcile the oauth integrations: {sorted(failed)}")
+            return
+
+        event.log("Successfully reconciled the OAuth clients of the oauth integrations")
 
     def _on_get_secret_keys_action(self, event: ActionEvent) -> None:
         if not peer_integration_exists(self):
@@ -878,38 +873,6 @@ class HydraCharm(CharmBase):
         self.hydra_secrets.add_secret_key(event.params["type"], event.params["key"])
 
         event.log(f"Successfully set the `{event.params['type']}` key")
-
-    @leader_unit
-    def _clean_up_oauth_relation_clients(self) -> int:
-        to_delete = []
-        for k in self.peer_data.keys():
-            if not k.startswith("oauth_"):
-                continue
-
-            rel_id = k[len("oauth_") :]
-            rel = self.model.get_relation(OAUTH_INTEGRATION_NAME, relation_id=int(rel_id))
-            if rel.active:
-                continue
-
-            client = self.peer_data[k]
-
-            try:
-                self._cli.delete_oauth_client(client["client_id"])
-            except CommandExecError:
-                logger.error(
-                    f"Failed to delete the OAuth client bound with the oauth integration: {rel_id}."
-                    "Please run the 'reconcile-oauth-clients' action."
-                )
-            except ClientDoesNotExistError:
-                pass
-
-            self.oauth_provider.remove_secret(rel)
-            to_delete.append(k)
-
-        for r in to_delete:
-            self.peer_data.pop(r)
-
-        return len(to_delete)
 
 
 if __name__ == "__main__":

@@ -266,7 +266,14 @@ class CommandLine:
     def get_oauth_client(self, client_id: str) -> Optional[OAuthClient]:
         """Get an OAuth 2.0 client by client id.
 
+        Returns None when the client could not be fetched. A caller that must not confuse
+        "Hydra does not have it" with "the lookup failed" should catch the exception rather
+        than test for None.
+
         More information: https://www.ory.sh/docs/hydra/cli/hydra-get-client
+
+        Raises:
+            ClientDoesNotExistError: if Hydra reports that the client is not registered.
         """
         cmd = [
             "hydra",
@@ -281,10 +288,13 @@ class CommandLine:
 
         try:
             stdout = self._run_cmd(cmd)
+        except ExecError as err:
+            logger.error("Failed to get the OAuth client: %s", err)
+            if err.stderr and "Unable to locate the resource" in err.stderr:
+                raise ClientDoesNotExistError() from err
+            return None
         except Error as err:
             logger.error("Failed to get the OAuth client: %s", err)
-            if "Unable to locate the resource" in str(err):
-                logger.error("OAuth client not found: %s", client_id)
             return None
 
         return OAuthClient.model_validate_json(stdout)

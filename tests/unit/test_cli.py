@@ -8,7 +8,7 @@ from ops import Container
 from ops.pebble import ExecError
 
 from cli import CommandLine, parse_kv_string
-from exceptions import MigrationError
+from exceptions import ClientDoesNotExistError, MigrationError
 
 
 @pytest.mark.parametrize(
@@ -130,12 +130,21 @@ class TestCommandLine:
     def test_get_oauth_client_not_found(
         self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
     ) -> None:
+        """Hydra reporting the client as missing must be distinguishable from a failure."""
         mock_process.wait_output.side_effect = ExecError(
-            ["cmd"], 1, "Unable to locate the resource", ""
+            ["cmd"], 1, "", "Unable to locate the resource"
         )
 
-        actual = command_line.get_oauth_client("client_id")
-        assert actual is None
+        with pytest.raises(ClientDoesNotExistError):
+            command_line.get_oauth_client("client_id")
+
+    def test_get_oauth_client_lookup_failed(
+        self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
+    ) -> None:
+        """An inconclusive answer must not be reported as absence."""
+        mock_process.wait_output.side_effect = ExecError(["cmd"], 1, "", "connection refused")
+
+        assert command_line.get_oauth_client("client_id") is None
 
     def test_run_cmd(
         self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock
