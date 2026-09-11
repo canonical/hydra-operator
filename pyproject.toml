@@ -43,7 +43,7 @@ integration = [
     "pytest",
     "requests",
     "tenacity",
-    "PyJWT==2.13.0",
+    "PyJWT==2.14.0",
     "cryptography",
 ]
 dev = [
