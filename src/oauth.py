@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Any
 
-from charms.hydra.v0.oauth import DataValidationError, OAuthProvider
+from charmlibs.interfaces.oauth import DataValidationError, OAuthProvider
 from ops.model import Model, Relation
 
 from cli import CommandLine, OAuthClient
