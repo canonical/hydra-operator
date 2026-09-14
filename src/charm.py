@@ -11,6 +11,7 @@ import logging
 from secrets import token_hex
 from typing import Any
 
+from charmlibs.interfaces.oauth import OAuthProvider
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseCreatedEvent,
     DatabaseRequires,
@@ -18,7 +19,6 @@ from charms.data_platform_libs.v0.data_interfaces import (
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
-from charms.hydra.v0.oauth import OAuthProvider
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )

@@ -5,8 +5,8 @@ import json
 from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
+from charmlibs.interfaces.oauth import OAuthProvider
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
-from charms.hydra.v0.oauth import OAuthProvider
 from ops import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.testing import Container, Context, PeerRelation, Relation
 from pytest_mock import MockerFixture
