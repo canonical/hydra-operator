@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.2.1](https://github.com/canonical/hydra-operator/compare/v3.2.0...v3.2.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency lightkube-models to ~=1.37.0.8 ([0d00627](https://github.com/canonical/hydra-operator/commit/0d00627d7b3bc1395cc0845f41915f6de2974362))
+* **deps:** update dependency lightkube-models to ~=1.37.0.8 ([#615](https://github.com/canonical/hydra-operator/issues/615)) ([8889d21](https://github.com/canonical/hydra-operator/commit/8889d21be2587a42aa3a93710a7e20a98a336adb))
+* **deps:** update dependency ops to v3.8.2 ([db6786e](https://github.com/canonical/hydra-operator/commit/db6786e755b0b8465716bba6eb81538a56696316))
+* **deps:** update dependency ops to v3.8.2 ([#618](https://github.com/canonical/hydra-operator/issues/618)) ([ad43164](https://github.com/canonical/hydra-operator/commit/ad43164ee716fc00d2e6f46fee61cdab87f2f2a8))
+* **tests:** retry jwks request until traefik ingress updates ([e5c6039](https://github.com/canonical/hydra-operator/commit/e5c603952681873e15f4eef42f93d8cfd2ac804a))
+
 ## [3.2.0](https://github.com/canonical/hydra-operator/compare/v3.1.1...v3.2.0) (2026-08-17)
 
 
