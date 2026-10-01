@@ -234,15 +234,15 @@ wheels = [
 
 [[package]]
 name = "charmlibs-interfaces-oauth"
-version = "1.1.0"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
     { name = "ops" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/4f/bcdcf63ad21cc92d8345a156e59f12a7b0d6c7c3ddbd136075928d4a4c1e/charmlibs_interfaces_oauth-1.1.0.tar.gz", hash = "sha256:87438364242d7b663ae5b432d7802ff0b33177ea579b0917b1ba635d191c97fa", size = 49922, upload-time = "2026-09-11T10:48:53.277Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/b8/986a5c734f47bfc37e5eeb695f536bc4edc169e1ee540fcfdd39fc6cfb2f/charmlibs_interfaces_oauth-1.2.0.tar.gz", hash = "sha256:8ac725cb3a08d503f7c22ce8b80beaef89be7e11269f690f2872137e49f79384", size = 51163, upload-time = "2026-10-01T11:34:39.44Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/e4/7f73de270221d2a97459f3d32ec538ed74180ce4bda6650a87666d246191/charmlibs_interfaces_oauth-1.1.0-py3-none-any.whl", hash = "sha256:a350e54f66ec5a58f5b31fb34db0b50e2ac3188729e422c39328b8623ec1261d", size = 10454, upload-time = "2026-09-11T10:48:52.088Z" },
+    { url = "https://files.pythonhosted.org/packages/74/c7/80df2113feee8b73e5e576ed9b36972085c396dee7eb2f0dfb0bbef6304b/charmlibs_interfaces_oauth-1.2.0-py3-none-any.whl", hash = "sha256:7f274ce2f7cf9dfa6a19d42884dc64b16c7099c3c0b9fffbec2f1ef4043a5af1", size = 10925, upload-time = "2026-10-01T11:34:37.991Z" },
 ]
 
 [[package]]
@@ -825,7 +825,7 @@ unit = [
 
 [package.metadata]
 requires-dist = [
-    { name = "charmlibs-interfaces-oauth", specifier = "~=1.1.0" },
+    { name = "charmlibs-interfaces-oauth", specifier = "~=1.2.0" },
     { name = "cosl" },
     { name = "dacite" },
     { name = "jinja2" },
