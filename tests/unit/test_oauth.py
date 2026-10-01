@@ -5,13 +5,26 @@ import json
 from dataclasses import replace
 from unittest.mock import call, patch
 
-from ops.testing import Context, PeerRelation, Relation, Secret
+import pytest
+from ops.testing import Context, PeerRelation, Relation, Secret, State
 from unit.conftest import create_state
 
 from cli import OAuthClient
 from configs import ConfigFile
 from constants import OAUTH_INTEGRATION_NAME
 from exceptions import ClientDoesNotExistError, CommandExecError
+
+
+def _with_redirect_uri(state: State, relation_id: int, redirect_uri: str) -> State:
+    """Return `state` with the requirer of an `oauth` integration publishing `redirect_uri`."""
+    relation = state.get_relation(relation_id)
+    assert isinstance(relation, Relation)
+    updated = replace(
+        relation,
+        remote_app_data={**relation.remote_app_data, "redirect_uri": redirect_uri},
+    )
+    others = frozenset(r for r in state.relations if r.id != relation_id)
+    return replace(state, relations=others | {updated})
 
 
 class TestOAuthClientReconciliation:
@@ -121,6 +134,170 @@ class TestOAuthClientReconciliation:
         record = json.loads(peer_out.local_app_data[f"oauth_{oauth_relation.id}"])
         assert record["client_id"] == "client_id"
         assert record["config_hash"] != "stale"
+
+    def test_client_created_with_multiple_redirect_uris(
+        self,
+        context: Context,
+        peer_relation_ready: PeerRelation,
+        db_relation_ready: Relation,
+        public_route_relation_ready: Relation,
+        login_ui_relation_ready: Relation,
+        oauth_relation_ready: Relation,
+    ) -> None:
+        """A requirer publishing a list of redirect uris gets all of them registered."""
+        redirect_uris = ["https://example.com/callback", "https://other.example.com/callback"]
+        oauth_relation = replace(
+            oauth_relation_ready,
+            remote_app_data={
+                **oauth_relation_ready.remote_app_data,
+                "redirect_uri": json.dumps(redirect_uris),
+            },
+        )
+        state = create_state(
+            leader=True,
+            relations=[
+                peer_relation_ready,
+                db_relation_ready,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+                oauth_relation,
+            ],
+        )
+
+        with (
+            patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
+            patch("charm.NOOP_CONDITIONS", new=[]),
+            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
+            patch("charm.WorkloadService.is_running", return_value=True),
+            patch(
+                "charm.CommandLine.create_oauth_client",
+                return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
+            ) as create_oauth_client,
+            patch("charm.OAuthProvider.set_client_credentials_in_relation_data"),
+        ):
+            context.run(context.on.relation_changed(oauth_relation), state)
+
+        create_oauth_client.assert_called_once()
+        assert create_oauth_client.call_args.args[0].redirect_uris == redirect_uris
+
+    def test_client_updated_when_requirer_adds_redirect_uri(
+        self,
+        context: Context,
+        peer_relation_ready: PeerRelation,
+        db_relation_ready: Relation,
+        public_route_relation_ready: Relation,
+        login_ui_relation_ready: Relation,
+        oauth_relation_ready: Relation,
+    ) -> None:
+        """A requirer going from one redirect uri to several updates the registered client."""
+        redirect_uris = [
+            oauth_relation_ready.remote_app_data["redirect_uri"],
+            "https://other.example.com/callback",
+        ]
+        state = create_state(
+            leader=True,
+            relations=[
+                peer_relation_ready,
+                db_relation_ready,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+                oauth_relation_ready,
+            ],
+        )
+
+        with (
+            patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
+            patch("charm.NOOP_CONDITIONS", new=[]),
+            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
+            # Keep the container plan untouched so `state_out` can be fed back in.
+            patch("charm.PebbleService.plan"),
+            patch("charm.WorkloadService.is_running", return_value=True),
+            patch(
+                "charm.CommandLine.create_oauth_client",
+                return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
+            ) as create_oauth_client,
+            patch(
+                "charm.CommandLine.update_oauth_client",
+                return_value=OAuthClient(client_id="client_id"),
+            ) as update_oauth_client,
+            patch("charm.OAuthProvider.set_client_credentials_in_relation_data"),
+        ):
+            state_out = context.run(context.on.update_status(), state)
+            context.run(
+                context.on.update_status(),
+                _with_redirect_uri(state_out, oauth_relation_ready.id, json.dumps(redirect_uris)),
+            )
+
+        create_oauth_client.assert_called_once()
+        update_oauth_client.assert_called_once()
+        target = update_oauth_client.call_args.args[0]
+        assert target.redirect_uris == redirect_uris
+        assert target.client_id == "client_id"
+
+    @pytest.mark.parametrize(
+        ("redirect_uri", "equivalent_redirect_uri"),
+        [
+            pytest.param(
+                "https://example.com/callback",
+                json.dumps(["https://example.com/callback"]),
+                id="single uri as a list",
+            ),
+            pytest.param(
+                json.dumps(["https://example.com/a", "https://example.com/b"]),
+                json.dumps(["https://example.com/b", "https://example.com/a"]),
+                id="reordered list",
+            ),
+        ],
+    )
+    def test_client_not_updated_when_redirect_uris_are_equivalent(
+        self,
+        context: Context,
+        peer_relation_ready: PeerRelation,
+        db_relation_ready: Relation,
+        public_route_relation_ready: Relation,
+        login_ui_relation_ready: Relation,
+        oauth_relation_ready: Relation,
+        redirect_uri: str,
+        equivalent_redirect_uri: str,
+    ) -> None:
+        """Republishing the same redirect uris in another form does not touch the client."""
+        oauth_relation = replace(
+            oauth_relation_ready,
+            remote_app_data={**oauth_relation_ready.remote_app_data, "redirect_uri": redirect_uri},
+        )
+        state = create_state(
+            leader=True,
+            relations=[
+                peer_relation_ready,
+                db_relation_ready,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+                oauth_relation,
+            ],
+        )
+
+        with (
+            patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
+            patch("charm.NOOP_CONDITIONS", new=[]),
+            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
+            # Keep the container plan untouched so `state_out` can be fed back in.
+            patch("charm.PebbleService.plan"),
+            patch("charm.WorkloadService.is_running", return_value=True),
+            patch(
+                "charm.CommandLine.create_oauth_client",
+                return_value=OAuthClient(client_id="client_id", client_secret="client_secret"),
+            ) as create_oauth_client,
+            patch("charm.CommandLine.update_oauth_client") as update_oauth_client,
+            patch("charm.OAuthProvider.set_client_credentials_in_relation_data"),
+        ):
+            state_out = context.run(context.on.update_status(), state)
+            context.run(
+                context.on.update_status(),
+                _with_redirect_uri(state_out, oauth_relation.id, equivalent_redirect_uri),
+            )
+
+        create_oauth_client.assert_called_once()
+        update_oauth_client.assert_not_called()
 
     def test_legacy_peer_record_without_config_hash_is_updated_once(
         self,
