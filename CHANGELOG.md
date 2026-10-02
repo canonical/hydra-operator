@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.3.0](https://github.com/canonical/hydra-operator/compare/v3.2.0...v3.3.0) (2026-10-02)
+
+
+### Features
+
+* accept a list of redirect uris from oauth requirers ([4f91b2b](https://github.com/canonical/hydra-operator/commit/4f91b2b72843877da0a51b2484ec83733ef2e724)), closes [#527](https://github.com/canonical/hydra-operator/issues/527)
+* accept a list of redirect uris from oauth requirers ([#643](https://github.com/canonical/hydra-operator/issues/643)) ([613ca1a](https://github.com/canonical/hydra-operator/commit/613ca1a64c729b45ffbaa4fd3f8224a3f1f252ec))
+
+
+### Bug Fixes
+
+* **deps:** update dependency charmlibs-interfaces-oauth to ~=1.2.0 ([29ec4e7](https://github.com/canonical/hydra-operator/commit/29ec4e7d473f894c5017bde91f03d4c94f0dcfc5))
+* **deps:** update dependency charmlibs-interfaces-oauth to ~=1.2.0 ([#645](https://github.com/canonical/hydra-operator/issues/645)) ([7a3de75](https://github.com/canonical/hydra-operator/commit/7a3de75682cb7578f6c9edcc6393f5e443e3ff5e))
+* **deps:** update dependency lightkube-models to ~=1.37.0.8 ([0d00627](https://github.com/canonical/hydra-operator/commit/0d00627d7b3bc1395cc0845f41915f6de2974362))
+* **deps:** update dependency lightkube-models to ~=1.37.0.8 ([#615](https://github.com/canonical/hydra-operator/issues/615)) ([8889d21](https://github.com/canonical/hydra-operator/commit/8889d21be2587a42aa3a93710a7e20a98a336adb))
+* **deps:** update dependency ops to v3.8.2 ([db6786e](https://github.com/canonical/hydra-operator/commit/db6786e755b0b8465716bba6eb81538a56696316))
+* **deps:** update dependency ops to v3.8.2 ([#618](https://github.com/canonical/hydra-operator/issues/618)) ([ad43164](https://github.com/canonical/hydra-operator/commit/ad43164ee716fc00d2e6f46fee61cdab87f2f2a8))
+* **deps:** update dependency ops to v3.8.3 ([867f836](https://github.com/canonical/hydra-operator/commit/867f836a491aadb9f680d4782b978450d728e5a3))
+* **deps:** update dependency ops to v3.8.3 ([#644](https://github.com/canonical/hydra-operator/issues/644)) ([ba4f328](https://github.com/canonical/hydra-operator/commit/ba4f3286211c91faffb152fcfb1768f9da7d0034))
+* **tests:** retry jwks request until traefik ingress updates ([e5c6039](https://github.com/canonical/hydra-operator/commit/e5c603952681873e15f4eef42f93d8cfd2ac804a))
+
 ## [3.2.0](https://github.com/canonical/hydra-operator/compare/v3.1.1...v3.2.0) (2026-08-17)
 
 
