@@ -66,19 +66,28 @@ def container_connectivity(charm: CharmBase) -> bool:
     return charm.unit.get_container(WORKLOAD_CONTAINER).can_connect()
 
 
+def is_newer_version(version: str, than: str) -> bool:
+    """Compare two `vX.Y.Z` workload versions; a malformed version is never newer."""
+
+    def parse(v: str) -> tuple[int, ...]:
+        return tuple(int(part) for part in v.removeprefix("v").split("."))
+
+    try:
+        return parse(version) > parse(than)
+    except ValueError:
+        return False
+
+
 # Condition failure causes early return without doing anything
 NOOP_CONDITIONS: tuple[Condition, ...] = (
+    container_connectivity,
     peer_integration_exists,
     database_integration_exists,
     public_route_integration_exists,
     login_ui_integration_exists,
     public_route_is_ready,
     login_ui_is_ready,
-    migration_is_ready,
     secrets_is_ready,
     public_route_is_secure,
     database_resource_is_created,
 )
-
-# Condition failure causes early return with corresponding event deferred
-EVENT_DEFER_CONDITIONS: tuple[Condition, ...] = (container_connectivity,)

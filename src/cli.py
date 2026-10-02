@@ -6,11 +6,22 @@ import json
 import logging
 import re
 import shlex
-from typing import Any, Optional
+from enum import Enum
+from http.client import HTTPException
+from typing import Annotated, Any, Literal, Optional
 
 from ops import Container
+from ops.pebble import ConnectionError as PebbleConnectionError
 from ops.pebble import Error, ExecError
-from pydantic import AliasChoices, BaseModel, Field, field_serializer, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_serializer,
+    field_validator,
+)
 
 from constants import ADMIN_PORT, CONFIG_FILE_NAME, DEFAULT_OAUTH_SCOPES, DEFAULT_RESPONSE_TYPES
 from exceptions import ClientDoesNotExistError, CommandExecError, MigrationError
@@ -18,6 +29,19 @@ from exceptions import ClientDoesNotExistError, CommandExecError, MigrationError
 logger = logging.getLogger(__name__)
 
 VERSION_REGEX = re.compile(r"Version:\s+(?P<version>v\d+\.\d+\.\d+)")
+
+# The per-migration states printed by `hydra migrate sql status`
+MIGRATION_STATES: TypeAdapter[list[str]] = TypeAdapter(
+    Annotated[list[Literal["Applied", "Pending"]], Field(min_length=1)]
+)
+
+
+class SchemaState(str, Enum):
+    """State of the Hydra database schema relative to the workload binary."""
+
+    FRESH = "fresh"  # no migration applied
+    UP_TO_DATE = "up_to_date"  # no migration pending
+    UPGRADE_PENDING = "upgrade_pending"  # some migrations applied, some pending
 
 
 def parse_kv_string(kv_str: str) -> dict[str, str]:
@@ -209,6 +233,43 @@ class CommandLine:
         except Error as err:
             logger.error("Failed to migrate the hydra service: %s", err)
             raise MigrationError from err
+
+    def migration_status(self, dsn: str, timeout: float = 20) -> SchemaState:
+        """Inspect which migrations of this Hydra binary are applied to the database.
+
+        The jsonpath format keeps only the per-migration state; the default JSON
+        output embeds every migration's SQL. Hydra retries an unreachable database
+        forever, so the exec timeout bounds the call.
+
+        More information (the page documents the deprecated `hydra migrate status`
+        alias, which takes the same flags):
+        https://www.ory.com/docs/hydra/cli/hydra-migrate-status
+
+        Raises:
+            MigrationError: if the status could not be fetched, or if the output is
+                anything but a non-empty list of known states.
+        """
+        cmd = ["hydra", "migrate", "sql", "status", "-e", "--format", "jsonpath=#.state"]
+
+        try:
+            stdout = self._run_cmd(cmd, timeout=timeout, environment={"DSN": dsn})
+        except Error as err:
+            # Callers retry, and the database may just not be reachable yet.
+            logger.warning("Failed to get the hydra migration status: %s", err)
+            raise MigrationError from err
+
+        # An unknown state must not pass for an up-to-date schema.
+        try:
+            states = MIGRATION_STATES.validate_json(stdout)
+        except ValidationError as err:
+            logger.error("Unexpected hydra migration status output: %s", stdout)
+            raise MigrationError from err
+
+        if "Pending" not in states:
+            return SchemaState.UP_TO_DATE
+        if "Applied" not in states:
+            return SchemaState.FRESH
+        return SchemaState.UPGRADE_PENDING
 
     def create_jwk(
         self, key_set_id: str = "hydra.openid.id-token", algorithm: str = "RS256"
@@ -407,11 +468,17 @@ class CommandLine:
         environment: Optional[dict] = None,
     ) -> str:
         logger.debug(f"Running command: {cmd}")
-        process = self.container.exec(cmd, environment=environment, timeout=timeout)
         try:
+            process = self.container.exec(cmd, environment=environment, timeout=timeout)
             stdout, _ = process.wait_output()
         except ExecError as err:
             logger.error("Exited with code: %d. Error: %s", err.exit_code, err.stderr)
             raise
+        except Error:
+            raise
+        except (OSError, HTTPException) as err:
+            # ops does not wrap a connection that drops while a request is in flight,
+            # e.g. when the container restarts during the command
+            raise PebbleConnectionError(f"Lost the connection to Pebble: {err}") from err
 
         return stdout

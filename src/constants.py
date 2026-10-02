@@ -8,6 +8,7 @@ POSTGRESQL_DSN_TEMPLATE = Template("postgres://$username:$password@$endpoint/$da
 WORKLOAD_CONTAINER = "hydra"
 WORKLOAD_SERVICE = "hydra"
 PEBBLE_READY_CHECK_NAME = "ready"
+PEBBLE_ALIVE_CHECK_NAME = "alive"
 COOKIE_SECRET_KEY = "cookie"
 SYSTEM_SECRET_KEY = "system"
 COOKIE_SECRET_LABEL = "cookiesecret"

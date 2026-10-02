@@ -54,7 +54,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch(
                 "charm.CommandLine.create_oauth_client",
@@ -114,7 +113,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch(
                 "charm.CommandLine.update_oauth_client",
@@ -167,7 +165,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch(
                 "charm.CommandLine.create_oauth_client",
@@ -208,7 +205,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             # Keep the container plan untouched so `state_out` can be fed back in.
             patch("charm.PebbleService.plan"),
             patch("charm.WorkloadService.is_running", return_value=True),
@@ -279,7 +275,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             # Keep the container plan untouched so `state_out` can be fed back in.
             patch("charm.PebbleService.plan"),
             patch("charm.WorkloadService.is_running", return_value=True),
@@ -334,7 +329,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             # Keep the container plan untouched so `state_out` can be fed back in.
             patch("charm.PebbleService.plan"),
             patch("charm.WorkloadService.is_running", return_value=True),
@@ -382,7 +376,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             # Keep the container plan untouched so `state_out` can be fed back in.
             patch("charm.PebbleService.plan"),
             patch("charm.WorkloadService.is_running", return_value=True),
@@ -423,7 +416,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=False),
             patch("charm.CommandLine.create_oauth_client") as create_oauth_client,
         ):
@@ -455,7 +447,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.create_oauth_client") as create_oauth_client,
         ):
@@ -495,7 +486,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch(
                 "charm.CommandLine.create_oauth_client",
@@ -540,7 +530,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch(
                 "charm.CommandLine.delete_oauth_client",
@@ -584,7 +573,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch(
                 "charm.CommandLine.delete_oauth_client",
@@ -627,7 +615,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.delete_oauth_client") as delete_oauth_client,
         ):
@@ -661,7 +648,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.create_oauth_client", return_value=None),
             patch(
@@ -708,7 +694,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.update_oauth_client", return_value=None),
             patch(
@@ -756,7 +741,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.update_oauth_client", return_value=None),
             patch(
@@ -806,7 +790,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.create_oauth_client") as create_oauth_client,
             patch("charm.CommandLine.update_oauth_client") as update_oauth_client,
@@ -852,7 +835,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.update_oauth_client", return_value=None),
             patch("charm.CommandLine.get_oauth_client", return_value=None),
@@ -901,7 +883,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch(
                 "charm.CommandLine.create_oauth_client",
@@ -949,7 +930,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.create_oauth_client") as create_oauth_client,
             patch("charm.CommandLine.update_oauth_client") as update_oauth_client,
@@ -989,7 +969,6 @@ class TestOAuthClientReconciliation:
             with (
                 patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
                 patch("charm.NOOP_CONDITIONS", new=[]),
-                patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
                 patch("charm.WorkloadService.is_running", return_value=True),
                 patch(
                     "charm.CommandLine.create_oauth_client",
@@ -1044,7 +1023,6 @@ class TestOAuthClientReconciliation:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.CommandLine.update_oauth_client", return_value=None),
             patch(

@@ -1,13 +1,15 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
+from http.client import RemoteDisconnected
 from unittest.mock import MagicMock
 
 import pytest
 from ops import Container
-from ops.pebble import ExecError
+from ops.pebble import ChangeError, ConnectionError, ExecError, TimeoutError
 
-from cli import CommandLine, parse_kv_string
+from cli import CommandLine, SchemaState, parse_kv_string
 from exceptions import ClientDoesNotExistError, MigrationError
 
 
@@ -126,6 +128,109 @@ class TestCommandLine:
 
         with pytest.raises(MigrationError):
             command_line.migrate()
+
+    def test_migrate_connection_error(
+        self, command_line: CommandLine, container: MagicMock
+    ) -> None:
+        container.exec.side_effect = ConnectionError("socket not found")
+
+        with pytest.raises(MigrationError):
+            command_line.migrate()
+
+    @pytest.mark.parametrize(
+        "states, expected",
+        [
+            (["Pending", "Pending"], SchemaState.FRESH),
+            (["Applied", "Applied"], SchemaState.UP_TO_DATE),
+            (["Applied", "Pending"], SchemaState.UPGRADE_PENDING),
+        ],
+    )
+    def test_migration_status(
+        self,
+        command_line: CommandLine,
+        container: MagicMock,
+        mock_process: MagicMock,
+        states: list[str],
+        expected: SchemaState,
+    ) -> None:
+        mock_process.wait_output.return_value = (json.dumps(states), "")
+
+        assert command_line.migration_status("dsn") == expected
+        container.exec.assert_called_with(
+            ["hydra", "migrate", "sql", "status", "-e", "--format", "jsonpath=#.state"],
+            environment={"DSN": "dsn"},
+            timeout=20,
+        )
+
+    @pytest.mark.parametrize(
+        "output, error",
+        [
+            ("", ExecError(["cmd"], 1, "", "could not connect")),
+            ("not json", None),
+            ("[]", None),
+            ('{"state": "Applied"}', None),
+            ('["Unknown"]', None),
+            ('["Applied", "Unknown"]', None),
+        ],
+    )
+    def test_migration_status_failed(
+        self,
+        command_line: CommandLine,
+        mock_process: MagicMock,
+        output: str,
+        error: ExecError | None,
+    ) -> None:
+        mock_process.wait_output.return_value = (output, "")
+        mock_process.wait_output.side_effect = error
+
+        with pytest.raises(MigrationError):
+            command_line.migration_status("dsn")
+
+    def test_migration_status_timeout_is_not_logged_as_error(
+        self,
+        command_line: CommandLine,
+        mock_process: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_process.wait_output.side_effect = ChangeError("timed out after 20s", MagicMock())
+
+        with caplog.at_level("WARNING"), pytest.raises(MigrationError):
+            command_line.migration_status("dsn")
+
+        assert [record.levelname for record in caplog.records] == ["WARNING"]
+
+    def test_migration_status_connection_error(
+        self, command_line: CommandLine, container: MagicMock
+    ) -> None:
+        container.exec.side_effect = ConnectionError("socket not found")
+
+        with pytest.raises(MigrationError):
+            command_line.migration_status("dsn")
+
+    @pytest.mark.parametrize(
+        "error",
+        [RemoteDisconnected("Remote end closed connection without response"), BrokenPipeError()],
+    )
+    def test_connection_dropped_during_command(
+        self, command_line: CommandLine, mock_process: MagicMock, error: Exception
+    ) -> None:
+        """A connection ops does not wrap is handled like any other Pebble error."""
+        mock_process.wait_output.side_effect = error
+
+        with pytest.raises(MigrationError):
+            command_line.migration_status("dsn")
+        with pytest.raises(MigrationError):
+            command_line.migrate()
+        assert command_line.get_hydra_service_version() is None
+
+    def test_pebble_error_is_raised_as_is(
+        self, command_line: CommandLine, mock_process: MagicMock
+    ) -> None:
+        """A Pebble timeout is an OSError too, and must not pass for a dropped connection."""
+        mock_process.wait_output.side_effect = TimeoutError("timed out waiting for change")
+
+        with pytest.raises(TimeoutError):
+            command_line.delete_oauth_client("client_id")
 
     def test_get_oauth_client_not_found(
         self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock

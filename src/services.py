@@ -14,6 +14,7 @@ from constants import (
     ADMIN_PORT,
     CONFIG_FILE_NAME,
     HYDRA_SERVICE_COMMAND,
+    PEBBLE_ALIVE_CHECK_NAME,
     PEBBLE_READY_CHECK_NAME,
     PUBLIC_PORT,
     WORKLOAD_CONTAINER,
@@ -42,7 +43,7 @@ PEBBLE_LAYER_DICT: LayerDict = {
             "http": {"url": f"http://localhost:{ADMIN_PORT}/health/ready"},
             "threshold": 3,
         },
-        "alive": {
+        PEBBLE_ALIVE_CHECK_NAME: {
             "override": "replace",
             "level": "alive",
             "http": {"url": f"http://localhost:{ADMIN_PORT}/health/alive"},
@@ -63,7 +64,9 @@ class WorkloadService:
 
     @property
     def version(self) -> str:
-        self._version = self._cli.get_hydra_service_version() or ""
+        """The workload version, fetched once per charm run; failed lookups are retried."""
+        if not self._version:
+            self._version = self._cli.get_hydra_service_version() or ""
         return self._version
 
     @version.setter
@@ -133,8 +136,21 @@ class PebbleService:
             raise PebbleServiceError(f"Pebble failed to restart the workload service. Error: {e}")
 
     def stop(self) -> None:
+        """Stop the workload service.
+
+        The alive check fails once the service is stopped, and Kubernetes restarts a
+        container whose alive level is unhealthy. The check therefore loses its level
+        here, and gets it back when `plan` adds the complete layer again.
+        """
+        alive_check = self._layer_dict["checks"][PEBBLE_ALIVE_CHECK_NAME]
+        layer = Layer({
+            "checks": {
+                PEBBLE_ALIVE_CHECK_NAME: {"override": "replace", "http": alive_check["http"]}
+            }
+        })
         try:
             self._container.stop(WORKLOAD_SERVICE)
+            self._container.add_layer(WORKLOAD_SERVICE, layer, combine=True)
         except Exception as e:
             raise PebbleServiceError(f"Pebble failed to stop the workload service. Error: {e}")
 
