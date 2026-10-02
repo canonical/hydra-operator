@@ -91,6 +91,10 @@ class DatabaseConfig:
             "dsn": self.dsn,
         }
 
+    @staticmethod
+    def migration_version_key(integration_id: int) -> str:
+        return f"migration_version_{integration_id}"
+
     @classmethod
     def load(cls, requirer: DatabaseRequires) -> "DatabaseConfig":
         if not (database_integrations := requirer.relations):
@@ -104,7 +108,7 @@ class DatabaseConfig:
             database=requirer.database,
             username=integration_data.get("username", ""),
             password=integration_data.get("password", ""),
-            migration_version=f"migration_version_{integration_id}",
+            migration_version=cls.migration_version_key(integration_id),
         )
 
 

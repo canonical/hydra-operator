@@ -176,6 +176,16 @@ def hydra_migrate_exec() -> Exec:
 
 
 @pytest.fixture
+def hydra_migration_status_exec() -> Exec:
+    """A fresh database: no migration applied yet."""
+    return Exec(
+        ["hydra", "migrate", "sql", "status"],
+        return_code=0,
+        stdout=dumps(["Pending", "Pending"]),
+    )
+
+
+@pytest.fixture
 def hydra_create_jwk_exec() -> Exec:
     return Exec(
         ["hydra", "create", "jwk"],
@@ -240,6 +250,7 @@ def hydra_delete_access_token_exec() -> Exec:
 def container(
     hydra_version_exec: Exec,
     hydra_migrate_exec: Exec,
+    hydra_migration_status_exec: Exec,
     hydra_create_jwk_exec: Exec,
     hydra_list_clients_exec: Exec,
     hydra_get_client_exec: Exec,
@@ -254,6 +265,7 @@ def container(
         execs={
             hydra_version_exec,
             hydra_migrate_exec,
+            hydra_migration_status_exec,
             hydra_create_jwk_exec,
             hydra_list_clients_exec,
             hydra_get_client_exec,
@@ -435,6 +447,11 @@ def create_state(
                 Exec(
                     ["hydra", "migrate", "sql", "-e", "--yes"],
                     return_code=0,
+                ),
+                Exec(
+                    ["hydra", "migrate", "sql", "status"],
+                    return_code=0,
+                    stdout=dumps(["Pending", "Pending"]),
                 ),
                 Exec(
                     ["hydra", "create", "jwk"],

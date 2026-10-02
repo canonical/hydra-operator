@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shlex
+from enum import Enum
 from typing import Any, Optional
 
 from ops import Container
@@ -18,6 +19,14 @@ from exceptions import ClientDoesNotExistError, CommandExecError, MigrationError
 logger = logging.getLogger(__name__)
 
 VERSION_REGEX = re.compile(r"Version:\s+(?P<version>v\d+\.\d+\.\d+)")
+
+
+class SchemaState(str, Enum):
+    """State of the Hydra database schema relative to the workload binary."""
+
+    FRESH = "fresh"  # no migration applied
+    UP_TO_DATE = "up_to_date"  # no migration pending
+    UPGRADE_PENDING = "upgrade_pending"  # some migrations applied, some pending
 
 
 def parse_kv_string(kv_str: str) -> dict[str, str]:
@@ -209,6 +218,34 @@ class CommandLine:
         except Error as err:
             logger.error("Failed to migrate the hydra service: %s", err)
             raise MigrationError from err
+
+    def migration_status(self, dsn: str, timeout: float = 20) -> SchemaState:
+        """Inspect which migrations of this Hydra binary are applied to the database.
+
+        The jsonpath format keeps only the per-migration state; the default JSON
+        output embeds every migration's SQL. Hydra retries an unreachable database
+        forever, so the exec timeout bounds the call.
+
+        More information: https://www.ory.com/docs/hydra/cli/hydra-migrate-sql-status
+        """
+        cmd = ["hydra", "migrate", "sql", "status", "-e", "--format", "jsonpath=#.state"]
+
+        try:
+            stdout = self._run_cmd(cmd, timeout=timeout, environment={"DSN": dsn})
+            states = json.loads(stdout)
+        except (Error, json.JSONDecodeError) as err:
+            logger.error("Failed to get the hydra migration status: %s", err)
+            raise MigrationError from err
+
+        if not isinstance(states, list) or not states:
+            logger.error("Unexpected hydra migration status output: %s", stdout)
+            raise MigrationError
+
+        if "Pending" not in states:
+            return SchemaState.UP_TO_DATE
+        if "Applied" not in states:
+            return SchemaState.FRESH
+        return SchemaState.UPGRADE_PENDING
 
     def create_jwk(
         self, key_set_id: str = "hydra.openid.id-token", algorithm: str = "RS256"

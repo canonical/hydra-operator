@@ -14,6 +14,7 @@ from unit.conftest import create_state
 from yarl import URL
 
 from charm import HydraCharm
+from cli import SchemaState
 from configs import ConfigFile
 from constants import (
     DATABASE_INTEGRATION_NAME,
@@ -22,7 +23,7 @@ from constants import (
     PUBLIC_ROUTE_INTEGRATION_NAME,
     WORKLOAD_CONTAINER,
 )
-from exceptions import CommandExecError, PebbleServiceError
+from exceptions import CommandExecError, MigrationError, PebbleServiceError
 from integrations import InternalIngressData, PublicRouteData
 
 
@@ -361,6 +362,145 @@ class TestDatabaseCreatedEvent:
         )
         assert isinstance(state_out.unit_status, ActiveStatus)
 
+    @patch("charm.CommandLine.migrate", side_effect=MigrationError)
+    def test_when_migration_failed(
+        self,
+        mocked_cli_migration: MagicMock,
+        context: Context,
+        db_relation_ready: Relation,
+        peer_relation: PeerRelation,
+        login_ui_relation_ready: Relation,
+        public_route_relation_ready: Relation,
+    ) -> None:
+        """Test that a failed auto-migration records no version and leaves the unit waiting."""
+        state = create_state(
+            leader=True,
+            relations=[
+                db_relation_ready,
+                peer_relation,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+            ],
+        )
+
+        state_out = context.run(context.on.relation_changed(db_relation_ready), state)
+
+        mocked_cli_migration.assert_called_once()
+        peer_out = state_out.get_relation(peer_relation.id)
+        assert f"migration_version_{db_relation_ready.id}" not in peer_out.local_app_data
+        assert state_out.unit_status == WaitingStatus(
+            "Waiting for migration to run, try running the `run-migration` action"
+        )
+
+    @pytest.mark.parametrize(
+        "recorded_version",
+        [None, "v0.9.0"],
+        ids=["new-integration-on-existing-database", "workload-upgraded"],
+    )
+    @patch("charm.CommandLine.migration_status", return_value=SchemaState.UPGRADE_PENDING)
+    @patch("charm.CommandLine.migrate")
+    def test_when_schema_upgrade_pending(
+        self,
+        mocked_cli_migration: MagicMock,
+        mocked_migration_status: MagicMock,
+        context: Context,
+        db_relation_ready: Relation,
+        login_ui_relation_ready: Relation,
+        public_route_relation_ready: Relation,
+        recorded_version: str | None,
+    ) -> None:
+        """Test that a schema needing an upgrade is left for the run-migration action."""
+        local_app_data = (
+            {f"migration_version_{db_relation_ready.id}": json.dumps(recorded_version)}
+            if recorded_version
+            else {}
+        )
+        peer_relation = PeerRelation(PEER_INTEGRATION_NAME, local_app_data=local_app_data)
+        state = create_state(
+            leader=True,
+            relations=[
+                db_relation_ready,
+                peer_relation,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+            ],
+        )
+
+        state_out = context.run(context.on.relation_changed(db_relation_ready), state)
+
+        mocked_migration_status.assert_called_once()
+        mocked_cli_migration.assert_not_called()
+        peer_out = state_out.get_relation(peer_relation.id)
+        assert peer_out.local_app_data == local_app_data
+        assert state_out.unit_status == WaitingStatus(
+            "Waiting for migration to run, try running the `run-migration` action"
+        )
+
+    @patch("charm.CommandLine.migration_status", return_value=SchemaState.UP_TO_DATE)
+    @patch("charm.CommandLine.migrate")
+    def test_when_schema_up_to_date(
+        self,
+        mocked_cli_migration: MagicMock,
+        mocked_migration_status: MagicMock,
+        context: Context,
+        db_relation_ready: Relation,
+        peer_relation: PeerRelation,
+        login_ui_relation_ready: Relation,
+        public_route_relation_ready: Relation,
+        hydra_workload_version: str,
+    ) -> None:
+        """Test that a reused, already migrated database is recorded without migrating."""
+        state = create_state(
+            leader=True,
+            relations=[
+                db_relation_ready,
+                peer_relation,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+            ],
+        )
+
+        state_out = context.run(context.on.relation_changed(db_relation_ready), state)
+
+        mocked_cli_migration.assert_not_called()
+        peer_out = state_out.get_relation(peer_relation.id)
+        assert peer_out.local_app_data.get(
+            f"migration_version_{db_relation_ready.id}"
+        ) == json.dumps(hydra_workload_version)
+        assert isinstance(state_out.unit_status, ActiveStatus)
+
+    @patch("charm.CommandLine.migration_status", side_effect=MigrationError)
+    @patch("charm.CommandLine.migrate")
+    def test_when_migration_status_failed(
+        self,
+        mocked_cli_migration: MagicMock,
+        mocked_migration_status: MagicMock,
+        context: Context,
+        db_relation_ready: Relation,
+        peer_relation: PeerRelation,
+        login_ui_relation_ready: Relation,
+        public_route_relation_ready: Relation,
+    ) -> None:
+        """Test that an unknown schema state neither migrates nor records a version."""
+        state = create_state(
+            leader=True,
+            relations=[
+                db_relation_ready,
+                peer_relation,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+            ],
+        )
+
+        state_out = context.run(context.on.relation_changed(db_relation_ready), state)
+
+        mocked_cli_migration.assert_not_called()
+        peer_out = state_out.get_relation(peer_relation.id)
+        assert f"migration_version_{db_relation_ready.id}" not in peer_out.local_app_data
+        assert state_out.unit_status == WaitingStatus(
+            "Waiting for migration to run, try running the `run-migration` action"
+        )
+
 
 class TestDatabaseBrokenEvent:
     """Tests for the Database Broken event."""
@@ -379,6 +519,65 @@ class TestDatabaseBrokenEvent:
         context.run(context.on.relation_broken(db_relation_ready), state)
 
         mocked_holistic_handler.assert_called_once()
+
+    def test_cleans_up_migration_version_in_peer_data(
+        self,
+        context: Context,
+        db_relation_ready: Relation,
+        peer_relation_ready: PeerRelation,
+        mocked_holistic_handler: MagicMock,
+    ) -> None:
+        """Test that breaking the database integration removes migration version from peer data."""
+        state = create_state(
+            leader=True,
+            relations=[db_relation_ready, peer_relation_ready],
+        )
+
+        state_out = context.run(context.on.relation_broken(db_relation_ready), state)
+
+        peer_out = state_out.get_relation(peer_relation_ready.id)
+        assert f"migration_version_{db_relation_ready.id}" not in peer_out.local_app_data
+
+
+class TestPebbleCheckRecoveredEvent:
+    """Tests for the Pebble Check Recovered event."""
+
+    @patch("charm.CommandLine.migrate")
+    def test_retries_failed_auto_migration(
+        self,
+        mocked_cli_migration: MagicMock,
+        context: Context,
+        db_relation_ready: Relation,
+        peer_relation: PeerRelation,
+        login_ui_relation_ready: Relation,
+        public_route_relation_ready: Relation,
+        hydra_workload_version: str,
+    ) -> None:
+        """Test that a migration that failed on database creation is retried on recovery."""
+        state = create_state(
+            leader=True,
+            relations=[
+                db_relation_ready,
+                peer_relation,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+            ],
+        )
+        mocked_cli_migration.side_effect = MigrationError
+        state = context.run(context.on.relation_changed(db_relation_ready), state)
+        assert isinstance(state.unit_status, WaitingStatus)
+
+        mocked_cli_migration.side_effect = None
+        container = state.get_container(WORKLOAD_CONTAINER)
+        check_info = list(container.check_infos)[0]
+        state_out = context.run(context.on.pebble_check_recovered(container, check_info), state)
+
+        assert mocked_cli_migration.call_count == 2
+        peer_out = state_out.get_relation(peer_relation.id)
+        assert peer_out.local_app_data.get(
+            f"migration_version_{db_relation_ready.id}"
+        ) == json.dumps(hydra_workload_version)
+        assert isinstance(state_out.unit_status, ActiveStatus)
 
 
 class TestTokenHookReadyEvent:
@@ -436,7 +635,6 @@ class TestOAuthIntegrationCreatedEvent:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider,
         ):
             context.run(context.on.relation_created(oauth_relation), state)
@@ -790,7 +988,6 @@ class TestHolisticHandler:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.PebbleService.plan", side_effect=PebbleServiceError),
             patch("charm.WorkloadService.is_failing", return_value=True),
             # Patch all checks to True
@@ -825,7 +1022,6 @@ class TestHolisticHandler:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.login_ui_is_ready", return_value=True),
             patch("charm.database_resource_is_created", return_value=True),
@@ -873,7 +1069,6 @@ class TestHolisticHandler:
         with (
             patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
             patch("charm.NOOP_CONDITIONS", new=[]),
-            patch("charm.EVENT_DEFER_CONDITIONS", new=[]),
             patch("charm.WorkloadService.is_running", return_value=True),
             patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider,
         ):

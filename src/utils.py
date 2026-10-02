@@ -68,17 +68,14 @@ def container_connectivity(charm: CharmBase) -> bool:
 
 # Condition failure causes early return without doing anything
 NOOP_CONDITIONS: tuple[Condition, ...] = (
+    container_connectivity,
     peer_integration_exists,
     database_integration_exists,
     public_route_integration_exists,
     login_ui_integration_exists,
     public_route_is_ready,
     login_ui_is_ready,
-    migration_is_ready,
     secrets_is_ready,
     public_route_is_secure,
     database_resource_is_created,
 )
-
-# Condition failure causes early return with corresponding event deferred
-EVENT_DEFER_CONDITIONS: tuple[Condition, ...] = (container_connectivity,)
