@@ -1,13 +1,14 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
 from ops import Container
-from ops.pebble import ExecError
+from ops.pebble import ConnectionError, ExecError
 
-from cli import CommandLine, parse_kv_string
+from cli import CommandLine, SchemaState, parse_kv_string
 from exceptions import ClientDoesNotExistError, MigrationError
 
 
@@ -126,6 +127,61 @@ class TestCommandLine:
 
         with pytest.raises(MigrationError):
             command_line.migrate()
+
+    def test_migrate_connection_error(
+        self, command_line: CommandLine, container: MagicMock
+    ) -> None:
+        container.exec.side_effect = ConnectionError("socket not found")
+
+        with pytest.raises(MigrationError):
+            command_line.migrate()
+
+    @pytest.mark.parametrize(
+        "states, expected",
+        [
+            (["Pending", "Pending"], SchemaState.FRESH),
+            (["Applied", "Applied"], SchemaState.UP_TO_DATE),
+            (["Applied", "Pending"], SchemaState.UPGRADE_PENDING),
+        ],
+    )
+    def test_migration_status(
+        self,
+        command_line: CommandLine,
+        container: MagicMock,
+        mock_process: MagicMock,
+        states: list[str],
+        expected: SchemaState,
+    ) -> None:
+        mock_process.wait_output.return_value = (json.dumps(states), "")
+
+        assert command_line.migration_status("dsn") == expected
+        container.exec.assert_called_with(
+            ["hydra", "migrate", "sql", "status", "-e", "--format", "jsonpath=#.state"],
+            environment={"DSN": "dsn"},
+            timeout=20,
+        )
+
+    @pytest.mark.parametrize(
+        "output, error",
+        [
+            ("", ExecError(["cmd"], 1, "", "could not connect")),
+            ("not json", None),
+            ("[]", None),
+            ('{"state": "Applied"}', None),
+        ],
+    )
+    def test_migration_status_failed(
+        self,
+        command_line: CommandLine,
+        mock_process: MagicMock,
+        output: str,
+        error: ExecError | None,
+    ) -> None:
+        mock_process.wait_output.return_value = (output, "")
+        mock_process.wait_output.side_effect = error
+
+        with pytest.raises(MigrationError):
+            command_line.migration_status("dsn")
 
     def test_get_oauth_client_not_found(
         self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock

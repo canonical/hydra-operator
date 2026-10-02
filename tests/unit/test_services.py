@@ -52,6 +52,18 @@ class TestWorkloadService:
 
         assert workload_service.version == expected
 
+    def test_version_is_cached_and_failed_lookup_retried(
+        self, mock_container: MagicMock, workload_service: WorkloadService
+    ) -> None:
+        mock_exec = MagicMock()
+        mock_exec.wait_output.side_effect = [("Invalid", ""), ("Version:    v1.0.0", "")]
+        mock_container.exec.return_value = mock_exec
+
+        assert workload_service.version == ""
+        assert workload_service.version == "v1.0.0"
+        assert workload_service.version == "v1.0.0"
+        assert mock_container.exec.call_count == 2
+
     def test_open_port(self, mock_unit: MagicMock, workload_service: WorkloadService) -> None:
         workload_service.open_port()
 

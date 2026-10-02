@@ -12,10 +12,7 @@ from secrets import token_hex
 from typing import Any
 
 from charmlibs.interfaces.oauth import OAuthProvider
-from charms.data_platform_libs.v0.data_interfaces import (
-    DatabaseCreatedEvent,
-    DatabaseRequires,
-)
+from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
@@ -47,7 +44,7 @@ from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
 from ops.pebble import Layer
 
-from cli import CommandLine, OAuthClient
+from cli import CommandLine, OAuthClient, SchemaState
 from configs import CharmConfig, ConfigFile
 from constants import (
     ADMIN_PORT,
@@ -86,7 +83,6 @@ from oauth import OAuthReconciler
 from secret import HydraSecrets, Secrets
 from services import PebbleService, WorkloadService
 from utils import (
-    EVENT_DEFER_CONDITIONS,
     NOOP_CONDITIONS,
     container_connectivity,
     database_integration_exists,
@@ -218,7 +214,7 @@ class HydraCharm(CharmBase):
 
         # database
         self.framework.observe(
-            self.database_requirer.on.database_created, self._on_database_created
+            self.database_requirer.on.database_created, self._on_holistic_handler
         )
         self.framework.observe(
             self.database_requirer.on.endpoints_changed, self._on_holistic_handler
@@ -326,7 +322,7 @@ class HydraCharm(CharmBase):
 
     @property
     def migration_needed(self) -> bool:
-        if not peer_integration_exists(self):
+        if not peer_integration_exists(self) or not database_integration_exists(self):
             return False
 
         database_config = DatabaseConfig.load(self.database_requirer)
@@ -436,43 +432,10 @@ class HydraCharm(CharmBase):
         requests = {"cpu": "100m", "memory": "200Mi"}
         return adjust_resource_requirements(limits, requests, adhere_to_requests=True)
 
-    def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
-        if not container_connectivity(self):
-            self.unit.status = WaitingStatus("Container is not connected yet")
-            event.defer()
-            return
-
-        if not peer_integration_exists(self):
-            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
-            event.defer()
-            return
-
-        if not self.migration_needed:
-            self._holistic_handler(event)
-            return
-
-        if not self.unit.is_leader():
-            logger.info(
-                "Unit does not have leadership. Wait for leader unit to run the migration."
-            )
-            self.unit.status = WaitingStatus("Waiting for leader unit to run the migration")
-            event.defer()
-            return
-
-        try:
-            self._cli.migrate(DatabaseConfig.load(self.database_requirer).dsn)
-        except MigrationError:
-            self.unit.status = BlockedStatus("Database migration failed")
-            logger.error("Auto migration job failed. Please use the run-migration action")
-            return
-
-        migration_version = DatabaseConfig.load(self.database_requirer).migration_version
-        self.peer_data[migration_version] = self._workload_service.version
-        self._holistic_handler(event)
-
     def _on_database_integration_broken(self, event: RelationBrokenEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
+        if self.unit.is_leader():
+            self.peer_data.pop(DatabaseConfig.migration_version_key(event.relation.id))
         self._holistic_handler(event)
         try:
             self._pebble_service.stop()
@@ -531,6 +494,35 @@ class HydraCharm(CharmBase):
     def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
         logger.error(f"Failed to patch resource constraints: {event.message}")
 
+    def _reconcile_migration(self) -> None:
+        """Bring the migration record in line with the database schema.
+
+        The database outlives the integration: charmed PostgreSQL keeps it when the
+        integration is removed, so a new integration can point at an existing schema.
+        Only a fresh database is migrated automatically; a schema upgrade requires
+        the `run-migration` action.
+        """
+        if not (workload_version := self._workload_service.version):
+            logger.info("Workload version is unknown, skipping the migration check")
+            return
+
+        database_config = DatabaseConfig.load(self.database_requirer)
+        try:
+            schema_state = self._cli.migration_status(database_config.dsn)
+            if schema_state is SchemaState.UPGRADE_PENDING:
+                logger.info("Database schema upgrade is pending, run the run-migration action")
+                return
+            if schema_state is SchemaState.FRESH:
+                self._cli.migrate(database_config.dsn)
+        except MigrationError:
+            logger.error(
+                "Automatic migration check failed, it will be retried on the next event. "
+                "Alternatively, use the run-migration action"
+            )
+            return
+
+        self.peer_data[database_config.migration_version] = workload_version
+
     def _on_holistic_handler(self, event: EventBase) -> None:
         """Centralized handler for most events.
 
@@ -548,8 +540,10 @@ class HydraCharm(CharmBase):
         if not all(condition(self) for condition in NOOP_CONDITIONS):
             return
 
-        if not all(condition(self) for condition in EVENT_DEFER_CONDITIONS):
-            event.defer()
+        if self.unit.is_leader() and self.migration_needed:
+            self._reconcile_migration()
+
+        if self.migration_needed:
             return
 
         config_file = ConfigFile.from_sources(
@@ -578,6 +572,7 @@ class HydraCharm(CharmBase):
     def _on_pebble_check_recovered(self, event: PebbleCheckRecoveredEvent) -> None:
         if event.info.name == PEBBLE_READY_CHECK_NAME:
             logger.info("The service is online again")
+        self._holistic_handler(event)
 
     def _on_collect_status(self, event: CollectStatusEvent) -> None:  # noqa: C901
         if not (can_connect := container_connectivity(self)):
@@ -616,7 +611,7 @@ class HydraCharm(CharmBase):
         if not database_resource_is_created(self):
             event.add_status(WaitingStatus("Waiting for database creation"))
 
-        if not migration_is_ready(self):
+        if can_connect and not migration_is_ready(self):
             event.add_status(
                 WaitingStatus(
                     "Waiting for migration to run, try running the `run-migration` action"

@@ -63,7 +63,9 @@ class WorkloadService:
 
     @property
     def version(self) -> str:
-        self._version = self._cli.get_hydra_service_version() or ""
+        """The workload version, fetched once per charm run; failed lookups are retried."""
+        if not self._version:
+            self._version = self._cli.get_hydra_service_version() or ""
         return self._version
 
     @version.setter
