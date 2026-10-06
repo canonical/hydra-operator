@@ -10,6 +10,7 @@ from ops.pebble import CheckStatus
 from configs import ConfigFile
 from constants import (
     CONFIG_FILE_NAME,
+    PEBBLE_ALIVE_CHECK_NAME,
     PEBBLE_READY_CHECK_NAME,
     WORKLOAD_SERVICE,
 )
@@ -51,6 +52,18 @@ class TestWorkloadService:
         mock_container.exec.return_value = mock_exec
 
         assert workload_service.version == expected
+
+    def test_version_is_cached_and_failed_lookup_retried(
+        self, mock_container: MagicMock, workload_service: WorkloadService
+    ) -> None:
+        mock_exec = MagicMock()
+        mock_exec.wait_output.side_effect = [("Invalid", ""), ("Version:    v1.0.0", "")]
+        mock_container.exec.return_value = mock_exec
+
+        assert workload_service.version == ""
+        assert workload_service.version == "v1.0.0"
+        assert workload_service.version == "v1.0.0"
+        assert mock_container.exec.call_count == 2
 
     def test_open_port(self, mock_unit: MagicMock, workload_service: WorkloadService) -> None:
         workload_service.open_port()
@@ -210,3 +223,20 @@ class TestPebbleService:
         pebble_service.stop()
 
         mock_container.stop.assert_called_with(WORKLOAD_SERVICE)
+
+    def test_stop_drops_the_alive_check_level(
+        self, mock_container: MagicMock, pebble_service: PebbleService
+    ) -> None:
+        pebble_service.stop()
+
+        label, layer = mock_container.add_layer.call_args.args
+        assert label == WORKLOAD_SERVICE
+        assert mock_container.add_layer.call_args.kwargs == {"combine": True}
+        assert layer.to_dict() == {
+            "checks": {
+                PEBBLE_ALIVE_CHECK_NAME: {
+                    "override": "replace",
+                    "http": {"url": "http://localhost:4445/health/alive"},
+                }
+            }
+        }

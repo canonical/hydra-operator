@@ -437,6 +437,11 @@ def create_state(
                     return_code=0,
                 ),
                 Exec(
+                    ["hydra", "migrate", "sql", "status"],
+                    return_code=0,
+                    stdout=dumps(["Pending", "Pending"]),
+                ),
+                Exec(
                     ["hydra", "create", "jwk"],
                     return_code=0,
                 ),
