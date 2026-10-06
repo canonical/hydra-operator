@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 
+import io
 import json
 import logging
 import re
@@ -35,6 +36,17 @@ MIGRATION_STATES: TypeAdapter[list[str]] = TypeAdapter(
     Annotated[list[Literal["Applied", "Pending"]], Field(min_length=1)]
 )
 
+# Command options whose value must not be logged
+SENSITIVE_OPTIONS = ("--secret",)
+# The `user:password@` of a URL. A URL-encoded password holds no "/", which keeps
+# a plain URL with an "@" further down its path out of the match
+DSN_CREDENTIALS_REGEX = re.compile(r"(://[^:/@\s]*):[^/@\s]+@")
+
+# Hydra starts every log record with its timestamp; a record can span several lines
+LOG_RECORD_START_REGEX = re.compile(r"^(?=time=)", re.MULTILINE)
+MAX_LOG_RECORD = 500
+MAX_LOGGED_STDERR = 1000
+
 
 class SchemaState(str, Enum):
     """State of the Hydra database schema relative to the workload binary."""
@@ -42,6 +54,57 @@ class SchemaState(str, Enum):
     FRESH = "fresh"  # no migration applied
     UP_TO_DATE = "up_to_date"  # no migration pending
     UPGRADE_PENDING = "upgrade_pending"  # some migrations applied, some pending
+
+
+def redact_command(cmd: list[str]) -> list[str]:
+    """Hide the values of the sensitive options of a command."""
+    return [
+        "***" if index and cmd[index - 1] in SENSITIVE_OPTIONS else arg
+        for index, arg in enumerate(cmd)
+    ]
+
+
+def redact_dsn(text: str) -> str:
+    """Hide the password of any URL-encoded DSN in a text."""
+    return DSN_CREDENTIALS_REGEX.sub(r"\1:***@", text)
+
+
+def error_summary(err: Exception) -> str:
+    """Say in one line what failed, without the output Pebble attaches to a failed change.
+
+    That output is what the workload printed, and Hydra prints the values it rejects.
+    """
+    # ChangeError.err is the summary of the change, without its task logs
+    return " ".join(str(getattr(err, "err", err)).split())
+
+
+def last_output(stderr: str) -> str:
+    """Extract what Hydra printed last, which says why a command failed.
+
+    The error Hydra exits with comes after its log records and is followed by a stack
+    trace. When Hydra instead kept retrying an unreachable database until the command
+    timed out, the last record is the last retry.
+    """
+    last_record = LOG_RECORD_START_REGEX.split(stderr.strip())[-1]
+    first_line, _, rest = last_record.partition("\n")
+    # A record continues on indented lines; the error Hydra exits with is not indented
+    if first_line.startswith("time=") and rest and not rest[0].isspace():
+        last_record = rest
+
+    return redact_dsn(" ".join(last_record.split()))[:MAX_LOG_RECORD]
+
+
+def failure_reason(err: Error, stderr: str) -> str:
+    """Summarise why a Hydra command failed, for the logs and for action results."""
+    if isinstance(err, ExecError):
+        reason = f"hydra exited with code {err.exit_code}"
+    else:
+        reason = error_summary(err)
+
+    if stderr.strip():
+        reason = f"{reason}; last output from hydra: {last_output(stderr)}"
+
+    return reason
 
 
 def parse_kv_string(kv_str: str) -> dict[str, str]:
@@ -130,7 +193,7 @@ class OAuthClient(BaseModel):
 
     @property
     def managed_by_integration(self) -> bool:
-        return bool(self.metadata) and "integration-id" in self.metadata
+        return "integration-id" in (self.metadata or {})
 
     @field_validator("redirect_uris", mode="before")
     @classmethod
@@ -221,18 +284,23 @@ class CommandLine:
         """Apply Hydra migration plan.
 
         More information: https://www.ory.sh/docs/hydra/cli/hydra-migrate-sql
+
+        Raises:
+            MigrationError: if the migration failed, with the reason as its message.
         """
-        cmd = ["hydra", "migrate", "sql", "-e", "--yes"]
+        cmd = ["hydra", "migrate", "sql", "up", "-e", "--yes"]
         env_vars = {"DSN": dsn} if dsn else None
 
         if not dsn:
             cmd.extend(["--config", CONFIG_FILE_NAME])
 
+        stderr = io.StringIO()
         try:
-            self._run_cmd(cmd, timeout=timeout, environment=env_vars)
+            self._run_cmd(cmd, timeout=timeout, environment=env_vars, stderr=stderr)
         except Error as err:
-            logger.error("Failed to migrate the hydra service: %s", err)
-            raise MigrationError from err
+            reason = failure_reason(err, stderr.getvalue())
+            logger.error("Failed to migrate the hydra service: %s", reason)
+            raise MigrationError(reason) from err
 
     def migration_status(self, dsn: str, timeout: float = 20) -> SchemaState:
         """Inspect which migrations of this Hydra binary are applied to the database.
@@ -247,23 +315,25 @@ class CommandLine:
 
         Raises:
             MigrationError: if the status could not be fetched, or if the output is
-                anything but a non-empty list of known states.
+                anything but a non-empty list of known states. The reason is its message.
         """
         cmd = ["hydra", "migrate", "sql", "status", "-e", "--format", "jsonpath=#.state"]
 
+        stderr = io.StringIO()
         try:
-            stdout = self._run_cmd(cmd, timeout=timeout, environment={"DSN": dsn})
+            stdout = self._run_cmd(cmd, timeout=timeout, environment={"DSN": dsn}, stderr=stderr)
         except Error as err:
+            reason = failure_reason(err, stderr.getvalue())
             # Callers retry, and the database may just not be reachable yet.
-            logger.warning("Failed to get the hydra migration status: %s", err)
-            raise MigrationError from err
+            logger.warning("Failed to get the hydra migration status: %s", reason)
+            raise MigrationError(reason) from err
 
         # An unknown state must not pass for an up-to-date schema.
         try:
             states = MIGRATION_STATES.validate_json(stdout)
         except ValidationError as err:
             logger.error("Unexpected hydra migration status output: %s", stdout)
-            raise MigrationError from err
+            raise MigrationError("unexpected hydra migration status output") from err
 
         if "Pending" not in states:
             return SchemaState.UP_TO_DATE
@@ -466,13 +536,32 @@ class CommandLine:
         cmd: list[str],
         timeout: float = 20,
         environment: Optional[dict] = None,
+        stderr: io.StringIO | None = None,
     ) -> str:
-        logger.debug(f"Running command: {cmd}")
+        """Run a command in the workload container and return its stdout.
+
+        With `stderr`, the output is streamed and stderr is collected into it, so that
+        what was printed is still available when the command fails or times out. The
+        caller then reports the failure.
+        """
+        logger.debug("Running command: %s", redact_command(cmd))
         try:
-            process = self.container.exec(cmd, environment=environment, timeout=timeout)
-            stdout, _ = process.wait_output()
+            if stderr is None:
+                process = self.container.exec(cmd, environment=environment, timeout=timeout)
+                stdout, _ = process.wait_output()
+            else:
+                output = io.StringIO()
+                process = self.container.exec(
+                    cmd, environment=environment, timeout=timeout, stdout=output, stderr=stderr
+                )
+                process.wait()
+                stdout = output.getvalue()
         except ExecError as err:
-            logger.error("Exited with code: %d. Error: %s", err.exit_code, err.stderr)
+            if stderr is None:
+                error_output = redact_dsn(err.stderr or "")
+                if len(error_output) > MAX_LOGGED_STDERR:
+                    error_output = f"{error_output[:MAX_LOGGED_STDERR]} [truncated]"
+                logger.error("Exited with code: %d. Error: %s", err.exit_code, error_output)
             raise
         except Error:
             raise
