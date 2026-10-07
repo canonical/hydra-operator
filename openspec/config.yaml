@@ -1,0 +1,64 @@
+schema: spec-driven
+
+context: |
+  This is a Kubernetes-native Charmed Operator (hydra-operator) written in Python using the Ops SDK.
+  It manages Ory Hydra, the OAuth 2.0 and OpenID Connect server of Canonical's Identity Platform.
+
+  Tech stack: Python Ops SDK, Pebble sidecar container manager, Juju Secrets, Pydantic, Terraform (deployment module).
+  Workload specifications: Hydra serves a public API (port 4444) and an admin API (port 4445) and stores its data in PostgreSQL. Database schema migrations are run with the Hydra CLI through Pebble exec before the workload is started. A fresh database is migrated automatically; a schema upgrade requires the `run-migration` action.
+
+  Code conventions & Architectural constraints (mandatory):
+  - File headers: Copyright <year> Canonical Ltd. / See LICENSE file for licensing details.
+  - Strict 3-layer architecture: `src/charm.py` orchestrates (events, state decisions, unit status); `src/services.py`, `src/integrations.py`, `src/secret.py` and `src/configs.py` hold domain logic and interface wrappers; `ops`, `lightkube` and Pebble are reached only through the second layer.
+  - Centralized Reconciliation: lifecycle events go through `_holistic_handler`, which must be idempotent.
+  - Limit `event.defer()`: Prefer holistic idempotent reconciliation. Deferral is a last resort.
+  - Derived state is read from its source (the database, Pebble, relation data) when it is needed, and is not stored in the peer relation.
+  - Juju status mapping: blocked means human intervention is required; waiting means automatic recovery is expected; maintenance means an internal operation is running; active means healthy and serving.
+  - Typing: all signatures are typed, with built-in generics and `|`. No `Optional`, `List`, `Dict` or `Union`, and no `Any` without a justifying comment.
+  - Juju Secrets Protocol: Sensitive data must use Juju secrets and must not reach logs, statuses or action results.
+  - Testing: `ops.testing` (Scenario) state-transition tests for charm logic, `pytest` with `unittest.mock` for helpers, `jubilant` for integration tests. No Harness.
+  - Governance: `charmcraft.yaml`, `renovate.json`, `SECURITY.md` and `.github/workflows/` change only with explicit maintainer validation.
+
+  Files & Workspace Structure:
+  - charmcraft.yaml: Charm metadata, containers, relation interfaces (pg-database, public-route, internal-route, ui-endpoint-info, oauth, hydra-endpoint-info, hydra-token-hook, logging, tracing, metrics-endpoint, grafana-dashboard, peer), configuration options and actions.
+  - lib/: Charm libraries providing/consuming interfaces for integrating with other charms.
+  - src/charm.py: Orchestrator component. Event subscriptions, the `_holistic_handler` reconciliation, unit status collection and action handlers.
+  - src/services.py: `WorkloadService` and `PebbleService`, managing the workload version, the Pebble layer, its checks and the service state.
+  - src/cli.py: Wraps the `hydra` CLI (version, migrations, OAuth clients, keys) through Pebble exec.
+  - src/configs.py: `CharmConfig` and the rendered workload config file (`templates/hydra.yaml.j2`).
+  - src/integrations.py: Typed wrappers around relation data (peer data, database, routes, login UI, token hook, tracing).
+  - src/oauth.py: Reconciles the OAuth clients requested through the `oauth` integration.
+  - src/secret.py: Juju secrets holding the system and cookie keys.
+  - src/constants.py, src/env_vars.py, src/exceptions.py, src/utils.py: Constants, container environment, domain exceptions, and readiness conditions.
+  - tests/unit/: Scenario and mock based unit tests.
+  - tests/integration/: End-to-end jubilant integration tests.
+  - terraform/: Terraform module for deploying the charm.
+
+  Product language:
+  - Write OpenSpec proposals and specs in user-facing product behavior language
+  - Requirements should describe the experience, observable behavior, and product contract
+  - Put internal mechanisms in design.md or tasks.md unless the mechanism is itself part of the user-facing contract
+  - Avoid technical jargon in proposals and specs when possible
+
+rules:
+  proposal:
+    - Keep proposals concise and strictly under 400 words.
+    - Include a "Non-goals" section to clarify what is out of scope for the proposal
+    - Include a "Success Metrics" section defining how we will measure the impact of this feature
+  specs:
+    - Include a "Purpose" section for each spec to explain the rationale behind the spec
+    - Cover happy path, validation errors, and edge cases in the spec
+    - Explicitly state any breaking changes or backward compatibility requirements
+  design:
+    - All design decisions should be justified with trade-offs and alternatives considered
+    - Include database schema modifications (e.g., tables, indexes, migrations) explicitly when applicable
+    - Include diagrams (Mermaid) or visual aids when describing complex designs
+    - Include security, performance, observability, scalability, migration considerations as applicable to the design
+  tasks:
+    - Break tasks down into distinct, single-event or relation-driven units of work.
+    - Every task must be independently completable (no implicit ordering within a group)
+    - Each task must explicitly reference the manifest or code file(s) it mutates (e.g., `src/charm.py`, `charmcraft.yaml`).
+    - Explicitly list unit, integration, or e2e testing requirements for each task (every relation implementation task must contain a parallel task mapping its corresponding unit/integration test suite requirements).
+    - Include a verification suite section
+    - Include a documentation & rollout section covering any necessary documentation updates and rollout steps
+    - Record deviations from the plan in an "Implementation Notes" section at the end
