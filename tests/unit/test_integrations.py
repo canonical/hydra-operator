@@ -54,6 +54,25 @@ class TestPeerData:
         data = PeerData(mocked_model)
         assert data["key"] == {}
 
+    def test_migration_versions(
+        self, peer_data: PeerData, mocked_model: MagicMock, peer_relation: MagicMock
+    ) -> None:
+        peer_relation.data[mocked_model.app] = {
+            "migration_version_3": '"v1.0.0"',
+            "migration_version_12": '"v2.0.0"',
+            "migration_version_7": '""',
+            "migration_version_": '"v3.0.0"',
+            "migration_version_x": '"v4.0.0"',
+            "system_keys": '"v5.0.0"',
+        }
+
+        assert peer_data.migration_versions() == {3: "v1.0.0", 12: "v2.0.0"}
+
+    def test_migration_versions_without_peer_integration(self, mocked_model: MagicMock) -> None:
+        mocked_model.get_relation.return_value = None
+
+        assert PeerData(mocked_model).migration_versions() == {}
+
     def test_with_wrong_key(
         self, peer_data: PeerData, mocked_model: MagicMock, peer_relation: MagicMock
     ) -> None:
@@ -123,6 +142,18 @@ class TestDatabaseConfig:
         actual = database_config.dsn
         assert actual == expected
 
+    def test_dsn_escapes_the_credentials(self) -> None:
+        database_config = DatabaseConfig(
+            username="us:/er",
+            password="p@ss/w?rd%1#x",
+            endpoint="endpoint:5432",
+            database="database",
+        )
+
+        assert database_config.dsn == (
+            "postgres://us%3A%2Fer:p%40ss%2Fw%3Frd%251%23x@endpoint:5432/database"
+        )
+
     def test_to_service_configs(self, database_config: DatabaseConfig) -> None:
         service_configs = database_config.to_service_configs()
         assert service_configs["dsn"] == database_config.dsn
@@ -186,6 +217,14 @@ class TestTracingData:
     def test_load_without_integration_ready(self, mocked_requirer: MagicMock) -> None:
         mocked_requirer.is_ready.return_value = False
 
+        actual = TracingData.load(mocked_requirer)
+        assert actual == TracingData()
+
+    def test_load_without_endpoint(self, mocked_requirer: MagicMock) -> None:
+        mocked_requirer.is_ready.return_value = True
+        mocked_requirer.get_endpoint.return_value = None
+
+        # Tracing enabled without an endpoint is a configuration Hydra refuses to start with
         actual = TracingData.load(mocked_requirer)
         assert actual == TracingData()
 
@@ -370,6 +409,13 @@ class TestHydraHookData:
 
     def test_load_when_integration_not_ready(self, mocked_requirer: MagicMock) -> None:
         mocked_requirer.ready.return_value = False
+
+        actual = HydraHookData.load(mocked_requirer)
+        assert actual == HydraHookData()
+
+    def test_load_when_integration_has_no_data(self, mocked_requirer: MagicMock) -> None:
+        mocked_requirer.ready.return_value = True
+        mocked_requirer.consume_relation_data.return_value = None
 
         actual = HydraHookData.load(mocked_requirer)
         assert actual == HydraHookData()

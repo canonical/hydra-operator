@@ -21,6 +21,7 @@ from integration.constants import (
 )
 from integration.utils import (
     all_active,
+    all_blocked,
     all_maintenance,
     all_waiting,
     any_error,
@@ -143,8 +144,13 @@ class TestHydraUpgrade:
             resources={"oci-image": HYDRA_IMAGE},
         )
 
+        # Blocked when the new workload brings schema migrations, as those wait for the action
         juju.wait(
-            ready=or_(all_waiting(self.hydra_app_name), all_maintenance(self.hydra_app_name)),
+            ready=or_(
+                all_blocked(self.hydra_app_name),
+                all_waiting(self.hydra_app_name),
+                all_maintenance(self.hydra_app_name),
+            ),
             error=any_error(self.hydra_app_name),
             timeout=15 * 60,
         )

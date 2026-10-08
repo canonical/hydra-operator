@@ -73,7 +73,23 @@ class TestRunMigrationAction:
         with pytest.raises(ActionFailed) as excinfo:
             context.run(context.on.action("run-migration"), state)
 
-        assert "Database migration failed" in excinfo.value.message
+        assert excinfo.value.message == "Database migration failed: failed"
+
+    def test_when_workload_version_unknown(
+        self,
+        context: Context,
+        peer_relation_ready: PeerRelation,
+        mocked_cli: MagicMock,
+        mocker: MockerFixture,
+    ) -> None:
+        """An empty version must not be recorded: it would pass for a finished migration."""
+        mocker.patch("charm.CommandLine.get_hydra_service_version", return_value=None)
+        state = create_state(leader=True, relations=[peer_relation_ready])
+
+        with pytest.raises(ActionFailed, match="Failed to get the workload version"):
+            context.run(context.on.action("run-migration"), state)
+
+        mocked_cli.assert_not_called()
 
     def test_when_action_succeeds(
         self,

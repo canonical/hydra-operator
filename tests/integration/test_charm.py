@@ -36,6 +36,7 @@ from integration.utils import (
     remove_integration,
     unit_number,
 )
+from tenacity import retry, stop_after_attempt, wait_exponential
 from yarl import URL
 
 from src.constants import (
@@ -361,6 +362,18 @@ def test_scale_up(
     assert leader_peer_integration_data == follower_peer_data
 
 
+@retry(
+    wait=wait_exponential(multiplier=2, min=1, max=10),
+    stop=stop_after_attempt(10),
+    reraise=True,
+)
+def jwks_key_ids(get_hydra_jwks: Callable[[], requests.Response]) -> set[str]:
+    resp = get_hydra_jwks()
+    assert resp.status_code == http.HTTPStatus.OK
+    return {jwk["kid"] for jwk in resp.json()["keys"]}
+
+
+@pytest.mark.parametrize("get_hydra_jwks", ["admin"], indirect=True)
 @pytest.mark.parametrize(
     "remote_app_name,integration_name,is_status",
     [
@@ -374,8 +387,12 @@ def test_remove_integration(
     remote_app_name: str,
     integration_name: str,
     is_status: Callable[[str], StatusPredicate],
+    get_hydra_jwks: Callable[[], requests.Response],
 ) -> None:
     """Test removing and re-adding integration."""
+    key_ids = jwks_key_ids(get_hydra_jwks)
+    assert key_ids
+
     with remove_integration(juju, remote_app_name, integration_name):
         juju.wait(
             ready=is_status(HYDRA_APP),
@@ -387,6 +404,11 @@ def test_remove_integration(
         error=any_error(HYDRA_APP, remote_app_name),
         timeout=10 * 60,
     )
+
+    # Hydra serves again. The keys are stored in the database, encrypted with the system
+    # secret, so for the database integration the same key ids also show that the data
+    # survived and that Hydra can still read it
+    assert jwks_key_ids(get_hydra_jwks) == key_ids
 
 
 def test_scale_down(juju: jubilant.Juju) -> None:

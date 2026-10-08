@@ -8,6 +8,7 @@
 
 import json
 import logging
+from functools import cached_property
 from secrets import token_hex
 from typing import Any
 
@@ -41,7 +42,13 @@ from ops.charm import (
     WorkloadEvent,
 )
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
+from ops.model import (
+    ActiveStatus,
+    BlockedStatus,
+    MaintenanceStatus,
+    StatusBase,
+    WaitingStatus,
+)
 from ops.pebble import Layer
 
 from cli import CommandLine, OAuthClient, SchemaState
@@ -104,6 +111,10 @@ logger = logging.getLogger(__name__)
 class HydraCharm(CharmBase):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
+
+        # What happened in this charm run; nothing here outlives the hook
+        self._migration_attempted = False
+        self._plan_failed = False
 
         self.peer_data = PeerData(self.model)
         self.secrets = Secrets(self.model)
@@ -493,6 +504,43 @@ class HydraCharm(CharmBase):
     def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
         logger.error(f"Failed to patch resource constraints: {event.message}")
 
+    @cached_property
+    def _schema_state(self) -> SchemaState | None:
+        """The state of the database schema, checked at most once per charm run.
+
+        It is asked from the database each time, and never stored. None means that it
+        could not be determined.
+        """
+        try:
+            return self._cli.migration_status(DatabaseConfig.load(self.database_requirer).dsn)
+        except MigrationError:
+            return None
+
+    def _is_newer_than_workload(self, recorded_version: object) -> bool:
+        return isinstance(recorded_version, str) and is_newer_version(
+            recorded_version, than=self._workload_service.version
+        )
+
+    def _workload_is_older_than_schema(self) -> bool:
+        """Whether a newer workload was the last one to migrate this database.
+
+        The older workload cannot see the newer migrations, so to it the schema looks
+        up to date. The record of this integration says which workload came last.
+        Without one, the record of the most recent earlier integration does, unless
+        the database is fresh: charmed PostgreSQL keeps the database across integrations.
+        """
+        database_config = DatabaseConfig.load(self.database_requirer)
+        if recorded_version := self.peer_data[database_config.migration_version]:
+            return self._is_newer_than_workload(recorded_version)
+
+        if not (versions := self.peer_data.migration_versions()):
+            return False
+
+        return (
+            self._is_newer_than_workload(versions[max(versions)])
+            and self._schema_state is SchemaState.UP_TO_DATE
+        )
+
     def _reconcile_migration(self) -> None:
         """Bring the migration record in line with the database schema.
 
@@ -501,42 +549,39 @@ class HydraCharm(CharmBase):
         Only a fresh database is migrated automatically. The `run-migration` action is
         required for a schema upgrade, for a first migration that was interrupted
         part-way (it looks like a schema upgrade), and for a workload older than the
-        one that last migrated the database (it cannot see the newer migrations, so
-        the schema looks up to date).
+        one that last migrated the database.
         """
         if not (workload_version := self._workload_service.version):
             logger.info("Workload version is unknown, skipping the migration check")
             return
 
-        database_config = DatabaseConfig.load(self.database_requirer)
-        recorded_version = self.peer_data[database_config.migration_version]
-        if isinstance(recorded_version, str) and is_newer_version(
-            recorded_version, than=workload_version
-        ):
+        if self._workload_is_older_than_schema():
             logger.info(
-                "The database was migrated by workload version %s, which is newer than %s. "
-                "Run the run-migration action to use it with the older workload",
-                recorded_version,
+                "The database was migrated by a workload newer than %s. Run the "
+                "run-migration action to use it with the older workload",
                 workload_version,
             )
             return
 
-        try:
-            schema_state = self._cli.migration_status(database_config.dsn)
-        except MigrationError:
+        if self._schema_state is None:
             logger.warning(
                 "Failed to check the database schema, the check is retried on the next event"
             )
             return
 
-        if schema_state is SchemaState.UPGRADE_PENDING:
+        if self._schema_state is SchemaState.UPGRADE_PENDING:
             logger.info(
                 "The database schema is partially migrated: an upgrade is pending or an "
                 "earlier migration was interrupted. Run the run-migration action"
             )
             return
 
-        if schema_state is SchemaState.FRESH:
+        database_config = DatabaseConfig.load(self.database_requirer)
+        if self._schema_state is SchemaState.FRESH:
+            if self._migration_attempted:
+                return
+
+            self._migration_attempted = True
             try:
                 self._cli.migrate(database_config.dsn)
             except MigrationError:
@@ -544,9 +589,46 @@ class HydraCharm(CharmBase):
                     "Automatic migration failed. It is retried on the next event only if no "
                     "migration was applied, otherwise run the run-migration action"
                 )
+                # The failed run may have applied some migrations, so ask again
+                del self._schema_state
                 return
 
         self.peer_data[database_config.migration_version] = workload_version
+
+    def _migration_status(self) -> StatusBase:
+        """The status of a unit whose database migration is not recorded yet.
+
+        Only the leader asks the database, and only when nothing else holds the unit
+        back; the others wait for the leader.
+        """
+        if not self._workload_service.version:
+            return WaitingStatus("Waiting for the workload version")
+
+        if not self.unit.is_leader():
+            return WaitingStatus("Waiting for leader unit to run the migration")
+
+        if not all(condition(self) for condition in NOOP_CONDITIONS):
+            return WaitingStatus("Waiting for database migration")
+
+        if self._workload_is_older_than_schema():
+            return WaitingStatus(
+                "Database schema is newer than the workload, "
+                "run the `run-migration` action if this is a rollback"
+            )
+
+        if self._schema_state is SchemaState.UPGRADE_PENDING:
+            return BlockedStatus(
+                "Database schema upgrade is pending, run the `run-migration` action"
+            )
+
+        return WaitingStatus("Waiting for database migration")
+
+    def _service_is_expected(self) -> bool:
+        """Whether the workload service should be running.
+
+        The charm does not start it, and stops it, while something it needs is missing.
+        """
+        return all(condition(self) for condition in NOOP_CONDITIONS) and not self.migration_needed
 
     def _on_holistic_handler(self, event: EventBase) -> None:
         """Centralized handler for most events.
@@ -584,6 +666,7 @@ class HydraCharm(CharmBase):
             self._pebble_service.plan(self._pebble_layer, config_file)
         except PebbleServiceError as e:
             logger.error(f"Failed to start the service, please check the container logs: {e}")
+            self._plan_failed = True
             return
 
         self._update_oauth_provider_info()
@@ -637,18 +720,17 @@ class HydraCharm(CharmBase):
             event.add_status(WaitingStatus("Waiting for database creation"))
 
         if can_connect and not migration_is_ready(self):
-            event.add_status(
-                WaitingStatus(
-                    "Waiting for migration to run, try running the `run-migration` action"
-                )
-            )
+            event.add_status(self._migration_status())
 
         if not secrets_is_ready(self):
             event.add_status(WaitingStatus("Waiting for secrets creation"))
 
         event.add_status(self.resources_patch.get_status())
 
-        if can_connect and self._workload_service.is_failing():
+        # A service that the charm keeps stopped fails its checks without having crashed
+        if self._plan_failed or (
+            self._service_is_expected() and self._workload_service.is_failing()
+        ):
             event.add_status(
                 BlockedStatus(
                     f"Failed to start the service, please check the {WORKLOAD_CONTAINER} container logs"
@@ -668,6 +750,11 @@ class HydraCharm(CharmBase):
 
         if not peer_integration_exists(self):
             event.fail("Peer integration is not ready yet")
+            return
+
+        # The version is what gets recorded, and an empty record would pass for a migration
+        if not self._workload_service.version:
+            event.fail("Failed to get the workload version, please try again")
             return
 
         event.log("Start migrating the database")

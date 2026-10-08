@@ -170,7 +170,7 @@ def hydra_version_exec(hydra_workload_version: str) -> Exec:
 @pytest.fixture
 def hydra_migrate_exec() -> Exec:
     return Exec(
-        ["hydra", "migrate", "sql", "-e", "--yes"],
+        ["hydra", "migrate", "sql", "up", "-e", "--yes"],
         return_code=0,
     )
 
@@ -433,7 +433,7 @@ def create_state(
                     ),
                 ),
                 Exec(
-                    ["hydra", "migrate", "sql", "-e", "--yes"],
+                    ["hydra", "migrate", "sql", "up", "-e", "--yes"],
                     return_code=0,
                 ),
                 Exec(

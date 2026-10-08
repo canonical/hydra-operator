@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from ops.model import Container, ModelError, Unit
-from ops.pebble import CheckStatus
+from ops.pebble import ChangeError, CheckStatus, ConnectionError, ServiceStatus
 
 from configs import ConfigFile
 from constants import (
@@ -15,6 +15,7 @@ from constants import (
     WORKLOAD_SERVICE,
 )
 from env_vars import DEFAULT_CONTAINER_ENV, EnvVarConvertible
+from exceptions import PebbleServiceError
 from services import PebbleService, WorkloadService
 
 
@@ -53,17 +54,25 @@ class TestWorkloadService:
 
         assert workload_service.version == expected
 
-    def test_version_is_cached_and_failed_lookup_retried(
-        self, mock_container: MagicMock, workload_service: WorkloadService
+    @pytest.mark.parametrize(
+        "stdout, expected",
+        [("Version:    v1.0.0", "v1.0.0"), ("Invalid", "")],
+        ids=["known", "unknown"],
+    )
+    def test_version_is_looked_up_once(
+        self,
+        mock_container: MagicMock,
+        workload_service: WorkloadService,
+        stdout: str,
+        expected: str,
     ) -> None:
         mock_exec = MagicMock()
-        mock_exec.wait_output.side_effect = [("Invalid", ""), ("Version:    v1.0.0", "")]
+        mock_exec.wait_output.return_value = (stdout, "")
         mock_container.exec.return_value = mock_exec
 
-        assert workload_service.version == ""
-        assert workload_service.version == "v1.0.0"
-        assert workload_service.version == "v1.0.0"
-        assert mock_container.exec.call_count == 2
+        assert workload_service.version == expected
+        assert workload_service.version == expected
+        assert mock_container.exec.call_count == 1
 
     def test_open_port(self, mock_unit: MagicMock, workload_service: WorkloadService) -> None:
         workload_service.open_port()
@@ -128,6 +137,39 @@ class TestWorkloadService:
 
         assert workload_service.is_running() is False
 
+    def test_get_service_when_pebble_is_unreachable(
+        self, mock_container: MagicMock, workload_service: WorkloadService
+    ) -> None:
+        mock_container.get_service.side_effect = ConnectionError("socket not found")
+
+        assert workload_service.get_service() is None
+
+    @pytest.mark.parametrize(
+        "checks",
+        [ConnectionError("socket not found"), {}],
+        ids=["pebble-unreachable", "check-missing"],
+    )
+    def test_checks_unavailable(
+        self,
+        mock_container: MagicMock,
+        workload_service: WorkloadService,
+        checks: Exception | dict,
+    ) -> None:
+        mock_container.get_service.return_value = MagicMock()
+        mock_container.get_checks.side_effect = [checks, checks]
+
+        assert workload_service.is_running() is False
+        assert workload_service.is_failing() is False
+
+    def test_service_that_failed_to_start_is_failing(
+        self, mock_container: MagicMock, workload_service: WorkloadService
+    ) -> None:
+        """Older Pebble reports a service that exits right after its start as inactive."""
+        mock_container.get_service.return_value = MagicMock(current=ServiceStatus.INACTIVE)
+        mock_container.get_checks.return_value = {PEBBLE_READY_CHECK_NAME: MagicMock(failures=3)}
+
+        assert workload_service.is_failing() is True
+
     @pytest.mark.parametrize(
         "failures, expected",
         [
@@ -183,14 +225,24 @@ class TestPebbleService:
         # Expect push and restart because mismatch
         mock_container.push.assert_called_with(CONFIG_FILE_NAME, "new_config", make_dirs=True)
         mock_container.restart.assert_called_with(WORKLOAD_SERVICE)
+        mock_container.start.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "service_status, started",
+        [(ServiceStatus.INACTIVE, True), (ServiceStatus.ACTIVE, False), ("backoff", False)],
+    )
     def test_plan_when_config_files_match(
-        self, mock_container: MagicMock, pebble_service: PebbleService
+        self,
+        mock_container: MagicMock,
+        pebble_service: PebbleService,
+        service_status: ServiceStatus | str,
+        started: bool,
     ) -> None:
         # Simulate local config file matching new config
         mock_file_cm = MagicMock()
         mock_file_cm.__enter__.return_value.read.return_value = "config_file"
         mock_container.pull.return_value = mock_file_cm
+        mock_container.get_service.return_value = MagicMock(current=service_status)
 
         layer = {"services": {"hydra": {"override": "replace"}}}
 
@@ -200,6 +252,37 @@ class TestPebbleService:
         mock_container.push.assert_not_called()
         mock_container.restart.assert_not_called()
         mock_container.replan.assert_called_once()
+        # Replan does not start a stopped service; one that is backing off is left to Pebble
+        assert mock_container.start.called is started
+
+    def test_plan_error_leaves_out_the_service_output(
+        self, mock_container: MagicMock, pebble_service: PebbleService
+    ) -> None:
+        """Pebble attaches what the service printed, and Hydra prints the values it rejects."""
+        mock_file_cm = MagicMock()
+        mock_file_cm.__enter__.return_value.read.return_value = "old_config"
+        mock_container.pull.return_value = mock_file_cm
+        error = ChangeError(
+            "cannot start service: exited quickly with code 1",
+            MagicMock(tasks=[MagicMock(log=["secrets.system.0: sh0rt-s3cr3t"])]),
+        )
+        mock_container.restart.side_effect = error
+
+        with pytest.raises(PebbleServiceError) as raised:
+            pebble_service.plan({"services": {}}, config_file=ConfigFile("new_config"))
+
+        assert "exited quickly with code 1" in str(raised.value)
+        assert "sh0rt-s3cr3t" not in str(raised.value)
+        assert raised.value.__cause__ is error
+
+    @pytest.mark.parametrize("failing_call", ["add_layer", "pull"])
+    def test_plan_when_pebble_is_unreachable(
+        self, mock_container: MagicMock, pebble_service: PebbleService, failing_call: str
+    ) -> None:
+        getattr(mock_container, failing_call).side_effect = ConnectionError("socket not found")
+
+        with pytest.raises(PebbleServiceError):
+            pebble_service.plan({"services": {}}, config_file=ConfigFile("config_file"))
 
     def test_render_pebble_layer(self, pebble_service: PebbleService) -> None:
         data_source = MagicMock(spec=EnvVarConvertible)
