@@ -15,7 +15,7 @@ dependencies = [
     "jinja2",
     "jsonschema",
     "ops==3.9.0",
-    "pydantic~=2.13.1",
+    "pydantic~=2.14.0",
     "lightkube~=1.0.0",
     "lightkube-models~=1.37.0.8",
     "yarl",
