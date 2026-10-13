@@ -66,6 +66,8 @@ def test_build_and_deploy(juju: jubilant.Juju, local_charm: Path) -> None:
         channel=ISTIO_CHANNEL,
         trust=True,
     )
+    # The gateways need the CRDs that the control plane installs.
+    juju.wait(ready=all_active(ISTIO_CHARM), timeout=10 * 60)
     juju.deploy(
         ISTIO_INGRESS_CHARM,
         app=ISTIO_INGRESS_PUBLIC_APP,

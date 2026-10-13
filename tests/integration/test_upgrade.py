@@ -93,6 +93,8 @@ class TestHydraUpgrade:
             channel=ISTIO_CHANNEL,
             trust=True,
         )
+        # The gateways need the CRDs that the control plane installs.
+        juju.wait(ready=all_active(ISTIO_CHARM), timeout=10 * 60)
 
         juju.deploy(
             ISTIO_INGRESS_CHARM,
