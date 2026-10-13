@@ -8,6 +8,7 @@ POSTGRESQL_DSN_TEMPLATE = Template("postgres://$username:$password@$endpoint/$da
 WORKLOAD_CONTAINER = "hydra"
 WORKLOAD_SERVICE = "hydra"
 PEBBLE_READY_CHECK_NAME = "ready"
+PEBBLE_ALIVE_CHECK_NAME = "alive"
 COOKIE_SECRET_KEY = "cookie"
 SYSTEM_SECRET_KEY = "system"
 COOKIE_SECRET_LABEL = "cookiesecret"
@@ -19,6 +20,7 @@ COOKIE_SECRET = "cookie"
 ALLOWED_SECRET_TYPES = [SYSTEM_SECRET, COOKIE_SECRET]
 
 # Peer relation keys
+MIGRATION_VERSION_KEY_PREFIX = "migration_version_"
 PEER_INTEGRATION_SYSTEM_SECRET_KEYS = "system_keys"
 PEER_INTEGRATION_COOKIE_SECRET_KEYS = "cookie_keys"
 

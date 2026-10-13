@@ -6,13 +6,13 @@ from typing import Any
 
 import pytest
 import yaml
-from charms.hydra.v0.oauth import (
-    CLIENT_SECRET_FIELD,
+from charmlibs.interfaces.oauth import (
     ClientChangedEvent,
     ClientCreatedEvent,
     ClientDeletedEvent,
     OAuthProvider,
 )
+from charmlibs.interfaces.oauth._oauth import CLIENT_SECRET_FIELD
 from ops.charm import CharmBase, RelationCreatedEvent
 from ops.testing import Context, Relation, Secret
 from unit.conftest import create_state

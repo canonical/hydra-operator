@@ -1,8 +1,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Optional, TypeVar
+from typing import TYPE_CHECKING, Callable, TypeVar
 
 from ops.charm import CharmBase
 
@@ -19,22 +18,8 @@ from integrations import LoginUIEndpointData, PublicRouteData
 if TYPE_CHECKING:
     from charm import HydraCharm
 
-CharmEventHandler = TypeVar("CharmEventHandler", bound=Callable[..., Any])
 CharmType = TypeVar("CharmType", bound=CharmBase)
 Condition = Callable[[CharmType], bool]
-
-
-def leader_unit(func: CharmEventHandler) -> CharmEventHandler:
-    """A decorator, applied to any event hook handler, to validate juju unit leadership."""
-
-    @wraps(func)
-    def wrapper(charm: CharmBase, *args: Any, **kwargs: Any) -> Optional[Any]:
-        if not charm.unit.is_leader():
-            return None
-
-        return func(charm, *args, **kwargs)
-
-    return wrapper  # type: ignore[return-value]
 
 
 def integration_existence(integration_name: str) -> Condition:
@@ -81,19 +66,28 @@ def container_connectivity(charm: CharmBase) -> bool:
     return charm.unit.get_container(WORKLOAD_CONTAINER).can_connect()
 
 
+def is_newer_version(version: str, than: str) -> bool:
+    """Compare two `vX.Y.Z` workload versions; a malformed version is never newer."""
+
+    def parse(v: str) -> tuple[int, ...]:
+        return tuple(int(part) for part in v.removeprefix("v").split("."))
+
+    try:
+        return parse(version) > parse(than)
+    except ValueError:
+        return False
+
+
 # Condition failure causes early return without doing anything
 NOOP_CONDITIONS: tuple[Condition, ...] = (
+    container_connectivity,
     peer_integration_exists,
     database_integration_exists,
     public_route_integration_exists,
     login_ui_integration_exists,
     public_route_is_ready,
     login_ui_is_ready,
-    migration_is_ready,
     secrets_is_ready,
     public_route_is_secure,
     database_resource_is_created,
 )
-
-# Condition failure causes early return with corresponding event deferred
-EVENT_DEFER_CONDITIONS: tuple[Condition, ...] = (container_connectivity,)

@@ -7,14 +7,14 @@ from typing import Any, Dict
 
 import pytest
 import yaml
-from charms.hydra.v0.oauth import (
-    CLIENT_SECRET_FIELD,
+from charmlibs.interfaces.oauth import (
     ClientConfig,
     InvalidClientConfigEvent,
     OAuthInfoChangedEvent,
     OauthProviderConfig,
     OAuthRequirer,
 )
+from charmlibs.interfaces.oauth._oauth import CLIENT_SECRET_FIELD
 from ops import EventBase
 from ops.charm import CharmBase
 from ops.testing import Context, Relation, Secret

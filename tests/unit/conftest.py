@@ -170,7 +170,7 @@ def hydra_version_exec(hydra_workload_version: str) -> Exec:
 @pytest.fixture
 def hydra_migrate_exec() -> Exec:
     return Exec(
-        ["hydra", "migrate", "sql", "-e", "--yes"],
+        ["hydra", "migrate", "sql", "up", "-e", "--yes"],
         return_code=0,
     )
 
@@ -370,6 +370,20 @@ def oauth_relation() -> Relation:
 
 
 @pytest.fixture
+def oauth_relation_ready(mocked_oauth_client_config: dict) -> Relation:
+    return Relation(
+        OAUTH_INTEGRATION_NAME,
+        remote_app_data={
+            "redirect_uri": mocked_oauth_client_config["redirect_uri"],
+            "scope": mocked_oauth_client_config["scope"],
+            "grant_types": dumps(mocked_oauth_client_config["grant_types"]),
+            "audience": dumps(mocked_oauth_client_config["audience"]),
+            "token_endpoint_auth_method": mocked_oauth_client_config["token_endpoint_auth_method"],
+        },
+    )
+
+
+@pytest.fixture
 def hydra_endpoint_relation() -> Relation:
     return Relation("hydra-endpoint-info")
 
@@ -419,8 +433,13 @@ def create_state(
                     ),
                 ),
                 Exec(
-                    ["hydra", "migrate", "sql", "-e", "--yes"],
+                    ["hydra", "migrate", "sql", "up", "-e", "--yes"],
                     return_code=0,
+                ),
+                Exec(
+                    ["hydra", "migrate", "sql", "status"],
+                    return_code=0,
+                    stdout=dumps(["Pending", "Pending"]),
                 ),
                 Exec(
                     ["hydra", "create", "jwk"],
