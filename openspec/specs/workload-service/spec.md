@@ -13,6 +13,11 @@ The charm SHALL keep Hydra running whenever everything it needs is in place:
 the database, the public ingress, the login UI, the secrets and a recorded
 schema migration.
 
+The login UI is in place when it publishes all of these 3 URLs on the
+relation `ui-endpoint-info`: `login_url`, `consent_url` and `oidc_error_url`.
+The charm SHALL NOT wait for the 2 device-flow URLs of the login UI,
+`device_verification_url` and `post_device_done_url`.
+
 #### Scenario: Stopped workload with an unchanged configuration
 
 - **WHEN** Hydra is stopped, its requirements are met and its configuration
@@ -29,6 +34,24 @@ schema migration.
 - **WHEN** Hydra exits repeatedly and Pebble is restarting it with a backoff
 - **THEN** the charm SHALL leave the restarts to Pebble and SHALL NOT restart
   Hydra on each event
+
+#### Scenario: Login UI without the device flow
+
+- **WHEN** the login UI publishes `login_url`, `consent_url` and
+  `oidc_error_url`, and no device-flow URL
+- **AND** the other requirements of Hydra are met
+- **THEN** the charm SHALL keep Hydra running
+- **AND** the unit SHALL show `active`
+
+#### Scenario: Login UI without a required URL
+
+- **WHEN** the login UI publishes `consent_url` and `oidc_error_url`, and no
+  `login_url`
+- **THEN** the charm SHALL NOT write the configuration of Hydra
+- **AND** the charm SHALL NOT start or restart Hydra
+- **AND** the charm SHALL NOT stop a Hydra that already runs
+- **AND** the unit SHALL show `waiting` with the message
+  "Waiting for login UI to be ready", unless another status takes priority
 
 ### Requirement: Start failures are reported accurately
 
