@@ -25,7 +25,7 @@ from integration.utils import (
     all_maintenance,
     all_waiting,
     any_error,
-    get_unit_address,
+    get_app_integration_data,
     or_,
 )
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -87,12 +87,13 @@ class TestHydraUpgrade:
         )
 
         # Deploy Istio Gateways instead of Traefik
-        # This test is expected to pass after hydra support for istio is released to latest/edge
-        juju.deploy(
-            ISTIO_CHARM,
-            channel=ISTIO_CHANNEL,
-            trust=True,
-        )
+        # One control plane serves the cluster: the first module's stays when its model is kept
+        if ISTIO_CHARM not in juju.status().apps:
+            juju.deploy(
+                ISTIO_CHARM,
+                channel=ISTIO_CHANNEL,
+                trust=True,
+            )
         # The gateways need the CRDs that the control plane installs.
         juju.wait(ready=all_active(ISTIO_CHARM), timeout=10 * 60)
 
@@ -111,7 +112,7 @@ class TestHydraUpgrade:
         juju.deploy(
             LOGIN_UI_APP,
             app=self.login_ui_app_name,
-            channel="latest/edge",
+            channel="istio/edge",
             trust=True,
         )
 
@@ -128,7 +129,7 @@ class TestHydraUpgrade:
         juju.deploy(
             HYDRA_APP,
             app=self.hydra_app_name,
-            channel="latest/edge",
+            channel="istio/edge",
             trust=True,
         )
         self.integrate_dependencies(juju)
@@ -189,8 +190,8 @@ class TestHydraUpgrade:
         reraise=True,
     )
     def _get_jwks(self, juju: jubilant.Juju, http_client: requests.Session) -> None:
-        address = get_unit_address(juju, app_name=self.istio_public_app_name)
-        url = f"https://{address}/.well-known/jwks.json"
+        data = get_app_integration_data(juju, self.hydra_app_name, PUBLIC_ROUTE_INTEGRATION_NAME)
+        url = f"https://{data['external_host']}/.well-known/jwks.json"
         resp = http_client.get(url)
         assert resp.status_code == http.HTTPStatus.OK
 
