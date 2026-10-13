@@ -274,6 +274,57 @@ class TestLoginUIEndpointData:
         actual = LoginUIEndpointData.load(mocked_requirer)
         assert actual == LoginUIEndpointData()
 
+    def test_load_without_device_urls(self, mocked_requirer: MagicMock) -> None:
+        """Test a login UI that publishes no device flow URLs."""
+        mocked_requirer.get_login_ui_endpoints.return_value = {
+            "consent_url": "consent_url",
+            "error_url": "error_url",
+            "login_url": "login_url",
+            "oidc_error_url": "oidc_error_url",
+        }
+
+        actual = LoginUIEndpointData.load(mocked_requirer)
+        assert actual == LoginUIEndpointData(
+            consent_url="consent_url",
+            oidc_error_url="oidc_error_url",
+            login_url="login_url",
+        )
+        assert actual.is_ready()
+
+    @pytest.mark.parametrize(
+        "data, expected",
+        [
+            (
+                LoginUIEndpointData(
+                    consent_url="consent_url",
+                    device_verification_url="device_verification_url",
+                    oidc_error_url="oidc_error_url",
+                    login_url="login_url",
+                    post_device_done_url="post_device_done_url",
+                ),
+                True,
+            ),
+            (
+                LoginUIEndpointData(
+                    consent_url="consent_url",
+                    oidc_error_url="oidc_error_url",
+                    login_url="login_url",
+                ),
+                True,
+            ),
+            (LoginUIEndpointData(oidc_error_url="oidc_error_url", login_url="login_url"), False),
+            (LoginUIEndpointData(consent_url="consent_url", login_url="login_url"), False),
+            (
+                LoginUIEndpointData(consent_url="consent_url", oidc_error_url="oidc_error_url"),
+                False,
+            ),
+            (LoginUIEndpointData(), False),
+        ],
+    )
+    def test_is_ready(self, data: LoginUIEndpointData, expected: bool) -> None:
+        """Test that the login, consent and error URLs are required, the device ones are not."""
+        assert data.is_ready() is expected
+
 
 class TestPublicRouteData:
     @pytest.fixture
