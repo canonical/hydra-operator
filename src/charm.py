@@ -8,18 +8,16 @@
 
 import json
 import logging
+from functools import cached_property
 from secrets import token_hex
 from typing import Any
 
 from charmlibs.interfaces.istio_ingress_route import IstioIngressRouteRequirer
-from charms.data_platform_libs.v0.data_interfaces import (
-    DatabaseCreatedEvent,
-    DatabaseRequires,
-)
+from charmlibs.interfaces.oauth import OAuthProvider
+from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.hydra.v0.hydra_endpoints import HydraEndpointsProvider
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
-from charms.hydra.v0.oauth import ClientChangedEvent, ClientCreatedEvent, OAuthProvider
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
@@ -43,10 +41,16 @@ from ops.charm import (
     WorkloadEvent,
 )
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
+from ops.model import (
+    ActiveStatus,
+    BlockedStatus,
+    MaintenanceStatus,
+    StatusBase,
+    WaitingStatus,
+)
 from ops.pebble import Layer
 
-from cli import CommandLine, OAuthClient
+from cli import CommandLine, OAuthClient, SchemaState
 from configs import CharmConfig, ConfigFile
 from constants import (
     ADMIN_PORT,
@@ -69,7 +73,6 @@ from constants import (
 )
 from exceptions import (
     ClientDoesNotExistError,
-    CommandExecError,
     MigrationError,
     PebbleServiceError,
 )
@@ -82,15 +85,15 @@ from integrations import (
     PublicRouteData,
     TracingData,
 )
+from oauth import OAuthReconciler
 from secret import HydraSecrets, Secrets
 from services import PebbleService, WorkloadService
 from utils import (
-    EVENT_DEFER_CONDITIONS,
     NOOP_CONDITIONS,
     container_connectivity,
     database_integration_exists,
     database_resource_is_created,
-    leader_unit,
+    is_newer_version,
     login_ui_integration_exists,
     login_ui_is_ready,
     migration_is_ready,
@@ -107,6 +110,10 @@ logger = logging.getLogger(__name__)
 class HydraCharm(CharmBase):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
+
+        # What happened in this charm run; nothing here outlives the hook
+        self._migration_attempted = False
+        self._plan_failed = False
 
         self.peer_data = PeerData(self.model)
         self.secrets = Secrets(self.model)
@@ -143,6 +150,9 @@ class HydraCharm(CharmBase):
         )
 
         self.oauth_provider = OAuthProvider(self)
+        self._oauth_reconciler = OAuthReconciler(
+            self.model, self.peer_data, self.oauth_provider, self._cli
+        )
 
         self.login_ui_requirer = LoginUIEndpointsRequirer(
             self, relation_name=LOGIN_UI_INTEGRATION_NAME
@@ -206,12 +216,12 @@ class HydraCharm(CharmBase):
         )
 
         # hooks
-        self.framework.observe(self.token_hook.on.ready, self._on_token_hook_changed)
-        self.framework.observe(self.token_hook.on.unavailable, self._on_token_hook_changed)
+        self.framework.observe(self.token_hook.on.ready, self._on_holistic_handler)
+        self.framework.observe(self.token_hook.on.unavailable, self._on_holistic_handler)
 
         # database
         self.framework.observe(
-            self.database_requirer.on.database_created, self._on_database_created
+            self.database_requirer.on.database_created, self._on_holistic_handler
         )
         self.framework.observe(
             self.database_requirer.on.endpoints_changed, self._on_holistic_handler
@@ -249,16 +259,12 @@ class HydraCharm(CharmBase):
         )
 
         # oauth
-        self.framework.observe(self.on.oauth_relation_created, self._on_oauth_integration_created)
         self.framework.observe(
-            self.oauth_provider.on.client_created, self._on_oauth_client_created
+            self.on[OAUTH_INTEGRATION_NAME].relation_created, self._on_holistic_handler
         )
         self.framework.observe(
-            self.oauth_provider.on.client_changed, self._on_oauth_client_changed
+            self.on[OAUTH_INTEGRATION_NAME].relation_changed, self._on_holistic_handler
         )
-        # self.framework.observe(
-        #     self.oauth_provider.on.client_deleted, self._on_oauth_client_deleted
-        # )
 
         # tracing
         self.framework.observe(self.tracing_requirer.on.endpoint_changed, self._on_config_changed)
@@ -292,7 +298,7 @@ class HydraCharm(CharmBase):
         )
         self.framework.observe(self.on.rotate_key_action, self._on_rotate_key_action)
         self.framework.observe(
-            self.on.reconcile_oauth_clients_action, self._reconcile_oauth_clients_action
+            self.on.reconcile_oauth_clients_action, self._on_reconcile_oauth_clients_action
         )
         self.framework.observe(self.on.get_secret_keys_action, self._on_get_secret_keys_action)
         self.framework.observe(self.on.add_secret_key_action, self._on_add_secret_key_action)
@@ -307,7 +313,7 @@ class HydraCharm(CharmBase):
 
     @property
     def migration_needed(self) -> bool:
-        if not peer_integration_exists(self):
+        if not peer_integration_exists(self) or not database_integration_exists(self):
             return False
 
         database_config = DatabaseConfig.load(self.database_requirer)
@@ -351,7 +357,6 @@ class HydraCharm(CharmBase):
         self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
         self._update_hydra_endpoints(event)
-        self._on_oauth_integration_created(event)
 
     def _on_internal_ingress_ready(self, event: RelationEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
@@ -362,47 +367,11 @@ class HydraCharm(CharmBase):
         self.unit.status = MaintenanceStatus("Configuring resources")
         self._holistic_handler(event)
         self._update_hydra_endpoints(event)
-        self._on_oauth_integration_created(event)
 
     def _resource_reqs_from_config(self) -> ResourceRequirements:
         limits = {"cpu": self.model.config.get("cpu"), "memory": self.model.config.get("memory")}
         requests = {"cpu": "100m", "memory": "200Mi"}
         return adjust_resource_requirements(limits, requests, adhere_to_requests=True)
-
-    def _on_database_created(self, event: DatabaseCreatedEvent) -> None:
-        self.unit.status = MaintenanceStatus("Configuring resources")
-        if not container_connectivity(self):
-            self.unit.status = WaitingStatus("Container is not connected yet")
-            event.defer()
-            return
-
-        if not peer_integration_exists(self):
-            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
-            event.defer()
-            return
-
-        if not self.migration_needed:
-            self._holistic_handler(event)
-            return
-
-        if not self.unit.is_leader():
-            logger.info(
-                "Unit does not have leadership. Wait for leader unit to run the migration."
-            )
-            self.unit.status = WaitingStatus("Waiting for leader unit to run the migration")
-            event.defer()
-            return
-
-        try:
-            self._cli.migrate(DatabaseConfig.load(self.database_requirer).dsn)
-        except MigrationError:
-            self.unit.status = BlockedStatus("Database migration failed")
-            logger.error("Auto migration job failed. Please use the run-migration action")
-            return
-
-        migration_version = DatabaseConfig.load(self.database_requirer).migration_version
-        self.peer_data[migration_version] = self._workload_service.version
-        self._holistic_handler(event)
 
     def _on_database_integration_broken(self, event: RelationBrokenEvent) -> None:
         self.unit.status = MaintenanceStatus("Configuring resources")
@@ -412,10 +381,14 @@ class HydraCharm(CharmBase):
         except PebbleServiceError as e:
             logger.error(f"Failed to stop the service, please check the container logs: {e}")
 
-    def _on_oauth_integration_created(self, event: EventBase) -> None:
+    def _update_oauth_provider_info(self) -> None:
+        """Publish Hydra's OIDC endpoints to every `oauth` integration.
+
+        Assumes the public route is ready. Every caller reaches this past a
+        `public_route_is_ready` check, so the guard below should never fire.
+        """
         if not (public_url := PublicRouteData.load(self.public_route).url):
-            event.defer()
-            logger.info("Public route URL is not available. Deferring the event.")
+            logger.info("Public route URL is not available, skipping the provider info update")
             return
 
         internal_endpoints = InternalIngressData.load(
@@ -437,55 +410,16 @@ class HydraCharm(CharmBase):
             jwt_access_token=self.config.get("jwt_access_tokens", True),
         )
 
-    @leader_unit
-    def _on_oauth_client_created(self, event: ClientCreatedEvent) -> None:
-        if not self._workload_service.is_running():
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            event.defer()
-            return
-
+    def _reconcile_oauth_clients(self, force: bool = False) -> list[int]:
         if not peer_integration_exists(self):
-            self.unit.status = WaitingStatus(f"Missing integration {PEER_INTEGRATION_NAME}")
-            event.defer()
-            return
+            logger.info("Peer integration is missing, skipping the OAuth client reconciliation")
+            return []
 
-        if self.peer_data[f"oauth_{event.relation_id}"]:
-            logger.info("Got client_created event, but client already exists. Ignoring event")
-            return
-
-        target_oauth_client = OAuthClient(
-            **event.snapshot(),
-            **{"metadata": {"integration-id": str(event.relation_id)}},
-        )
-        if not (oauth_client := self._cli.create_oauth_client(target_oauth_client)):
-            logger.error("Failed to create the OAuth client bound with the oauth integration")
-            event.defer()
-            return
-
-        self.peer_data[f"oauth_{event.relation_id}"] = {"client_id": oauth_client.client_id}
-        self.oauth_provider.set_client_credentials_in_relation_data(
-            event.relation_id,
-            oauth_client.client_id,  # type: ignore[arg-type]
-            oauth_client.client_secret,  # type: ignore[arg-type]
-        )
-
-    @leader_unit
-    def _on_oauth_client_changed(self, event: ClientChangedEvent) -> None:
         if not self._workload_service.is_running():
-            self.unit.status = WaitingStatus("Waiting for Hydra service")
-            event.defer()
-            return
+            logger.info("Hydra service is not running, skipping the OAuth client reconciliation")
+            return []
 
-        target_oauth_client = OAuthClient(
-            **event.snapshot(),
-            **{"metadata": {"integration-id": str(event.relation_id)}},
-        )
-        if not self._cli.update_oauth_client(target_oauth_client):
-            logger.error(
-                "Failed to update the OAuth client bound with the oauth integration: %d",
-                event.relation_id,
-            )
-            event.defer()
+        return self._oauth_reconciler.reconcile(force)
 
     def _update_hydra_endpoints(self, event: EventBase) -> None:
         internal_endpoints = InternalIngressData.load(
@@ -496,12 +430,134 @@ class HydraCharm(CharmBase):
             str(internal_endpoints.public_endpoint),
         )
 
-    def _on_token_hook_changed(self, event: EventBase) -> None:
-        self._on_holistic_handler(event)
-        self._on_oauth_integration_created(event)
-
     def _on_resource_patch_failed(self, event: K8sResourcePatchFailedEvent) -> None:
         logger.error(f"Failed to patch resource constraints: {event.message}")
+
+    @cached_property
+    def _schema_state(self) -> SchemaState | None:
+        """The state of the database schema, checked at most once per charm run.
+
+        It is asked from the database each time, and never stored. None means that it
+        could not be determined.
+        """
+        try:
+            return self._cli.migration_status(DatabaseConfig.load(self.database_requirer).dsn)
+        except MigrationError:
+            return None
+
+    def _is_newer_than_workload(self, recorded_version: object) -> bool:
+        return isinstance(recorded_version, str) and is_newer_version(
+            recorded_version, than=self._workload_service.version
+        )
+
+    def _workload_is_older_than_schema(self) -> bool:
+        """Whether a newer workload was the last one to migrate this database.
+
+        The older workload cannot see the newer migrations, so to it the schema looks
+        up to date. The record of this integration says which workload came last.
+        Without one, the record of the most recent earlier integration does, unless
+        the database is fresh: charmed PostgreSQL keeps the database across integrations.
+        """
+        database_config = DatabaseConfig.load(self.database_requirer)
+        if recorded_version := self.peer_data[database_config.migration_version]:
+            return self._is_newer_than_workload(recorded_version)
+
+        if not (versions := self.peer_data.migration_versions()):
+            return False
+
+        return (
+            self._is_newer_than_workload(versions[max(versions)])
+            and self._schema_state is SchemaState.UP_TO_DATE
+        )
+
+    def _reconcile_migration(self) -> None:
+        """Bring the migration record in line with the database schema.
+
+        The database outlives the integration: charmed PostgreSQL keeps it when the
+        integration is removed, so a new integration can point at an existing schema.
+        Only a fresh database is migrated automatically. The `run-migration` action is
+        required for a schema upgrade, for a first migration that was interrupted
+        part-way (it looks like a schema upgrade), and for a workload older than the
+        one that last migrated the database.
+        """
+        if not (workload_version := self._workload_service.version):
+            logger.info("Workload version is unknown, skipping the migration check")
+            return
+
+        if self._workload_is_older_than_schema():
+            logger.info(
+                "The database was migrated by a workload newer than %s. Run the "
+                "run-migration action to use it with the older workload",
+                workload_version,
+            )
+            return
+
+        if self._schema_state is None:
+            logger.warning(
+                "Failed to check the database schema, the check is retried on the next event"
+            )
+            return
+
+        if self._schema_state is SchemaState.UPGRADE_PENDING:
+            logger.info(
+                "The database schema is partially migrated: an upgrade is pending or an "
+                "earlier migration was interrupted. Run the run-migration action"
+            )
+            return
+
+        database_config = DatabaseConfig.load(self.database_requirer)
+        if self._schema_state is SchemaState.FRESH:
+            if self._migration_attempted:
+                return
+
+            self._migration_attempted = True
+            try:
+                self._cli.migrate(database_config.dsn)
+            except MigrationError:
+                logger.error(
+                    "Automatic migration failed. It is retried on the next event only if no "
+                    "migration was applied, otherwise run the run-migration action"
+                )
+                # The failed run may have applied some migrations, so ask again
+                del self._schema_state
+                return
+
+        self.peer_data[database_config.migration_version] = workload_version
+
+    def _migration_status(self) -> StatusBase:
+        """The status of a unit whose database migration is not recorded yet.
+
+        Only the leader asks the database, and only when nothing else holds the unit
+        back; the others wait for the leader.
+        """
+        if not self._workload_service.version:
+            return WaitingStatus("Waiting for the workload version")
+
+        if not self.unit.is_leader():
+            return WaitingStatus("Waiting for leader unit to run the migration")
+
+        if not all(condition(self) for condition in NOOP_CONDITIONS):
+            return WaitingStatus("Waiting for database migration")
+
+        if self._workload_is_older_than_schema():
+            return WaitingStatus(
+                "Database schema is newer than the workload, "
+                "run the `run-migration` action if this is a rollback"
+            )
+
+        if self._schema_state is SchemaState.UPGRADE_PENDING:
+            return BlockedStatus(
+                "Database schema upgrade is pending, run the `run-migration` action"
+            )
+
+        return WaitingStatus("Waiting for database migration")
+
+    def _service_is_expected(self) -> bool:
+        """Whether the workload service should be running.
+
+        The charm does not start it, and stops it, while something it needs is missing.
+        """
+        return all(condition(self) for condition in NOOP_CONDITIONS) and not self.migration_needed
 
     def _on_holistic_handler(self, event: EventBase) -> None:
         """Centralized handler for most events.
@@ -530,8 +586,10 @@ class HydraCharm(CharmBase):
         if not all(condition(self) for condition in NOOP_CONDITIONS):
             return
 
-        if not all(condition(self) for condition in EVENT_DEFER_CONDITIONS):
-            event.defer()
+        if self.unit.is_leader() and self.migration_needed:
+            self._reconcile_migration()
+
+        if self.migration_needed:
             return
 
         config_file = ConfigFile.from_sources(
@@ -547,9 +605,12 @@ class HydraCharm(CharmBase):
             self._pebble_service.plan(self._pebble_layer, config_file)
         except PebbleServiceError as e:
             logger.error(f"Failed to start the service, please check the container logs: {e}")
+            self._plan_failed = True
             return
 
-        self._clean_up_oauth_relation_clients()
+        self._update_oauth_provider_info()
+        self._oauth_reconciler.garbage_collect()
+        self._reconcile_oauth_clients()
 
     def _on_pebble_check_failed(self, event: PebbleCheckFailedEvent) -> None:
         if event.info.name == PEBBLE_READY_CHECK_NAME:
@@ -558,6 +619,7 @@ class HydraCharm(CharmBase):
     def _on_pebble_check_recovered(self, event: PebbleCheckRecoveredEvent) -> None:
         if event.info.name == PEBBLE_READY_CHECK_NAME:
             logger.info("The service is online again")
+        self._holistic_handler(event)
 
     def _on_collect_status(self, event: CollectStatusEvent) -> None:  # noqa: C901
         if not (can_connect := container_connectivity(self)):
@@ -596,19 +658,18 @@ class HydraCharm(CharmBase):
         if not database_resource_is_created(self):
             event.add_status(WaitingStatus("Waiting for database creation"))
 
-        if not migration_is_ready(self):
-            event.add_status(
-                WaitingStatus(
-                    "Waiting for migration to run, try running the `run-migration` action"
-                )
-            )
+        if can_connect and not migration_is_ready(self):
+            event.add_status(self._migration_status())
 
         if not secrets_is_ready(self):
             event.add_status(WaitingStatus("Waiting for secrets creation"))
 
         event.add_status(self.resources_patch.get_status())
 
-        if can_connect and self._workload_service.is_failing():
+        # A service that the charm keeps stopped fails its checks without having crashed
+        if self._plan_failed or (
+            self._service_is_expected() and self._workload_service.is_failing()
+        ):
             event.add_status(
                 BlockedStatus(
                     f"Failed to start the service, please check the {WORKLOAD_CONTAINER} container logs"
@@ -628,6 +689,11 @@ class HydraCharm(CharmBase):
 
         if not peer_integration_exists(self):
             event.fail("Peer integration is not ready yet")
+            return
+
+        # The version is what gets recorded, and an empty record would pass for a migration
+        if not self._workload_service.version:
+            event.fail("Failed to get the workload version, please try again")
             return
 
         event.log("Start migrating the database")
@@ -665,7 +731,13 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+        try:
+            oauth_client = self._cli.get_oauth_client(client_id)
+        except ClientDoesNotExistError:
+            event.fail(f"The OAuth client {client_id} does not exist")
+            return
+
+        if not oauth_client:
             event.fail("Failed to get the OAuth client. Please check the juju logs")
             return
 
@@ -677,7 +749,13 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+        try:
+            oauth_client = self._cli.get_oauth_client(client_id)
+        except ClientDoesNotExistError:
+            event.fail(f"The OAuth client {client_id} does not exist")
+            return
+
+        if not oauth_client:
             event.fail(f"Failed to get the OAuth client {client_id}. Please check the juju logs")
             return
 
@@ -706,7 +784,13 @@ class HydraCharm(CharmBase):
             return
 
         client_id = event.params["client-id"]
-        if not (oauth_client := self._cli.get_oauth_client(client_id)):
+        try:
+            oauth_client = self._cli.get_oauth_client(client_id)
+        except ClientDoesNotExistError:
+            event.fail(f"The OAuth client {client_id} does not exist")
+            return
+
+        if not oauth_client:
             event.fail(f"Failed to get the OAuth client {client_id}. Please check the juju logs")
             return
 
@@ -770,7 +854,7 @@ class HydraCharm(CharmBase):
         event.log("Successfully rotated the JWK")
         event.set_results({"new-key-id": jwk_id})
 
-    def _reconcile_oauth_clients_action(self, event: ActionEvent) -> None:
+    def _on_reconcile_oauth_clients_action(self, event: ActionEvent) -> None:
         if not self.unit.is_leader():
             event.fail("You need to run this action from the leader unit")
             return
@@ -779,9 +863,27 @@ class HydraCharm(CharmBase):
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
-        deleted = self._clean_up_oauth_relation_clients()
+        if not peer_integration_exists(self):
+            event.fail("Peer integration is not ready yet")
+            return
 
+        deleted = self._oauth_reconciler.garbage_collect()
         event.log(f"Successfully deleted {deleted} clients")
+
+        # Publishing credentials into a databag that carries no provider info yet leaves it
+        # failing the provider schema, which errors the next oauth hook on both sides of the
+        # integration. Deleting clients needs no provider info, hence the guard sits here.
+        if self.model.relations[OAUTH_INTEGRATION_NAME] and not public_route_is_ready(self):
+            event.fail("Public route is not ready. Please re-run the action once it is")
+            return
+
+        self._update_oauth_provider_info()
+
+        if failed := self._reconcile_oauth_clients(force=True):
+            event.fail(f"Failed to reconcile the oauth integrations: {sorted(failed)}")
+            return
+
+        event.log("Successfully reconciled the OAuth clients of the oauth integrations")
 
     def _on_get_secret_keys_action(self, event: ActionEvent) -> None:
         if not peer_integration_exists(self):
@@ -817,38 +919,6 @@ class HydraCharm(CharmBase):
         self.hydra_secrets.add_secret_key(event.params["type"], event.params["key"])
 
         event.log(f"Successfully set the `{event.params['type']}` key")
-
-    @leader_unit
-    def _clean_up_oauth_relation_clients(self) -> int:
-        to_delete = []
-        for k in self.peer_data.keys():
-            if not k.startswith("oauth_"):
-                continue
-
-            rel_id = k[len("oauth_") :]
-            rel = self.model.get_relation(OAUTH_INTEGRATION_NAME, relation_id=int(rel_id))
-            if rel.active:
-                continue
-
-            client = self.peer_data[k]
-
-            try:
-                self._cli.delete_oauth_client(client["client_id"])
-            except CommandExecError:
-                logger.error(
-                    f"Failed to delete the OAuth client bound with the oauth integration: {rel_id}."
-                    "Please run the 'reconcile-oauth-clients' action."
-                )
-            except ClientDoesNotExistError:
-                pass
-
-            self.oauth_provider.remove_secret(rel)
-            to_delete.append(k)
-
-        for r in to_delete:
-            self.peer_data.pop(r)
-
-        return len(to_delete)
 
 
 if __name__ == "__main__":

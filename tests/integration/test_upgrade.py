@@ -21,12 +21,14 @@ from integration.constants import (
 )
 from integration.utils import (
     all_active,
+    all_blocked,
     all_maintenance,
     all_waiting,
     any_error,
     get_unit_address,
     or_,
 )
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.constants import (
     INTERNAL_ROUTE_INTEGRATION_NAME,
@@ -157,8 +159,13 @@ class TestHydraUpgrade:
             resources={"oci-image": HYDRA_IMAGE},
         )
 
+        # Blocked when the new workload brings schema migrations, as those wait for the action
         juju.wait(
-            ready=or_(all_waiting(self.hydra_app_name), all_maintenance(self.hydra_app_name)),
+            ready=or_(
+                all_blocked(self.hydra_app_name),
+                all_waiting(self.hydra_app_name),
+                all_maintenance(self.hydra_app_name),
+            ),
             error=any_error(self.hydra_app_name),
             timeout=15 * 60,
         )
@@ -174,14 +181,20 @@ class TestHydraUpgrade:
             timeout=15 * 60,
         )
 
-    def test_verify_action(self, juju: jubilant.Juju, http_client: requests.Session) -> None:
-        """Verify that hydra is functional after the upgrade via Istio."""
+    @retry(
+        wait=wait_exponential(multiplier=2, min=1, max=10),
+        stop=stop_after_attempt(10),
+        reraise=True,
+    )
+    def _get_jwks(self, juju: jubilant.Juju, http_client: requests.Session) -> None:
         address = get_unit_address(juju, app_name=self.istio_public_app_name)
         url = f"https://{address}/.well-known/jwks.json"
-
         resp = http_client.get(url)
-
         assert resp.status_code == http.HTTPStatus.OK
+
+    def test_verify_action(self, juju: jubilant.Juju, http_client: requests.Session) -> None:
+        """Verify that hydra is functional after the upgrade via Istio."""
+        self._get_jwks(juju, http_client)
 
     def test_get_secrets(self, juju: jubilant.Juju, secrets: dict[str, str]) -> None:
         """Get the existing secret keys before deleting Hydra."""
@@ -248,9 +261,4 @@ class TestHydraUpgrade:
             timeout=5 * 60,
         )
 
-        address = get_unit_address(juju, app_name=self.istio_public_app_name)
-        url = f"https://{address}/.well-known/jwks.json"
-
-        resp = http_client.get(url)
-
-        assert resp.status_code == http.HTTPStatus.OK
+        self._get_jwks(juju, http_client)
