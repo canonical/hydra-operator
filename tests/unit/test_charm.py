@@ -1357,6 +1357,29 @@ class TestHolisticHandler:
             "Either enable HTTPS on public ingress or set 'dev' config to true for local development."
         )
 
+    def test_when_public_path_prefix_invalid(
+        self,
+        context: Context,
+        public_route_relation_ready: Relation,
+        login_ui_relation_ready: Relation,
+        db_relation_ready: Relation,
+        peer_relation_ready: PeerRelation,
+    ) -> None:
+        """Test blocked status when the public path prefix is not a path."""
+        state = create_state(
+            relations=[
+                peer_relation_ready,
+                db_relation_ready,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+            ],
+            config={"public_path_prefix": "s s"},
+        )
+
+        state_out = context.run(context.on.update_status(), state)
+
+        assert state_out.unit_status == BlockedStatus("Invalid configuration: public_path_prefix")
+
     def test_when_database_not_ready(
         self,
         context: Context,
@@ -1626,3 +1649,38 @@ class TestHolisticHandler:
             context.run(context.on.update_status(), state)
 
         mocked_provider.assert_called_once()
+
+    def test_publishes_oauth_provider_info_under_public_path_prefix(
+        self,
+        context: Context,
+        public_route_relation_ready: Relation,
+        login_ui_relation_ready: Relation,
+        db_relation_ready: Relation,
+        peer_relation_ready: PeerRelation,
+        oauth_relation: Relation,
+    ) -> None:
+        """Test that the issuer and the public endpoints carry the public path prefix."""
+        state = create_state(
+            relations=[
+                peer_relation_ready,
+                db_relation_ready,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+                oauth_relation,
+            ],
+            config={"public_path_prefix": "/sso"},
+        )
+
+        with (
+            patch("charm.ConfigFile.from_sources", return_value=ConfigFile("config")),
+            patch("charm.NOOP_CONDITIONS", new=[]),
+            patch("charm.WorkloadService.is_running", return_value=True),
+            patch("charm.OAuthProvider.set_provider_info_in_relation_data") as mocked_provider,
+        ):
+            context.run(context.on.update_status(), state)
+
+        assert mocked_provider.call_args.kwargs["issuer_url"] == "https://example.com/sso"
+        assert (
+            mocked_provider.call_args.kwargs["authorization_endpoint"]
+            == "https://example.com/sso/oauth2/auth"
+        )

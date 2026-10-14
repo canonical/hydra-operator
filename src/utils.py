@@ -1,6 +1,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import re
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 from ops.charm import CharmBase
@@ -10,6 +11,7 @@ from constants import (
     INTERNAL_ROUTE_INTEGRATION_NAME,
     LOGIN_UI_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
+    PUBLIC_PATH_PREFIX_PATTERN,
     PUBLIC_ROUTE_INTEGRATION_NAME,
     WORKLOAD_CONTAINER,
 )
@@ -38,8 +40,16 @@ internal_route_integration_exists = integration_existence(INTERNAL_ROUTE_INTEGRA
 login_ui_integration_exists = integration_existence(LOGIN_UI_INTEGRATION_NAME)
 
 
+def public_path_prefix_is_valid(charm: "HydraCharm") -> bool:
+    return (
+        re.fullmatch(PUBLIC_PATH_PREFIX_PATTERN, charm.charm_config.public_path_prefix) is not None
+    )
+
+
 def public_route_is_ready(charm: "HydraCharm") -> bool:
-    return PublicRouteData.load(charm.public_route).is_ready()
+    return PublicRouteData.load(
+        charm.public_route, charm.charm_config.public_path_prefix
+    ).is_ready()
 
 
 def login_ui_is_ready(charm: "HydraCharm") -> bool:
@@ -55,7 +65,10 @@ def secrets_is_ready(charm: "HydraCharm") -> bool:
 
 
 def public_route_is_secure(charm: "HydraCharm") -> bool:
-    return charm.dev_mode or PublicRouteData.load(charm.public_route).secured
+    return (
+        charm.dev_mode
+        or PublicRouteData.load(charm.public_route, charm.charm_config.public_path_prefix).secured
+    )
 
 
 def database_resource_is_created(charm: "HydraCharm") -> bool:
@@ -85,6 +98,7 @@ NOOP_CONDITIONS: tuple[Condition, ...] = (
     database_integration_exists,
     public_route_integration_exists,
     login_ui_integration_exists,
+    public_path_prefix_is_valid,
     public_route_is_ready,
     login_ui_is_ready,
     secrets_is_ready,

@@ -62,6 +62,15 @@ juju integrate traefik-public hydra:public-ingress
 Note that the public ingress needs to be secured with HTTPS if the charm
 config `dev` is not `true`.
 
+To serve the public API under a path of the gateway's host, for example to
+share the host with another Hydra, set `public_path_prefix`:
+
+```shell
+juju config hydra public_path_prefix=/sso
+```
+
+The issuer and the published endpoints then include the path.
+
 ### Kratos
 
 This charm offers integration

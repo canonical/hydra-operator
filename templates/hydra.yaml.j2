@@ -15,6 +15,11 @@ secrets:
     - {{ secret }}
   {%- endfor %}
 serve:
+  {%- if session_cookie_path %}
+  cookies:
+    paths:
+      session: {{ session_cookie_path }}
+  {%- endif %}
   admin:
     cors:
       enabled: true

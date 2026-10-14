@@ -76,6 +76,19 @@ class TestCharmConfig:
         actual = CharmConfig(config, mock_model).use_ingress_for_relations
         assert actual == expected
 
+    @pytest.mark.parametrize(
+        "config, expected",
+        [
+            ({}, ""),
+            ({"public_path_prefix": "sso"}, "/sso"),
+            ({"public_path_prefix": "/a/b/"}, "/a/b"),
+        ],
+    )
+    def test_public_path_prefix(self, config: dict, expected: str) -> None:
+        """Test that the prefix has one leading slash and no trailing slash."""
+        actual = CharmConfig(config, MagicMock(spec=Model)).public_path_prefix
+        assert actual == expected
+
 
 class TestConfigFile:
     """Tests for the ConfigFile class."""
@@ -165,6 +178,21 @@ class TestConfigFile:
         config_file = ConfigFile.from_sources(source)
 
         assert yaml.safe_load(str(config_file))["urls"]["device"] == expected
+
+    @pytest.mark.parametrize(
+        "session_cookie_path, expected",
+        [("/sso", {"paths": {"session": "/sso"}}), ("", None)],
+    )
+    def test_from_sources_session_cookie_path(
+        self, session_cookie_path: str, expected: dict | None
+    ) -> None:
+        """Test that Hydra's session cookie is kept to the path prefix, when there is one."""
+        source = MagicMock(spec=ServiceConfigSource)
+        source.to_service_configs.return_value = {"session_cookie_path": session_cookie_path}
+
+        config_file = ConfigFile.from_sources(source)
+
+        assert yaml.safe_load(str(config_file))["serve"].get("cookies") == expected
 
     def test_from_workload_container(self, mocked_container: MagicMock) -> None:
         """Test creating a ConfigFile from a workload container file."""

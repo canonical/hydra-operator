@@ -6,6 +6,7 @@ from dataclasses import asdict
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
+from charmlibs.interfaces.istio_ingress_route import PathModifierType
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.hydra.v0.hydra_token_hook import (
     HydraHookRequirer,
@@ -360,6 +361,36 @@ class TestPublicRouteData:
         assert actual.config is not None
         assert actual.config.listeners[0].port == INGRESS_HTTPS_PORT
         assert actual.config.http_routes[0].listener.port == INGRESS_HTTPS_PORT
+
+    def test_load_with_path_prefix(self, mocked_requirer: MagicMock) -> None:
+        actual = PublicRouteData.load(mocked_requirer, "/sso")
+
+        assert actual.url == URL("http://external.hydra.com/sso")
+        assert actual.to_service_configs()["session_cookie_path"] == "/sso"
+        assert actual.config is not None
+        rewrites = {
+            route.matches[0].path.value: (
+                route.filters[0].urlRewrite.path.type,
+                route.filters[0].urlRewrite.path.value,
+            )
+            for route in actual.config.http_routes
+        }
+        assert rewrites == {
+            "/sso/oauth2": (PathModifierType.ReplacePrefixMatch, "/oauth2"),
+            "/sso/.well-known/jwks.json": (
+                PathModifierType.ReplaceFullPath,
+                "/.well-known/jwks.json",
+            ),
+            "/sso/.well-known/openid-configuration": (
+                PathModifierType.ReplaceFullPath,
+                "/.well-known/openid-configuration",
+            ),
+            "/sso/.well-known/oauth-authorization-server": (
+                PathModifierType.ReplaceFullPath,
+                "/.well-known/oauth-authorization-server",
+            ),
+            "/sso/userinfo": (PathModifierType.ReplaceFullPath, "/userinfo"),
+        }
 
     def test_load_without_external_host(self, mocked_requirer: MagicMock) -> None:
         mocked_requirer.external_host = ""

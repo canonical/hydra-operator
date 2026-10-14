@@ -35,6 +35,12 @@ class CharmConfig:
         """Check whether relation endpoints should route through ingress."""
         return bool(self["use_ingress_for_relations"])
 
+    @property
+    def public_path_prefix(self) -> str:
+        """The path of the public endpoints, as `/a/b`, or empty for the root."""
+        prefix = (self._config.get("public_path_prefix") or "").strip().strip("/")
+        return f"/{prefix}" if prefix else ""
+
     def __getitem__(self, key: str) -> Any:
         return self._config.get(key)
 
