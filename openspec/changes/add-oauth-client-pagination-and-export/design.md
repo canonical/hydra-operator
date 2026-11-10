@@ -5,17 +5,17 @@
 See [proposal.md](proposal.md) for motivation and
 [the listing spec](specs/oauth-client-listing/spec.md) for the action contract.
 
-`CommandLine.list_oauth_clients()` in `src/cli.py` currently invokes the
-workload CLI once and discards all response data except `items`. The action
-handler in `src/charm.py` serializes client models without `client_secret`
-and returns a single `clients` string. It currently confuses an empty list
-with a failed command.
+Before this change, `CommandLine.list_oauth_clients()` in `src/cli.py`
+invoked the workload CLI once and discarded all response data except `items`.
+The action handler returned a single `clients` string without client secrets
+and confused an empty inventory with command failure.
 
-The CLI exposes `--page-size`, `--page-token`, and JSON continuation metadata.
-The implementation must verify that schema against the packaged Hydra
-version, rather than assume legacy offset pagination. Juju action results
-are passed as command-line arguments and have an approximately 100 KB
-practical limit, not a portable exact payload ceiling.
+Implementation verification confirmed `--page-size`, `--page-token`, and
+JSON continuation metadata against the deployed `26.2.0` workload image.
+The Hydra pagination source sets a maximum of 1000 items per page; the charm
+passes requested sizes to Hydra rather than imposing a separate count cap.
+Juju action results are passed as command-line arguments and have an
+approximately 100 KB practical limit, not a portable exact payload ceiling.
 
 Relevant references:
 

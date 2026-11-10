@@ -75,6 +75,7 @@ from constants import (
 from exceptions import (
     ClientDoesNotExistError,
     MigrationError,
+    OAuthClientListingError,
     PebbleServiceError,
 )
 from integrations import (
@@ -87,6 +88,7 @@ from integrations import (
     TracingData,
 )
 from oauth import OAuthReconciler
+from oauth_client_listing import OAuthClientRetriever
 from secret import HydraSecrets, Secrets
 from services import PebbleService, WorkloadService
 from utils import (
@@ -875,18 +877,16 @@ class HydraCharm(CharmBase):
             event.fail("Service is not ready. Please re-run the action when the charm is active")
             return
 
-        if not (oauth_clients := self._cli.list_oauth_clients()):
-            event.fail("Failed to list OAuth clients. Please check the juju logs")
-            return
-
-        clients = [
-            client.model_dump(
-                by_alias=True, exclude_none=True, exclude={"client_secret"}, mode="json"
+        retriever = OAuthClientRetriever(self._cli, self.charm_dir, self.unit.name)
+        try:
+            results = retriever.run(event.params)
+            event.set_results(results)
+        except OAuthClientListingError as err:
+            event.fail(str(err))
+        except OSError:
+            event.fail(
+                "Failed to return OAuth client results. Try a smaller page-size or export=json"
             )
-            for client in oauth_clients
-        ]
-
-        event.set_results({"clients": json.dumps(clients)})
 
     def _on_revoke_oauth_client_access_tokens_action(self, event: ActionEvent) -> None:
         if not self._workload_service.is_running():

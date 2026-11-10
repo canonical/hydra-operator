@@ -9,9 +9,11 @@ from pathlib import Path
 import jubilant
 import pytest
 import requests
+from integration.conftest import registered_oauth_clients
 from integration.constants import (
     ADMIN_INGRESS_DOMAIN,
     CA_APP,
+    CLIENT_SECRET,
     DB_APP,
     HYDRA_APP,
     HYDRA_IMAGE,
@@ -177,9 +179,80 @@ class TestHydraUpgrade:
         resp = http_client.get(url)
         assert resp.status_code == http.HTTPStatus.OK
 
-    def test_verify_action(self, juju: jubilant.Juju, http_client: requests.Session) -> None:
-        """Verify that hydra is functional after the upgrade."""
+    def test_verify_action(
+        self, juju: jubilant.Juju, http_client: requests.Session, tmp_path: Path
+    ) -> None:
+        """Verify that hydra is functional and OAuth client listing/export work after upgrade."""
         self._get_jwks(juju, http_client)
+
+        empty_action = juju.run(f"{self.hydra_app_name}/0", "list-oauth-clients")
+        assert json.loads(empty_action.results["clients"]) == []
+        assert "next-page-token" not in empty_action.results
+        assert "is-last-page" not in empty_action.results
+
+        with registered_oauth_clients(
+            juju, count=2, metadata_size=32, app_name=self.hydra_app_name
+        ) as created_ids:
+            default_action = juju.run(f"{self.hydra_app_name}/0", "list-oauth-clients")
+            default_clients = json.loads(default_action.results["clients"])
+            assert {client["client-id"] for client in default_clients} >= set(created_ids)
+            assert "next-page-token" not in default_action.results
+            assert "is-last-page" not in default_action.results
+            assert json.dumps(CLIENT_SECRET) not in default_action.results["clients"]
+
+            first_page_action = juju.run(
+                f"{self.hydra_app_name}/0",
+                "list-oauth-clients",
+                params={"page-size": 1},
+            )
+            first_page = json.loads(first_page_action.results["clients"])
+            assert len(first_page) == 1
+            next_token = first_page_action.results.get("next-page-token")
+            assert next_token
+            assert "is-last-page" not in first_page_action.results
+
+            second_page_action = juju.run(
+                f"{self.hydra_app_name}/0",
+                "list-oauth-clients",
+                params={"page-size": 1, "page-token": next_token},
+            )
+            second_page = json.loads(second_page_action.results["clients"])
+            assert len(second_page) == 1
+            assert first_page[0]["client-id"] != second_page[0]["client-id"]
+            assert "is-last-page" not in second_page_action.results
+
+            export_action = juju.run(
+                f"{self.hydra_app_name}/0",
+                "list-oauth-clients",
+                params={"export": "json", "page-size": 1},
+                wait=300,
+            )
+            assert set(export_action.results.keys()) == {
+                "export-path",
+                "export-unit",
+                "export-container",
+                "client-count",
+            }
+            export_path = export_action.results["export-path"]
+            export_unit = export_action.results["export-unit"]
+            export_container = export_action.results["export-container"]
+            assert export_unit == f"{self.hydra_app_name}/0"
+            assert export_container == "charm"
+            assert int(export_action.results["client-count"]) >= len(created_ids)
+
+            exported_file = tmp_path / "upgraded-oauth-clients.json"
+            juju.scp(
+                f"{export_unit}:{export_path}",
+                exported_file,
+                container=export_container,
+            )
+            exported_clients = json.loads(exported_file.read_text(encoding="utf-8"))
+            assert len(exported_clients) == int(export_action.results["client-count"])
+            assert {client["client-id"] for client in exported_clients} >= set(created_ids)
+            assert all(
+                "client-secret" not in client and "client_secret" not in client
+                for client in exported_clients
+            )
 
     def test_get_secrets(self, juju: jubilant.Juju, secrets: dict[str, str]) -> None:
         """Get the existing secret keys before deleting Hydra."""

@@ -260,7 +260,26 @@ actions:
         type: string
     required: ["client-id"]
   list-oauth-clients:
-    description: List all oauth clients
+    description: |
+      List one page of OAuth clients (100 by default), excluding client secrets.
+      Use next-page-token from the result as page-token to retrieve another page.
+      Set export=json to retrieve every page into a temporary file in the charm
+      container; the result contains its path, unit, container and client count
+      for retrieval with juju scp. Only the latest successful export is retained.
+    params:
+      page-size:
+        description: Maximum clients per page, or fetch batch size for export.
+        type: integer
+        default: 100
+      page-token:
+        description: Opaque continuation token from a previous listing; omit to start.
+        type: string
+        default: ""
+      export:
+        description: |
+          Export format. Only json is supported. Omit for inline listing.
+          Cannot be combined with a non-empty page-token.
+        type: string
   revoke-oauth-client-access-tokens:
     description: Delete an oauth client's access tokens
     params:

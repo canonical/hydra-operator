@@ -145,7 +145,7 @@ def mocked_holistic_handler(mocker: MockerFixture) -> MagicMock:
 
 
 @pytest.fixture
-def context():
+def context() -> Context:
     return Context(HydraCharm)
 
 
@@ -188,7 +188,9 @@ def hydra_list_clients_exec(mocked_oauth_client: dict) -> Exec:
     return Exec(
         ["hydra", "list", "clients"],
         return_code=0,
-        stdout=dumps([{k: v for k, v in mocked_oauth_client.items() if k != "client_secret"}]),
+        stdout=dumps({
+            "items": [{k: v for k, v in mocked_oauth_client.items() if k != "client_secret"}],
+        }),
     )
 
 
@@ -448,9 +450,11 @@ def create_state(
                 Exec(
                     ["hydra", "list", "clients"],
                     return_code=0,
-                    stdout=dumps([
-                        {k: v for k, v in OAUTH_CLIENT_DATA.items() if k != "client_secret"}
-                    ]),
+                    stdout=dumps({
+                        "items": [
+                            {k: v for k, v in OAUTH_CLIENT_DATA.items() if k != "client_secret"}
+                        ],
+                    }),
                 ),
                 Exec(
                     ["hydra", "get", "client"],
