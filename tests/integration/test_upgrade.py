@@ -77,6 +77,7 @@ class TestHydraUpgrade:
             app=self.postgresql_app_name,
             channel="14/stable",
             trust=True,
+            force=True,
         )
         juju.deploy(
             CA_APP,
@@ -292,6 +293,10 @@ class TestHydraUpgrade:
             trust=True,
         )
         self.integrate_dependencies(juju)
+        juju.wait(
+            lambda s: s.apps[self.hydra_app_name].is_active,
+            timeout=10 * 60,
+        )
 
         for secret in secrets["cookie"]:
             juju.run(
