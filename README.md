@@ -178,6 +178,92 @@ juju integrate -m new-model hydra postgresql
 
 Once the new Hydra instance is running and integrated, it should be able to decrypt and use the backed-up database data seamlessly. You can verify this by checking that the new instance's JWKS endpoint (https://hydra-url/.well-known/jwks.json) matches the one from your old deployment.
 
+## Listing and Exporting OAuth Clients
+
+The `list-oauth-clients` action inspects registered OAuth 2.0 clients through
+either paginated inline responses or a complete JSON file export.
+
+### Default and Paginated Inline Listing
+
+When invoked without parameters, `list-oauth-clients` returns a single page of
+at most 100 clients in the `clients` JSON string:
+
+```shell
+juju run hydra/0 list-oauth-clients
+```
+
+When no OAuth clients are registered, the action succeeds with `clients: '[]'`
+and omits `next-page-token`. When more pages remain, the action includes a
+non-empty `next-page-token` in the result (it never returns an `is-last-page`
+field). Pass that opaque value back as `page-token` to retrieve the next page,
+and optionally adjust `page-size` (default `100`):
+
+```shell
+juju run hydra/0 list-oauth-clients page-size=50
+juju run hydra/0 list-oauth-clients page-size=50 page-token=<next-page-token>
+```
+
+Inline action results are bounded by a conservative 90 KiB UTF-8 encoded budget
+(covering result keys, serialized `clients`, and continuation metadata) to stay
+within Juju's practical action result limit. If a page exceeds 90 KiB, the
+action fails without truncating the client list and instructs you to specify a
+smaller `page-size` or `export=json`.
+
+### Complete JSON Export and Retrieval
+
+To export the entire OAuth client inventory across all pages into a JSON file
+in the `charm` container, set `export=json`. You may optionally pass
+`page-size` to control the per-page fetch batch size, but `export=json` always
+starts from the first page and cannot be combined with a non-empty
+`page-token`:
+
+```shell
+juju run hydra/0 list-oauth-clients export=json
+```
+
+In export mode, the action returns only file location and count metadata
+(`export-path`, `export-unit`, `export-container`, and `client-count`) and
+omits `clients` and `next-page-token`. Download the file with `juju scp` using
+the exact `export-unit`, `export-container`, and `export-path` returned by the
+action:
+
+```shell
+juju scp --container charm \
+  hydra/0:/var/lib/juju/agents/unit-hydra-0/charm/oauth-client-exports/oauth-clients.json \
+  ./oauth-clients.json
+```
+
+Always use the returned `export-unit` (for example `hydra/0`) rather than
+`hydra/leader`, because leadership can change between running the action and
+copying the file.
+
+### Operational Constraints and Retention
+
+- **Secret exclusion:** Both inline results and exported JSON files exclude
+  OAuth client secrets (`client-secret`). Exporting clients is not a secret
+  backup mechanism.
+- **Empty inventory success:** An empty client inventory succeeds in both modes,
+  producing `clients: '[]'` inline or a JSON file containing `[]` with
+  `client-count: 0`.
+- **Resource budgets and deadline:** Exports enforce a maximum file size of
+  100 MiB and a five-minute (300-second) total deadline. If any page fetch
+  fails, times out, repeats a continuation token, or exceeds 100 MiB, the
+  action fails, removes incomplete output, and leaves any previous completed
+  export on that unit intact.
+- **Latest-only temporary retention:** Each unit writes exports to a private
+  directory (`0700`) and file (`0600`) at
+  `<charm-dir>/oauth-client-exports/oauth-clients.json` inside the `charm`
+  container, retaining only the latest successful export on that unit. Running
+  another successful export on the same unit atomically replaces the previous
+  file, and unit restarts or pod replacements remove temporary files. Retrieve
+  each export with `juju scp` before starting another export on that unit.
+- **Non-snapshot semantics:** Paginated listing and `export=json` fetch pages
+  sequentially from Hydra and do not provide a transactional snapshot if
+  clients are created, modified, or deleted concurrently.
+- **Upgraded charm revision required:** The `page-size`, `page-token`, and
+  `export` parameters require refreshing the application to a charm revision
+  that defines the updated `list-oauth-clients` action schema.
+
 ## OCI Images
 
 The image used by this charm is hosted

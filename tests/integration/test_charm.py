@@ -12,7 +12,7 @@ import jubilant
 import jwt
 import pytest
 import requests
-from integration.conftest import integrate_dependencies
+from integration.conftest import integrate_dependencies, registered_oauth_clients
 from integration.constants import (
     ADMIN_INGRESS_DOMAIN,
     CA_APP,
@@ -320,6 +320,208 @@ def test_delete_oauth_client(juju: jubilant.Juju, oauth_clients: list[dict[str, 
         )
 
     assert result.value.task.status == "failed"
+
+
+def test_list_oauth_clients_pagination(
+    juju: jubilant.Juju,
+    paginated_oauth_clients: list[str],
+) -> None:
+    """Test default single-page listing and token pagination across more than 100 clients."""
+    assert len(paginated_oauth_clients) > 100
+
+    first_action = juju.run(f"{HYDRA_APP}/0", "list-oauth-clients")
+    assert "clients" in first_action.results
+    assert "is-last-page" not in first_action.results
+
+    first_page = json.loads(first_action.results["clients"])
+    assert len(first_page) == 100
+    next_page_token = first_action.results.get("next-page-token")
+    assert next_page_token
+
+    for client in first_page:
+        assert "client-id" in client
+        assert "redirect-uris" in client
+        assert "grant-types" in client
+        assert "response-types" in client
+        assert "scope" in client
+        assert "metadata" in client
+        assert "client-secret" not in client
+        assert "client_secret" not in client
+    assert json.dumps(CLIENT_SECRET) not in first_action.results["clients"]
+
+    all_clients = list(first_page)
+    later_clients: list[dict] = []
+    page_action = first_action
+    while next_page_token:
+        page_action = juju.run(
+            f"{HYDRA_APP}/0",
+            "list-oauth-clients",
+            params={"page-token": next_page_token},
+        )
+        assert "clients" in page_action.results
+        assert "is-last-page" not in page_action.results
+
+        page_clients = json.loads(page_action.results["clients"])
+        assert page_clients
+        for client in page_clients:
+            assert "client-secret" not in client
+            assert "client_secret" not in client
+        assert json.dumps(CLIENT_SECRET) not in page_action.results["clients"]
+
+        later_clients.extend(page_clients)
+        all_clients.extend(page_clients)
+        next_page_token = page_action.results.get("next-page-token")
+
+    assert "next-page-token" not in page_action.results
+
+    first_page_ids = {client["client-id"] for client in first_page}
+    later_page_ids = {client["client-id"] for client in later_clients}
+    missing_from_first_page = set(paginated_oauth_clients) - first_page_ids
+    assert missing_from_first_page
+    assert missing_from_first_page <= later_page_ids
+    assert set(paginated_oauth_clients) <= {client["client-id"] for client in all_clients}
+
+
+def test_export_oauth_clients(
+    juju: jubilant.Juju,
+    large_oauth_clients: list[str],
+    tmp_path: Path,
+) -> None:
+    """Test inline result budget failure and complete JSON export retrieval via juju scp."""
+    assert len(large_oauth_clients) > 100
+
+    with pytest.raises(jubilant.TaskError) as inline_err:
+        juju.run(
+            f"{HYDRA_APP}/0",
+            "list-oauth-clients",
+            params={"page-size": len(large_oauth_clients)},
+        )
+    assert inline_err.value.task.status == "failed"
+    assert "clients" not in inline_err.value.task.results
+    assert "page-size" in inline_err.value.task.message
+    assert "export=json" in inline_err.value.task.message
+    assert json.dumps(CLIENT_SECRET) not in inline_err.value.task.message
+
+    export_action = juju.run(
+        f"{HYDRA_APP}/0",
+        "list-oauth-clients",
+        params={"export": "json"},
+        wait=300,
+    )
+    assert set(export_action.results.keys()) == {
+        "export-path",
+        "export-unit",
+        "export-container",
+        "client-count",
+    }
+    assert "clients" not in export_action.results
+    assert "next-page-token" not in export_action.results
+    assert "is-last-page" not in export_action.results
+
+    export_path = export_action.results["export-path"]
+    export_unit = export_action.results["export-unit"]
+    export_container = export_action.results["export-container"]
+    client_count = int(export_action.results["client-count"])
+
+    assert export_path.startswith("/")
+    assert export_path.endswith("/oauth-client-exports/oauth-clients.json")
+    assert export_unit == f"{HYDRA_APP}/0"
+    assert export_container == "charm"
+    assert client_count >= len(large_oauth_clients)
+
+    downloaded_export = tmp_path / "oauth-clients.json"
+    juju.scp(
+        f"{export_unit}:{export_path}",
+        downloaded_export,
+        container=export_container,
+    )
+
+    raw_export = downloaded_export.read_bytes()
+    assert len(raw_export) > 90 * 1024
+    assert json.dumps(CLIENT_SECRET).encode("utf-8") not in raw_export
+
+    exported_clients = json.loads(raw_export.decode("utf-8"))
+    assert isinstance(exported_clients, list)
+    assert len(exported_clients) == client_count
+
+    exported_by_id = {client["client-id"]: client for client in exported_clients}
+    assert set(large_oauth_clients) <= set(exported_by_id.keys())
+    for client in exported_clients:
+        assert "client-secret" not in client
+        assert "client_secret" not in client
+    for client_id in large_oauth_clients:
+        exported_client = exported_by_id[client_id]
+        assert exported_client["redirect-uris"] == CLIENT_REDIRECT_URIS
+        assert exported_client["grant-types"] == ["client_credentials"]
+        assert "payload" in exported_client["metadata"]
+
+
+def test_export_oauth_clients_replaces_previous_export(
+    juju: jubilant.Juju,
+    tmp_path: Path,
+) -> None:
+    """Test that a failed export preserves the previous file and a successful export replaces it."""
+    with registered_oauth_clients(juju, count=1, metadata_size=32) as first_batch:
+        first_action = juju.run(
+            f"{HYDRA_APP}/0",
+            "list-oauth-clients",
+            params={"export": "json"},
+            wait=300,
+        )
+        first_path = first_action.results["export-path"]
+        first_unit = first_action.results["export-unit"]
+        first_container = first_action.results["export-container"]
+        first_count = int(first_action.results["client-count"])
+
+        first_download = tmp_path / "first-oauth-clients.json"
+        juju.scp(
+            f"{first_unit}:{first_path}",
+            first_download,
+            container=first_container,
+        )
+        first_clients = json.loads(first_download.read_text(encoding="utf-8"))
+        assert len(first_clients) == first_count
+        assert first_batch[0] in {client["client-id"] for client in first_clients}
+
+        with registered_oauth_clients(juju, count=1, metadata_size=32) as second_batch:
+            with pytest.raises(jubilant.TaskError) as failed_export:
+                juju.run(
+                    first_unit,
+                    "list-oauth-clients",
+                    params={"export": "json", "page-token": "non-empty-token"},
+                )
+            assert failed_export.value.task.status == "failed"
+
+            preserved_download = tmp_path / "preserved-oauth-clients.json"
+            juju.scp(
+                f"{first_unit}:{first_path}",
+                preserved_download,
+                container=first_container,
+            )
+            assert json.loads(preserved_download.read_text(encoding="utf-8")) == first_clients
+
+            second_action = juju.run(
+                first_unit,
+                "list-oauth-clients",
+                params={"export": "json"},
+                wait=300,
+            )
+            assert second_action.results["export-path"] == first_path
+            assert second_action.results["export-unit"] == first_unit
+            assert second_action.results["export-container"] == first_container
+            assert int(second_action.results["client-count"]) == first_count + 1
+
+            second_download = tmp_path / "second-oauth-clients.json"
+            juju.scp(
+                f"{first_unit}:{first_path}",
+                second_download,
+                container=first_container,
+            )
+            second_clients = json.loads(second_download.read_text(encoding="utf-8"))
+            second_ids = {client["client-id"] for client in second_clients}
+            assert len(second_clients) == first_count + 1
+            assert first_batch[0] in second_ids
+            assert second_batch[0] in second_ids
 
 
 @pytest.mark.parametrize("get_hydra_jwks", ["public"], indirect=True)

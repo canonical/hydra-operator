@@ -14,13 +14,14 @@ from ops.pebble import ChangeError, ConnectionError, ExecError, TimeoutError
 from cli import (
     CommandLine,
     OAuthClient,
+    OAuthClientPage,
     SchemaState,
     last_output,
     parse_kv_string,
     redact_command,
     redact_dsn,
 )
-from exceptions import ClientDoesNotExistError, MigrationError
+from exceptions import ClientDoesNotExistError, MigrationError, OAuthClientListingError
 
 
 @pytest.mark.parametrize(
@@ -77,9 +78,25 @@ def test_key_value_parser_missing_equals() -> None:
 
 
 def test_redact_command() -> None:
-    cmd = ["hydra", "create", "client", "--secret", "s3cr3t", "--name", "app"]
+    cmd = [
+        "hydra",
+        "create",
+        "client",
+        "--secret",
+        "s3cr3t",
+        "--name",
+        "app",
+    ]
 
-    assert redact_command(cmd) == ["hydra", "create", "client", "--secret", "***", "--name", "app"]
+    assert redact_command(cmd) == [
+        "hydra",
+        "create",
+        "client",
+        "--secret",
+        "***",
+        "--name",
+        "app",
+    ]
     assert cmd[4] == "s3cr3t"
 
 
@@ -473,6 +490,205 @@ class TestCommandLine:
         mock_process.wait_output.side_effect = ExecError(["cmd"], 1, "", "connection refused")
 
         assert command_line.get_oauth_client("client_id") is None
+
+    def test_list_oauth_clients_returns_typed_page_with_continuation(
+        self,
+        command_line: CommandLine,
+        container: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self.stream(
+            container,
+            stdout=json.dumps({
+                "items": [{"client_id": "client-1", "client_name": "app"}],
+                "next_page_token": "next-token-123",
+                "is_last_page": False,
+            }),
+        )
+
+        with caplog.at_level(logging.DEBUG):
+            page = command_line.list_oauth_clients(
+                page_size=25, page_token="prev-token-xyz", timeout=15
+            )
+
+        assert page == OAuthClientPage(
+            items=[OAuthClient(client_id="client-1", name="app")],
+            next_page_token="next-token-123",
+        )
+        assert container.exec.call_args.args == (
+            [
+                "hydra",
+                "list",
+                "clients",
+                "--endpoint",
+                "http://localhost:4445",
+                "--format",
+                "json",
+                "--page-size",
+                "25",
+                "--page-token",
+                "prev-token-xyz",
+            ],
+        )
+        assert container.exec.call_args.kwargs["timeout"] == 15
+        assert "prev-token-xyz" in caplog.text
+        assert "next-token-123" not in caplog.text
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"items": []},
+            {"items": [], "next_page_token": ""},
+            {"items": [], "next_page_token": "", "is_last_page": True},
+        ],
+    )
+    def test_list_oauth_clients_empty_page_and_last_page_tokens(
+        self,
+        command_line: CommandLine,
+        container: MagicMock,
+        payload: dict[str, object],
+    ) -> None:
+        self.stream(container, stdout=json.dumps(payload))
+
+        page = command_line.list_oauth_clients()
+
+        assert page == OAuthClientPage(items=[], next_page_token=None)
+        assert container.exec.call_args.args == (
+            [
+                "hydra",
+                "list",
+                "clients",
+                "--endpoint",
+                "http://localhost:4445",
+                "--format",
+                "json",
+                "--page-size",
+                "100",
+            ],
+        )
+        assert container.exec.call_args.kwargs["timeout"] == 20
+
+    @pytest.mark.parametrize(
+        "stdout",
+        [
+            "",
+            "not-json",
+            "[]",
+            "null",
+            "{}",
+            '{"items": null}',
+            '{"items": "not-a-list"}',
+            '{"items": ["not-an-object"]}',
+            '{"items": [{"client_id": 123, "client_secret": "s3cr3t-payload"}]}',
+            '{"items": [{"redirect_uris": 123, "client_secret": "s3cr3t-payload"}]}',
+            '{"items": [{"scope": 123, "client_secret": "s3cr3t-payload"}]}',
+            '{"items": [{"metadata": 123, "client_secret": "s3cr3t-payload"}]}',
+            '{"items": [{"metadata": "invalid-kv", "client_secret": "s3cr3t-payload"}]}',
+            '{"items": [{"client_secret": "s3cr3t-payload"}], "next_page_token": null}',
+            '{"items": [{"client_secret": "s3cr3t-payload"}], "next_page_token": 123}',
+            '{"items": [{"client_secret": "s3cr3t-payload"}], "next_page_token": true}',
+            '{"items": [{"client_secret": "s3cr3t-payload"}], "next_page_token": ["tok"]}',
+            '{"items": [{"client_secret": "s3cr3t-payload"}], "next_page_token": {"tok": "x"}}',
+        ],
+    )
+    def test_list_oauth_clients_rejects_malformed_output_without_leaking_payload(
+        self,
+        command_line: CommandLine,
+        container: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+        stdout: str,
+    ) -> None:
+        self.stream(container, stdout=stdout)
+
+        with caplog.at_level(logging.DEBUG), pytest.raises(OAuthClientListingError) as raised:
+            command_line.list_oauth_clients()
+
+        assert "s3cr3t-payload" not in str(raised.value)
+        assert "s3cr3t-payload" not in caplog.text
+
+    @pytest.mark.parametrize(
+        "page_size, page_token",
+        [
+            (0, ""),
+            (-5, ""),
+            (True, ""),
+            (1.5, ""),  # type: ignore[arg-type]
+            ("10", ""),  # type: ignore[arg-type]
+            (10, None),  # type: ignore[arg-type]
+            (10, 123),  # type: ignore[arg-type]
+        ],
+    )
+    def test_list_oauth_clients_rejects_invalid_arguments_before_exec(
+        self,
+        command_line: CommandLine,
+        container: MagicMock,
+        page_size: int,
+        page_token: str,
+    ) -> None:
+        with pytest.raises(OAuthClientListingError):
+            command_line.list_oauth_clients(page_size=page_size, page_token=page_token)
+
+        container.exec.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "stderr, error",
+        [
+            (
+                'Could not parse page-token argument "page-token-value": invalid syntax\n',
+                ExecError(["hydra"], 1, None, None),
+            ),
+            (
+                "Unable to parse pagination token: page-token-value postgres://u:***@h/db\n",
+                ExecError(["hydra"], 1, None, None),
+            ),
+            (
+                "time=1 msg=retrying\n",
+                ChangeError("timed out after 20s", MagicMock()),
+            ),
+        ],
+    )
+    def test_list_oauth_clients_execution_failure_sanitizes_logs_and_error(
+        self,
+        command_line: CommandLine,
+        container: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+        stderr: str,
+        error: Exception,
+    ) -> None:
+        self.stream(container, stderr=stderr, error=error)
+
+        with caplog.at_level(logging.DEBUG), pytest.raises(OAuthClientListingError) as raised:
+            command_line.list_oauth_clients(page_size=10, page_token="page-token-value")
+
+        assert "page-token-value" not in str(raised.value)
+        assert "postgres://" not in caplog.text
+        assert "db-secret" not in str(raised.value)
+        assert "db-secret" not in caplog.text
+
+    def test_list_failure_does_not_log_client_payloads(
+        self,
+        command_line: CommandLine,
+        container: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self.stream(
+            container,
+            stderr='rejected client: {"client_secret": "listing-secret", "metadata": "private-data"}',
+            error=ExecError(["hydra"], 1, None, None),
+        )
+        with caplog.at_level(logging.DEBUG), pytest.raises(OAuthClientListingError) as raised:
+            command_line.list_oauth_clients()
+        for value in ("listing-secret", "private-data"):
+            assert value not in str(raised.value)
+            assert value not in caplog.text
+
+    def test_list_oauth_clients_connection_error(
+        self, command_line: CommandLine, container: MagicMock
+    ) -> None:
+        container.exec.side_effect = ConnectionError("socket not found")
+
+        with pytest.raises(OAuthClientListingError, match="Failed to list OAuth clients"):
+            command_line.list_oauth_clients()
 
     def test_run_cmd(
         self, command_line: CommandLine, container: MagicMock, mock_process: MagicMock

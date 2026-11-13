@@ -20,19 +20,31 @@ from pydantic import (
     Field,
     TypeAdapter,
     ValidationError,
+    ValidationInfo,
     field_serializer,
     field_validator,
 )
 
-from constants import ADMIN_PORT, CONFIG_FILE_NAME, DEFAULT_OAUTH_SCOPES, DEFAULT_RESPONSE_TYPES
-from exceptions import ClientDoesNotExistError, CommandExecError, MigrationError
+from constants import (
+    ADMIN_PORT,
+    CONFIG_FILE_NAME,
+    DEFAULT_OAUTH_CLIENT_PAGE_SIZE,
+    DEFAULT_OAUTH_SCOPES,
+    DEFAULT_RESPONSE_TYPES,
+)
+from exceptions import (
+    ClientDoesNotExistError,
+    CommandExecError,
+    MigrationError,
+    OAuthClientListingError,
+)
 
 logger = logging.getLogger(__name__)
 
 VERSION_REGEX = re.compile(r"Version:\s+(?P<version>v\d+\.\d+\.\d+)")
 
 # The per-migration states printed by `hydra migrate sql status`
-MIGRATION_STATES: TypeAdapter[list[str]] = TypeAdapter(
+MIGRATION_STATES: TypeAdapter[list[Literal["Applied", "Pending"]]] = TypeAdapter(
     Annotated[list[Literal["Applied", "Pending"]], Field(min_length=1)]
 )
 
@@ -197,19 +209,21 @@ class OAuthClient(BaseModel):
 
     @field_validator("redirect_uris", mode="before")
     @classmethod
-    def deserialize_redirect_uris(cls, v: str | list[str]) -> list[str]:
+    def deserialize_redirect_uris(cls, v: object) -> list[str]:
         if isinstance(v, list):
             return v
-
-        return v.split()
+        if isinstance(v, str):
+            return v.split()
+        raise ValueError("redirect_uris must be a string or list of strings")
 
     @field_validator("scope", mode="before")
     @classmethod
-    def deserialize_scope(cls, v: str | list[str]) -> str:
+    def deserialize_scope(cls, v: object) -> str:
         if isinstance(v, str):
             return v
-
-        return ",".join(v)
+        if isinstance(v, list) and all(isinstance(item, str) for item in v):
+            return ",".join(v)
+        raise ValueError("scope must be a string or list of strings")
 
     @field_serializer("scope")
     def serialize_scope(self, scope: str) -> list[str]:
@@ -217,10 +231,12 @@ class OAuthClient(BaseModel):
 
     @field_validator("metadata", mode="before")
     @classmethod
-    def deserialize_metadata(cls, v: str | dict[str, Any]) -> dict[str, Any]:
+    def deserialize_metadata(cls, v: object) -> dict[str, Any]:
         if isinstance(v, dict):
             return v
-        return parse_kv_string(v)
+        if isinstance(v, str):
+            return parse_kv_string(v)
+        raise ValueError("metadata must be a string or mapping")
 
     def to_cmd_options(self) -> list[str]:
         cmd_options = []
@@ -256,6 +272,20 @@ class OAuthClient(BaseModel):
             cmd_options.extend(["--metadata", json.dumps(self.metadata)])
 
         return cmd_options
+
+
+class OAuthClientPage(BaseModel):
+    """One validated page of OAuth 2.0 clients returned by Hydra."""
+
+    items: list[OAuthClient]
+    next_page_token: str | None = None
+
+    @field_validator("next_page_token", mode="before")
+    @classmethod
+    def _validate_next_page_token(cls, value: object, info: ValidationInfo) -> str | None:
+        if (info.mode == "json" or value is not None) and not isinstance(value, str):
+            raise ValueError("next_page_token must be a string")
+        return value or None
 
 
 class CommandLine:
@@ -370,11 +400,25 @@ class CommandLine:
         res = json.loads(stdout)
         return res["keys"][0]["kid"]
 
-    def list_oauth_clients(self) -> list[OAuthClient]:
-        """List OAuth 2.0 clients.
+    def list_oauth_clients(
+        self,
+        page_size: int = DEFAULT_OAUTH_CLIENT_PAGE_SIZE,
+        page_token: str = "",
+        timeout: float = 20,
+    ) -> OAuthClientPage:
+        """List one page of OAuth 2.0 clients.
 
         More information: https://www.ory.sh/docs/hydra/cli/hydra-list-clients
+
+        Raises:
+            OAuthClientListingError: if pagination arguments are invalid, the command fails,
+                or Hydra returns malformed output.
         """
+        if isinstance(page_size, bool) or not isinstance(page_size, int) or page_size < 1:
+            raise OAuthClientListingError("Invalid page-size: must be a positive integer")
+        if not isinstance(page_token, str):
+            raise OAuthClientListingError("Invalid page-token: must be a string")
+
         cmd = [
             "hydra",
             "list",
@@ -383,16 +427,37 @@ class CommandLine:
             f"http://localhost:{ADMIN_PORT}",
             "--format",
             "json",
+            "--page-size",
+            str(page_size),
         ]
+        if page_token:
+            cmd.extend(["--page-token", page_token])
+
+        stderr = io.StringIO()
+        try:
+            stdout = self._run_cmd(cmd, timeout=timeout, stderr=stderr)
+        except Error as err:
+            # Listing output can contain entire client records, including secrets.
+            # Report an exit code without copying stderr or Pebble task logs.
+            reason = (
+                f"hydra exited with code {err.exit_code}"
+                if isinstance(err, ExecError)
+                else "Hydra command failed"
+            )
+            message = (
+                f"Failed to list OAuth clients: {reason}. "
+                "Check service availability and pagination parameters"
+            )
+            logger.error(message)
+            raise OAuthClientListingError(message) from None
 
         try:
-            stdout = self._run_cmd(cmd)
-        except Error as err:
-            logger.error("Failed to list all OAuth clients: %s", err)
-            return []
-
-        clients = json.loads(stdout)["items"]
-        return [OAuthClient(**c) for c in clients]
+            return OAuthClientPage.model_validate_json(stdout)
+        except ValidationError as err:
+            logger.error("Failed to list OAuth clients: unexpected hydra client list output")
+            raise OAuthClientListingError(
+                "Failed to list OAuth clients: unexpected hydra client list output"
+            ) from err
 
     def get_oauth_client(self, client_id: str) -> Optional[OAuthClient]:
         """Get an OAuth 2.0 client by client id.

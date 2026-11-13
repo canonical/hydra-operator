@@ -24,3 +24,7 @@ class MigrationError(CharmError):
 
 class InvalidHydraConfig(CharmError):
     """Error for invalid hydra config."""
+
+
+class OAuthClientListingError(CharmError):
+    """Error for OAuth client listing and export operations."""

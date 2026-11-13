@@ -3,15 +3,22 @@
 
 import json
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from ops.testing import ActionFailed, Context, PeerRelation, Relation
+import yaml
+from ops.testing import ActionFailed, Container, Context, PeerRelation, Relation
 from pytest_mock import MockerFixture
 from unit.conftest import create_state
 
 from cli import OAuthClient
-from exceptions import ClientDoesNotExistError, CommandExecError, MigrationError
+from exceptions import (
+    ClientDoesNotExistError,
+    CommandExecError,
+    MigrationError,
+    OAuthClientListingError,
+)
 from integrations import DatabaseConfig
 
 
@@ -464,47 +471,124 @@ class TestDeleteOAuthClientAction:
 
 
 class TestListOAuthClientsAction:
-    @pytest.fixture
-    def mocked_cli(self, mocker: MockerFixture, mocked_oauth_client_config: dict) -> MagicMock:
-        return mocker.patch(
-            "charm.CommandLine.list_oauth_clients",
-            return_value=[OAuthClient(**mocked_oauth_client_config, **{"client-id": "client_id"})],
-        )
+    def test_action_metadata_defaults(self) -> None:
+        manifest = Path(__file__).parents[2] / "charmcraft.yaml"
+        action = yaml.safe_load(manifest.read_text(encoding="utf-8"))["actions"][
+            "list-oauth-clients"
+        ]
+        params = action["params"]
 
-    def test_when_hydra_service_not_ready(
+        assert params["page-size"]["type"] == "integer"
+        assert params["page-size"]["default"] == 100
+        assert params["page-token"]["type"] == "string"
+        assert params["page-token"]["default"] == ""
+        assert params["export"]["type"] == "string"
+        assert "default" not in params["export"]
+        assert "json" in params["export"]["description"]
+        assert action.get("required", []) == []
+
+    @pytest.mark.parametrize("use_named_fixture", [False, True])
+    def test_default_listing_uses_shared_paginated_fixture(
         self,
         context: Context,
-        mocked_cli: MagicMock,
+        container: Container,
+        mocked_oauth_client: dict,
+        use_named_fixture: bool,
     ) -> None:
-        state = create_state(hydra_is_running=False)
-        with pytest.raises(ActionFailed) as excinfo:
-            context.run(context.on.action("list-oauth-clients"), state)
-        assert (
-            "Service is not ready. Please re-run the action when the charm is active"
-            in excinfo.value.message
-        )
-        mocked_cli.assert_not_called()
-
-    def test_when_commandline_failed(
-        self,
-        context: Context,
-    ) -> None:
-        with patch("charm.CommandLine.list_oauth_clients", return_value=[]):
-            state = create_state()
-            with pytest.raises(ActionFailed) as excinfo:
-                context.run(context.on.action("list-oauth-clients"), state)
-            assert (
-                "Failed to list OAuth clients. Please check the juju logs" in excinfo.value.message
-            )
-
-    def test_when_action_succeeds(
-        self,
-        context: Context,
-        mocked_cli: MagicMock,
-    ) -> None:
-        state = create_state()
+        state = create_state(containers=[container]) if use_named_fixture else create_state()
         context.run(context.on.action("list-oauth-clients"), state)
-        mocked_cli.assert_called_once()
+
+        assert context.action_results is not None
+        clients = json.loads(context.action_results["clients"])
+        assert [client["client-id"] for client in clients] == [mocked_oauth_client["client_id"]]
+        assert clients[0]["redirect-uris"] == mocked_oauth_client["redirect_uris"]
+        assert "client-secret" not in clients[0]
+        assert "client_secret" not in clients[0]
+        assert "next-page-token" not in context.action_results
+
+    @pytest.fixture
+    def listing(self, mocker: MockerFixture) -> MagicMock:
+        service = mocker.patch("charm.OAuthClientRetriever")
+        service.return_value.run.return_value = {"clients": "[]"}
+        return service
+
+    def test_delegates_default_listing(self, context: Context, listing: MagicMock) -> None:
+        context.run(context.on.action("list-oauth-clients"), create_state())
+
+        listing.assert_called_once()
+        assert listing.call_args.args[2] == "hydra/0"
+        listing.return_value.run.assert_called_once_with({})
+        assert context.action_results == {"clients": "[]"}
+
+    def test_when_hydra_service_not_ready(self, context: Context, listing: MagicMock) -> None:
+        with pytest.raises(ActionFailed, match="Service is not ready"):
+            context.run(
+                context.on.action("list-oauth-clients"), create_state(hydra_is_running=False)
+            )
+        listing.assert_not_called()
+
+    def test_when_commandline_failed(self, context: Context, listing: MagicMock) -> None:
+        listing.return_value.run.side_effect = OAuthClientListingError(
+            "Failed to list OAuth clients"
+        )
+        with pytest.raises(ActionFailed, match="Failed to list OAuth clients"):
+            context.run(context.on.action("list-oauth-clients"), create_state())
+        assert not context.action_results
+
+    def test_continuation_is_forwarded(self, context: Context, listing: MagicMock) -> None:
+        results = {"clients": "[]", "next-page-token": "following"}
+        listing.return_value.run.return_value = results
+        params = {"page-size": 5, "page-token": "opaque"}
+
+        context.run(context.on.action("list-oauth-clients", params), create_state())
+
+        listing.return_value.run.assert_called_once_with(params)
+        assert context.action_results == results
+        assert context.action_results is not None
+        assert "is-last-page" not in context.action_results
+
+    def test_export_returns_only_metadata(self, context: Context, listing: MagicMock) -> None:
+        results = {
+            "export-path": "/charm/oauth-client-exports/oauth-clients.json",
+            "export-unit": "hydra/0",
+            "export-container": "charm",
+            "client-count": 101,
+        }
+        listing.return_value.run.return_value = results
+
+        context.run(context.on.action("list-oauth-clients", {"export": "json"}), create_state())
+
+        listing.return_value.run.assert_called_once_with({"export": "json"})
+        assert context.action_results == results
+
+    def test_transport_failure_is_actionable(
+        self, context: Context, listing: MagicMock, mocker: MockerFixture
+    ) -> None:
+        mocker.patch("charm.ActionEvent.set_results", side_effect=OSError("sensitive payload"))
+
+        with pytest.raises(ActionFailed, match="smaller page-size or export=json") as error:
+            context.run(context.on.action("list-oauth-clients"), create_state())
+
+        assert "sensitive payload" not in error.value.message
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"page-size": 0},
+            {"page-size": -1},
+            {"export": ""},
+            {"export": "true"},
+            {"export": "yaml"},
+            {"export": "json", "page-token": "next"},
+        ],
+    )
+    def test_invalid_input_does_not_fetch_clients(
+        self, context: Context, mocker: MockerFixture, params: dict[str, object]
+    ) -> None:
+        fetch = mocker.patch("charm.CommandLine.list_oauth_clients")
+        with pytest.raises(ActionFailed):
+            context.run(context.on.action("list-oauth-clients", params), create_state())
+        fetch.assert_not_called()
 
 
 class TestRevokeOAuthClientAccessTokenAction:

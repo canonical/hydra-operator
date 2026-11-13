@@ -7,7 +7,7 @@ import re
 import secrets
 import ssl
 import subprocess
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Callable, Generator
 
@@ -15,6 +15,8 @@ import jubilant
 import pytest
 import requests
 from integration.constants import (
+    CLIENT_REDIRECT_URIS,
+    CLIENT_SECRET,
     DB_APP,
     HYDRA_APP,
     HYDRA_IMAGE,
@@ -275,6 +277,59 @@ def oauth_clients(juju: jubilant.Juju) -> list[dict[str, str]]:
     action = juju.run(f"{HYDRA_APP}/0", "list-oauth-clients")
     clients_json = action.results["clients"]
     return json.loads(clients_json)
+
+
+PAGINATED_CLIENT_COUNT = 115
+PAGINATED_CLIENT_METADATA_SIZE = 550
+
+
+@contextmanager
+def registered_oauth_clients(
+    juju: jubilant.Juju,
+    count: int = PAGINATED_CLIENT_COUNT,
+    metadata_size: int = PAGINATED_CLIENT_METADATA_SIZE,
+    app_name: str = HYDRA_APP,
+) -> Generator[list[str], None, None]:
+    """Register a batch of OAuth clients and delete them on exit."""
+    created_client_ids: list[str] = []
+    payload = "x" * metadata_size
+    try:
+        for index in range(count):
+            metadata = f"index={index} payload={payload}" if payload else f"index={index}"
+            action = juju.run(
+                f"{app_name}/0",
+                "create-oauth-client",
+                params={
+                    "redirect-uris": CLIENT_REDIRECT_URIS,
+                    "client-secret": CLIENT_SECRET,
+                    "grant-types": ["client_credentials"],
+                    "metadata": metadata,
+                },
+            )
+            created_client_ids.append(action.results["client-id"])
+        yield created_client_ids
+    finally:
+        for client_id in reversed(created_client_ids):
+            with suppress(jubilant.TaskError):
+                juju.run(
+                    f"{app_name}/0",
+                    "delete-oauth-client",
+                    params={"client-id": client_id},
+                )
+
+
+@pytest.fixture
+def paginated_oauth_clients(juju: jubilant.Juju) -> Generator[list[str], None, None]:
+    """Register more than 100 OAuth clients and remove them after the test."""
+    with registered_oauth_clients(juju, metadata_size=32) as client_ids:
+        yield client_ids
+
+
+@pytest.fixture
+def large_oauth_clients(juju: jubilant.Juju) -> Generator[list[str], None, None]:
+    """Register a client inventory whose full JSON exceeds the inline result budget."""
+    with registered_oauth_clients(juju) as client_ids:
+        yield client_ids
 
 
 @pytest.fixture
