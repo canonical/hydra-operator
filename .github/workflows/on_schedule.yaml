@@ -6,14 +6,14 @@ on:
 jobs:
   update-charm-libs:
     name: Update Charm Libraries
-    uses: canonical/identity-team/.github/workflows/charm-libs-update.yaml@990a60c1a8f3017af7236b91f0e24eb2e7999657 # v1.19.1
+    uses: canonical/identity-team/.github/workflows/charm-libs-update.yaml@00995831ff788db43992012900820edf7967305f # v1.19.2
     secrets:
       CHARMCRAFT_CREDENTIALS: ${{ secrets.CHARMCRAFT_CREDENTIALS }}
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 
   tests:
     name: CI
-    uses: canonical/identity-team/.github/workflows/charm-pull-request.yaml@990a60c1a8f3017af7236b91f0e24eb2e7999657 # v1.19.1
+    uses: canonical/identity-team/.github/workflows/charm-pull-request.yaml@00995831ff788db43992012900820edf7967305f # v1.19.2
     with:
       container-name: "hydra"
       use-charmcraftcache: false
