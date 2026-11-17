@@ -179,7 +179,12 @@ class LoginUIEndpointData:
     post_device_done_url: str = ""
 
     def is_ready(self) -> bool:
-        return all(v for _, v in self.to_service_configs().items())
+        """Check that the login, consent and error URLs are published.
+
+        The device flow URLs are optional: a login UI without the device flow
+        publishes none, and Hydra falls back to its own pages for them.
+        """
+        return all((self.consent_url, self.oidc_error_url, self.login_url))
 
     def to_service_configs(self) -> ServiceConfigs:
         return asdict(self)

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
+import yaml
 from charmlibs.interfaces.oauth import OAuthProvider
 from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
 from ops import ActiveStatus, BlockedStatus, WaitingStatus
@@ -1452,6 +1453,69 @@ class TestHolisticHandler:
         state_out = context.run(context.on.update_status(), state)
 
         assert state_out.unit_status == WaitingStatus("Waiting for login UI to be ready")
+
+    def test_when_login_ui_has_no_device_urls(
+        self,
+        context: Context,
+        public_route_relation_ready: Relation,
+        login_ui_relation: Relation,
+        db_relation_ready: Relation,
+        peer_relation_ready: PeerRelation,
+    ) -> None:
+        """Test that a login UI without the device flow is enough to configure Hydra."""
+        login_ui_relation = replace(
+            login_ui_relation,
+            remote_app_data={
+                "consent_url": "https://login-ui.example.com/consent",
+                "error_url": "https://login-ui.example.com/error",
+                "login_url": "https://login-ui.example.com/login",
+                "oidc_error_url": "https://login-ui.example.com/oidc_error",
+            },
+        )
+        state = create_state(
+            relations=[
+                peer_relation_ready,
+                db_relation_ready,
+                public_route_relation_ready,
+                login_ui_relation,
+            ]
+        )
+
+        with patch("charm.PebbleService.plan") as mocked_plan:
+            state_out = context.run(context.on.update_status(), state)
+
+        assert state_out.unit_status == ActiveStatus()
+        hydra_urls = yaml.safe_load(str(mocked_plan.call_args.args[1]))["urls"]
+        assert "device" not in hydra_urls
+        assert hydra_urls["login"] == "https://login-ui.example.com/login"
+
+    def test_when_login_ui_has_device_urls(
+        self,
+        context: Context,
+        public_route_relation_ready: Relation,
+        login_ui_relation_ready: Relation,
+        db_relation_ready: Relation,
+        peer_relation_ready: PeerRelation,
+    ) -> None:
+        """Test that Hydra is given the device flow URLs the login UI publishes."""
+        state = create_state(
+            relations=[
+                peer_relation_ready,
+                db_relation_ready,
+                public_route_relation_ready,
+                login_ui_relation_ready,
+            ]
+        )
+
+        with patch("charm.PebbleService.plan") as mocked_plan:
+            state_out = context.run(context.on.update_status(), state)
+
+        assert state_out.unit_status == ActiveStatus()
+        hydra_urls = yaml.safe_load(str(mocked_plan.call_args.args[1]))["urls"]
+        assert hydra_urls["device"] == {
+            "verification": "https://login-ui.example.com/device_verification",
+            "success": "https://login-ui.example.com/post_device_done",
+        }
 
     def test_when_pebble_plan_failed(
         self,
