@@ -24,7 +24,7 @@ resources:
   oci-image:
     type: oci-image
     description: OCI image for hydra container
-    upstream-source: ghcr.io/canonical/hydra:25.4.0
+    upstream-source: ghcr.io/canonical/hydra:26.2.0
 
 requires:
   pg-database:
@@ -277,7 +277,7 @@ actions:
         default: RS256
         enumerate: [RS256, RS512, ES256, ES512, EdDSA]
   reconcile-oauth-clients:
-    description: Clean up clients that were created by the oauth relation
+    description: Synchronize the oauth clients with the oauth integrations, creating or updating the clients of active integrations, re-registering clients that were removed from Hydra out of band, and deleting the clients of removed integrations
   get-secret-keys:
     description: Get all the system or cookie secret keys used by hydra to encrypt sensitive data
     params:
@@ -299,12 +299,18 @@ actions:
 
 platforms:
   ubuntu@22.04:amd64:
+  ubuntu@22.04:arm64:
+  ubuntu@26.04:amd64:
+  ubuntu@26.04:arm64:
 
 parts:
+  templates:
+    plugin: dump
+    source: .
+    prime:
+      - templates/
   charm:
-    charm-binary-python-packages:
-      - jsonschema
-      - "setuptools>=70.0.0"
-    build-packages:
-      - "rustc-1.85"
-      - "cargo-1.85"
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv

@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from typing import Any, KeysView, Optional, Type, TypeAlias, Union
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import dacite
 from charmlibs.interfaces.istio_ingress_route import (
@@ -20,7 +20,7 @@ from charmlibs.interfaces.istio_ingress_route import (
     ProtocolType,
 )
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
-from charms.hydra.v0.hydra_token_hook import HydraHookRequirer
+from charms.hydra.v0.hydra_token_hook import AuthIn, HydraHookRequirer
 from charms.identity_platform_login_ui_operator.v0.login_ui_endpoints import (
     LoginUIEndpointsRequirer,
 )
@@ -33,6 +33,7 @@ from constants import (
     ADMIN_PORT,
     INGRESS_HTTP_PORT,
     INGRESS_HTTPS_PORT,
+    MIGRATION_VERSION_KEY_PREFIX,
     PEER_INTEGRATION_NAME,
     POSTGRESQL_DSN_TEMPLATE,
     PUBLIC_PORT,
@@ -75,6 +76,19 @@ class PeerData:
 
         return peers.data[self._app].keys()
 
+    def migration_versions(self) -> dict[int, JsonSerializable]:
+        """Return the workload versions recorded for the database integrations, by id.
+
+        The ids grow with time, so the highest one belongs to the most recent integration.
+        """
+        versions = {}
+        for key in self.keys():
+            integration_id = key.removeprefix(MIGRATION_VERSION_KEY_PREFIX)
+            if key != integration_id and integration_id.isdigit() and (version := self[key]):
+                versions[int(integration_id)] = version
+
+        return versions
+
 
 @dataclass(frozen=True, slots=True)
 class DatabaseConfig:
@@ -88,9 +102,10 @@ class DatabaseConfig:
 
     @property
     def dsn(self) -> str:
+        # Unescaped, a character such as "/" or "%" in the credentials breaks the URL
         return POSTGRESQL_DSN_TEMPLATE.substitute(
-            username=self.username,
-            password=self.password,
+            username=quote(self.username, safe=""),
+            password=quote(self.password, safe=""),
             endpoint=self.endpoint,
             database=self.database,
         )
@@ -113,7 +128,7 @@ class DatabaseConfig:
             database=requirer.database,
             username=integration_data.get("username", ""),
             password=integration_data.get("password", ""),
-            migration_version=f"migration_version_{integration_id}",
+            migration_version=f"{MIGRATION_VERSION_KEY_PREFIX}{integration_id}",
         )
 
 
@@ -141,11 +156,15 @@ class TracingData:
         if not (is_ready := requirer.is_ready()):
             return cls()
 
-        http_endpoint = urlparse(requirer.get_endpoint("otlp_http"))
+        # The provider can be ready without this receiver, e.g. a relay with no backend yet
+        if not (endpoint := requirer.get_endpoint("otlp_http")):
+            return cls()
+
+        http_endpoint = urlparse(endpoint)
 
         return cls(
             is_ready=is_ready,
-            http_endpoint=http_endpoint.geturl().replace(f"{http_endpoint.scheme}://", "", 1),  # type: ignore[arg-type]
+            http_endpoint=http_endpoint.geturl().replace(f"{http_endpoint.scheme}://", "", 1),
         )
 
 
@@ -197,7 +216,7 @@ class HydraHookData:
         if not self.is_ready:
             return {}
 
-        r = {
+        r: dict[str, object] = {
             "token_hook_url": self.url,
         }
         if self.auth_enabled:
@@ -216,7 +235,8 @@ class HydraHookData:
         if not (is_ready := requirer.ready()):
             return cls()
 
-        data = requirer.consume_relation_data()
+        if not (data := requirer.consume_relation_data()):
+            return cls()
 
         c = cls(
             is_ready=is_ready,
@@ -228,7 +248,8 @@ class HydraHookData:
             c.auth_type = "api_key"
             c.auth_name = data.auth_config_name
             c.auth_value = data.auth_config_value
-            c.auth_in = data.auth_config_in
+            auth_in = data.auth_config_in
+            c.auth_in = auth_in.value if isinstance(auth_in, AuthIn) else auth_in
         return c
 
 
