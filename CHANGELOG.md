@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.4.0](https://github.com/canonical/hydra-operator/compare/v3.3.0...v3.4.0) (2026-11-20)
+
+
+### Features
+
+* add OAuth client pagination and JSON export ([ff6c088](https://github.com/canonical/hydra-operator/commit/ff6c08887fdcdffb82f9d02692cab150ca4f3b92))
+* OAuth client pagination and JSON export ([#677](https://github.com/canonical/hydra-operator/issues/677)) ([6254ac7](https://github.com/canonical/hydra-operator/commit/6254ac729514634e77c1b87fc83737d270510369))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ops to v3.10.0 ([8c75f5d](https://github.com/canonical/hydra-operator/commit/8c75f5dd948fc0f642fafe938a35d3c5326279c7))
+* **deps:** update dependency ops to v3.10.0 ([#688](https://github.com/canonical/hydra-operator/issues/688)) ([88a8da0](https://github.com/canonical/hydra-operator/commit/88a8da0ba038bd633f6d509dda5c8dcfcaf28a13))
+
 ## [3.3.0](https://github.com/canonical/hydra-operator/compare/v3.2.0...v3.3.0) (2026-10-19)
 
 
