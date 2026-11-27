@@ -58,9 +58,15 @@ urls:
   consent: {{ consent_url }}
   error: {{ oidc_error_url }}
   login: {{ login_url }}
+  {%- if device_verification_url or post_device_done_url %}
   device:
+    {%- if device_verification_url %}
     verification: {{ device_verification_url }}
+    {%- endif %}
+    {%- if post_device_done_url %}
     success: {{ post_device_done_url }}
+    {%- endif %}
+  {%- endif %}
   self:
     issuer: {{ public_url }}
     public: {{ public_url }}

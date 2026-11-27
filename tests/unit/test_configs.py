@@ -4,6 +4,7 @@
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
+import yaml
 from ops import Model
 from ops.pebble import PathError
 
@@ -100,6 +101,70 @@ class TestConfigFile:
             config_file = ConfigFile.from_sources(source, another_source)
 
         assert str(config_file) == f"{DEFAULT_OAUTH_SCOPES} and value1 and value2"
+
+    @pytest.fixture
+    def login_ui_service_configs(self) -> dict:
+        return {
+            "consent_url": "https://login-ui.example.com/consent",
+            "oidc_error_url": "https://login-ui.example.com/oidc_error",
+            "login_url": "https://login-ui.example.com/login",
+            "device_verification_url": "https://login-ui.example.com/device_verification",
+            "post_device_done_url": "https://login-ui.example.com/post_device_done",
+        }
+
+    def test_from_sources_with_device_urls(self, login_ui_service_configs: dict) -> None:
+        """Test that Hydra is given the device flow URLs the login UI publishes."""
+        source = MagicMock(spec=ServiceConfigSource)
+        source.to_service_configs.return_value = login_ui_service_configs
+
+        config_file = ConfigFile.from_sources(source)
+
+        assert yaml.safe_load(str(config_file))["urls"]["device"] == {
+            "verification": "https://login-ui.example.com/device_verification",
+            "success": "https://login-ui.example.com/post_device_done",
+        }
+
+    def test_from_sources_without_device_urls(self, login_ui_service_configs: dict) -> None:
+        """Test that Hydra's device flow URLs are left unset when the login UI has none.
+
+        Hydra then falls back to its own pages; an empty or null value is not unset.
+        """
+        source = MagicMock(spec=ServiceConfigSource)
+        source.to_service_configs.return_value = {
+            **login_ui_service_configs,
+            "device_verification_url": "",
+            "post_device_done_url": "",
+        }
+
+        config_file = ConfigFile.from_sources(source)
+
+        urls = yaml.safe_load(str(config_file))["urls"]
+        assert "device" not in urls
+        assert urls["login"] == "https://login-ui.example.com/login"
+
+    @pytest.mark.parametrize(
+        "missing, expected",
+        [
+            (
+                "device_verification_url",
+                {"success": "https://login-ui.example.com/post_device_done"},
+            ),
+            (
+                "post_device_done_url",
+                {"verification": "https://login-ui.example.com/device_verification"},
+            ),
+        ],
+    )
+    def test_from_sources_with_one_device_url(
+        self, login_ui_service_configs: dict, missing: str, expected: dict
+    ) -> None:
+        """Test that each device flow URL is set on its own."""
+        source = MagicMock(spec=ServiceConfigSource)
+        source.to_service_configs.return_value = {**login_ui_service_configs, missing: ""}
+
+        config_file = ConfigFile.from_sources(source)
+
+        assert yaml.safe_load(str(config_file))["urls"]["device"] == expected
 
     def test_from_workload_container(self, mocked_container: MagicMock) -> None:
         """Test creating a ConfigFile from a workload container file."""
