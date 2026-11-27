@@ -17,7 +17,11 @@ from charmlibs.interfaces.istio_ingress_route import (
     IstioIngressRouteConfig,
     IstioIngressRouteRequirer,
     Listener,
+    PathModifier,
+    PathModifierType,
     ProtocolType,
+    URLRewriteFilter,
+    URLRewriteSpec,
 )
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.hydra.v0.hydra_token_hook import AuthIn, HydraHookRequirer
@@ -350,67 +354,93 @@ class InternalIngressData:
         )
 
 
+# The public paths of Hydra: a name for the route, the type of match, the path.
+PUBLIC_PATHS = (
+    ("oauth2", HTTPPathMatchType.PathPrefix, "/oauth2"),
+    ("jwks", HTTPPathMatchType.Exact, "/.well-known/jwks.json"),
+    ("openid-configuration", HTTPPathMatchType.Exact, "/.well-known/openid-configuration"),
+    (
+        "oauth-authorization-server",
+        HTTPPathMatchType.Exact,
+        "/.well-known/oauth-authorization-server",
+    ),
+    ("userinfo", HTTPPathMatchType.Exact, "/userinfo"),
+)
+
+
 @dataclass(frozen=True, slots=True)
 class PublicRouteData:
-    """The data source from the public-route integration."""
+    """The data source from the public-route integration.
+
+    With a path prefix, each public path is served under the prefix and
+    rewritten to Hydra's own path.
+    """
 
     url: URL = URL()
     config: Optional[IstioIngressRouteConfig] = None
+    path_prefix: str = ""
 
     def is_ready(self) -> bool:
         return bool(self.url)
 
     @classmethod
-    def load(cls, requirer: IstioIngressRouteRequirer) -> "PublicRouteData":
+    def load(cls, requirer: IstioIngressRouteRequirer, path_prefix: str = "") -> "PublicRouteData":
         model, app = requirer._charm.model.name, requirer._charm.app.name
         external_host, scheme = get_external_host_and_scheme(requirer)
 
         ingress_port = INGRESS_HTTPS_PORT if requirer.tls_enabled else INGRESS_HTTP_PORT
         listener = Listener(port=ingress_port, protocol=ProtocolType.HTTP)
-        ingress_config = IstioIngressRouteConfig(
-            model=model,
-            listeners=[listener],
-            http_routes=[
+        backends = [BackendRef(service=app, port=PUBLIC_PORT)]
+        if not path_prefix:
+            http_routes = [
                 HTTPRoute(
                     name=f"{app}-public",
                     listener=listener,
                     matches=[
-                        HTTPRouteMatch(
-                            path=HTTPPathMatch(type=HTTPPathMatchType.PathPrefix, value="/oauth2")
-                        ),
-                        HTTPRouteMatch(
-                            path=HTTPPathMatch(
-                                type=HTTPPathMatchType.Exact, value="/.well-known/jwks.json"
-                            )
-                        ),
-                        HTTPRouteMatch(
-                            path=HTTPPathMatch(
-                                type=HTTPPathMatchType.Exact,
-                                value="/.well-known/openid-configuration",
-                            )
-                        ),
-                        HTTPRouteMatch(
-                            path=HTTPPathMatch(
-                                type=HTTPPathMatchType.Exact,
-                                value="/.well-known/oauth-authorization-server",
-                            )
-                        ),
-                        HTTPRouteMatch(
-                            path=HTTPPathMatch(type=HTTPPathMatchType.Exact, value="/userinfo")
-                        ),
+                        HTTPRouteMatch(path=HTTPPathMatch(type=match_type, value=path))
+                        for _, match_type, path in PUBLIC_PATHS
                     ],
-                    backends=[BackendRef(service=app, port=PUBLIC_PORT)],
+                    backends=backends,
                 )
-            ],
+            ]
+        else:
+            http_routes = [
+                HTTPRoute(
+                    name=f"{app}-public-{name}",
+                    listener=listener,
+                    matches=[
+                        HTTPRouteMatch(
+                            path=HTTPPathMatch(type=match_type, value=f"{path_prefix}{path}")
+                        )
+                    ],
+                    filters=[
+                        URLRewriteFilter(
+                            urlRewrite=URLRewriteSpec(
+                                path=PathModifier(
+                                    type=PathModifierType.ReplacePrefixMatch
+                                    if match_type == HTTPPathMatchType.PathPrefix
+                                    else PathModifierType.ReplaceFullPath,
+                                    value=path,
+                                )
+                            )
+                        )
+                    ],
+                    backends=backends,
+                )
+                for name, match_type, path in PUBLIC_PATHS
+            ]
+        ingress_config = IstioIngressRouteConfig(
+            model=model, listeners=[listener], http_routes=http_routes
         )
 
         if not external_host:
             logger.error("External hostname is not set on the ingress provider")
-            return cls(config=ingress_config)
+            return cls(config=ingress_config, path_prefix=path_prefix)
 
         return cls(
-            url=URL(f"{scheme}://{external_host}"),
+            url=URL(f"{scheme}://{external_host}{path_prefix}"),
             config=ingress_config,
+            path_prefix=path_prefix,
         )
 
     @property
@@ -418,4 +448,4 @@ class PublicRouteData:
         return self.url.scheme == "https"
 
     def to_service_configs(self) -> ServiceConfigs:
-        return {"public_url": str(self.url)}
+        return {"public_url": str(self.url), "session_cookie_path": self.path_prefix}

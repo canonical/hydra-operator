@@ -98,6 +98,7 @@ from utils import (
     login_ui_is_ready,
     migration_is_ready,
     peer_integration_exists,
+    public_path_prefix_is_valid,
     public_route_integration_exists,
     public_route_is_ready,
     public_route_is_secure,
@@ -387,7 +388,11 @@ class HydraCharm(CharmBase):
         Assumes the public route is ready. Every caller reaches this past a
         `public_route_is_ready` check, so the guard below should never fire.
         """
-        if not (public_url := PublicRouteData.load(self.public_route).url):
+        if not (
+            public_url := PublicRouteData.load(
+                self.public_route, self.charm_config.public_path_prefix
+            ).url
+        ):
             logger.info("Public route URL is not available, skipping the provider info update")
             return
 
@@ -573,8 +578,14 @@ class HydraCharm(CharmBase):
         if not self.hydra_secrets.is_ready:
             self._initialize_secrets()
 
-        if self.unit.is_leader() and self.public_route.is_ready():
-            public_route_config = PublicRouteData.load(self.public_route).config
+        if (
+            self.unit.is_leader()
+            and self.public_route.is_ready()
+            and public_path_prefix_is_valid(self)
+        ):
+            public_route_config = PublicRouteData.load(
+                self.public_route, self.charm_config.public_path_prefix
+            ).config
             self.public_route.submit_config(public_route_config)
 
         if self.unit.is_leader() and self.internal_ingress.is_ready():
@@ -597,7 +608,7 @@ class HydraCharm(CharmBase):
             self.charm_config,
             DatabaseConfig.load(self.database_requirer),
             LoginUIEndpointData.load(self.login_ui_requirer),
-            PublicRouteData.load(self.public_route),
+            PublicRouteData.load(self.public_route, self.charm_config.public_path_prefix),
             HydraHookData.load(self.token_hook),
         )
 
@@ -643,6 +654,9 @@ class HydraCharm(CharmBase):
 
         if not public_route_is_ready(self):
             event.add_status(WaitingStatus("Waiting for ingress to be ready"))
+
+        if not public_path_prefix_is_valid(self):
+            event.add_status(BlockedStatus("Invalid configuration: public_path_prefix"))
 
         if public_route_is_ready(self) and not public_route_is_secure(self):
             event.add_status(

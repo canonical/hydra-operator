@@ -31,6 +31,7 @@ ADMIN_PORT = 4445
 INGRESS_HTTP_PORT = 80
 INGRESS_HTTPS_PORT = 443
 CONFIG_FILE_NAME = "/etc/config/hydra.yaml"
+PUBLIC_PATH_PREFIX_PATTERN = r"(/[A-Za-z0-9_-]+)*"
 
 # Integration constants
 HYDRA_TOKEN_HOOK_INTEGRATION_NAME = "hydra-token-hook"

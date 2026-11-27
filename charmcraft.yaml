@@ -121,6 +121,10 @@ config:
         Route relation endpoints through ingress. If set to false, in-cluster Kubernetes service addresses are preferred for related services even when internal-route is configured.
       type: boolean
       default: false
+    public_path_prefix:
+      description: Path under which the public endpoints are served, for example /sso. Empty serves them at the root.
+      type: string
+      default: ""
     initial_system_secret_id:
       description: |
         Juju secret id containing the system secret key used to encrypt database entries.
